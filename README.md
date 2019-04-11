@@ -25,6 +25,7 @@ StanShock is writen in object-oriented python, which allows the client to flexib
 It is recommended to install an anaconda distribution (https://www.continuum.io/downloads), which will contain all dependencies except cantera. Cantera (http://www.cantera.org/docs/sphinx/html/index.html) will require a separate installation.
 
 Included are six examples:
+
 	laminarFlame (laminar flame test case of stoichiometric H2/Air)
 	optimization (driver insert optimization)
 	validationCases (four validation test cases)
@@ -34,6 +35,7 @@ Included are six examples:
 		case4 (disparate driver/driven mixtures)
 
 Files include:
+
 	stanShock.py (entirety of the StanShock solver code)
 	*.{xml,cti} (cantera files containing the thermodiffusive properties)
 	{laminarFlame,optimization,case{1..4}}.py (python driver scripts)
