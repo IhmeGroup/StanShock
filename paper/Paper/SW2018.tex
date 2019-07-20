@@ -335,18 +335,18 @@ The implementation of the diffusive fluxes in \stnshk\ is verified using a premi
 \begin{figure}[!ht!]
 	\centering
 	\includegraphics[width=84mm]{laminarFlame.pdf}
-	\caption{\label{FIG_LF} Comparison of the \stnshk\ (-$\square$-) and \cantera ($--$) solutions to a steady, premixed laminar flame. The flame thickness, $\delta_\mathrm{F}=368\mu$m, is defined as twice the inverse of the logarithmic temperature gradient. }
+	\caption{\label{FIG_LF} Comparison of the \stnshk\ (-$\square$-) and \cantera ($--$) solutions to a steady, premixed laminar flame. The flame thickness, $\delta_\mathrm{f}=368\mu$m, is defined as twice the inverse of the logarithmic temperature gradient. }
 \end{figure}
 \subsection{Zeldovich-von Neumann-D\"oring Detonation}
 
-The Zeldovich-von Neumann-D\"oring (ZND) structure of a laminar detonation  is used for verification o fthe reacting flow model. A comparison of \stnshk\ to the solution of the ZND equations is given in Fig.~\ref{FIG_ZND}. The solution to the ZND equations is found using a stiff ODE solver, and details about the solution may be found in Lee~\cite{LEE_BOOK2008}. The hydrogen-oxygen mechanism due to Burke~\emph{et al.}~\cite{BURKE_CHAOS_JU_DRYER_KLIPPENSTEIN_IJCK20112} is employed for the chemical model. The mixture consists of stoichiometric H$_2$-Air with an initial pressure of $0.1$ bar and temperature of 300 K. The \stnshk\ solution is initialized from a uniform von Neumann state with the inlet condition at the von Neumann state and a constant back-pressure at the CJ pressure. The initial von Neumann state corresponds to $[\rho_\mathrm{VN},u_\mathrm{VN},p_\mathrm{VN}]=[0.441\ \mathrm{kg/m^3}, 	369\ \mathrm{m/s},25.9\ \mathrm{bar}]$ for the mixture. The grid is resolved to $l_\mathrm{IND}/\Delta x=185$, where $l_\mathrm{IND}:=|\arg\max_{x}Y_\mathrm{OH}(x)|$. 
+The Zeldovich-von Neumann-D\"oring (ZND) structure of a laminar detonation  is used for verification o fthe reacting flow model. A comparison of \stnshk\ to the solution of the ZND equations is given in Fig.~\ref{FIG_ZND}. The solution to the ZND equations is found using a stiff ODE solver, and details about the solution may be found in Lee~\cite{LEE_BOOK2008}. The hydrogen-oxygen mechanism due to Burke~\emph{et al.}~\cite{BURKE_CHAOS_JU_DRYER_KLIPPENSTEIN_IJCK20112} is employed for the chemical model. The mixture consists of stoichiometric H$_2$-Air with an initial pressure of $0.1$ bar and temperature of 300 K. The \stnshk\ solution is initialized from a uniform von Neumann state with the inlet condition at the von Neumann state and a constant back-pressure at the CJ pressure. The initial von Neumann state corresponds to $[\rho_\mathrm{vN},u_\mathrm{vN},p_\mathrm{vN}]=[0.441\ \mathrm{kg/m^3}, 	369\ \mathrm{m/s},25.9\ \mathrm{bar}]$ for the mixture. The grid is resolved to $l_\mathrm{ind}/\Delta x=185$, where $l_\mathrm{ind}:=|\arg\max_{x}Y_\mathrm{OH}(x)|$. 
 
- The velocity is found to be slightly overpredicted by 1.65\% at $x/l_\mathrm{IND}=-1$; this may be due to the finite domain of the one-dimensional \stnshk\ simulation. However, the ability of \stnshk\ to model laminar detonation chemistry is shown to be quite good overall. Particularly, pressure, density, and mass fractions shown do not deviate significantly from the analytical solution. Hence, \stnshk\ is demonstrated to perform reasonably well in capturing high-speed combustion chemistry in the absence of significant diffusive effects.
+ The velocity is found to be slightly overpredicted by 1.65\% at $x/l_\mathrm{ind}=-1$; this may be due to the finite domain of the one-dimensional \stnshk\ simulation. However, the ability of \stnshk\ to model laminar detonation chemistry is shown to be quite good overall. Particularly, pressure, density, and mass fractions shown do not deviate significantly from the analytical solution. Hence, \stnshk\ is demonstrated to perform reasonably well in capturing high-speed combustion chemistry in the absence of significant diffusive effects.
 
 \begin{figure}[!ht!]
 	\centering
 	\includegraphics[width=84mm]{ZNDDetonation}
-	\caption{\label{FIG_ZND} Comparison of numerical ($\circ$) and analytical ($-$) solutions to a laminar ZND detonation. The grid resolution is $l_\mathrm{IND}/\Delta x=185$. The mixture is stoichiometric H$_2$-Air with an initial state of $p_0=0.1$ bar and $T_0=300$ K.} 
+	\caption{\label{FIG_ZND} Comparison of numerical ($\circ$) and analytical ($-$) solutions to a laminar ZND detonation. The grid resolution is $l_\mathrm{ind}/\Delta x=185$. The mixture is stoichiometric H$_2$-Air with an initial state of $p_0=0.1$ bar and $T_0=300$ K.} 
 \end{figure}
 
 \subsection{Validation Cases}
@@ -483,15 +483,15 @@ We proceed by employing \stnshk\ for optimizing the geometry of the driver inser
 \begin{mini}|l|
 	{\boldsymbol\theta}{\left(\frac{\partial \log p(x,\tau;\boldsymbol \theta)}{\partial \tau}\right)^2+\lambda\left(\frac{\bar p(x,\tau;\boldsymbol \theta)}{p_5}-1\right)^2}{}{}
 	\addConstraint{\boldsymbol \theta}{= [L,D,\alpha]^\top}{}
-	\addConstraint{x}{= x_\mathrm{EW}}{}
-	\addConstraint{\tau}{= \frac{t-\tau_\mathrm{SHK}}{\tau_\mathrm{TEST}}}{}
+	\addConstraint{x}{= x_\mathrm{ew}}{}
+	\addConstraint{\tau}{= \frac{t-\tau_\mathrm{shk}}{\tau_\mathrm{test}}}{}
 	\addConstraint{0}{\le \tau }\le{1}
-	\addConstraint{0}{\le L/L_\mathrm{DRIVER} }\le{1}
-	\addConstraint{0}{\le D/D_\mathrm{DRIVER} }\le{1}
+	\addConstraint{0}{\le L/L_\mathrm{driver} }\le{1}
+	\addConstraint{0}{\le D/D_\mathrm{driver} }\le{1}
 	\addConstraint{0}{\le \alpha }\le{1}\ ,
 	\label{EQ_OPT}
 \end{mini}
-where the test time is given by $\tau_\mathrm{TEST}$ and is defined as the interval between the time of shock reflection ($\tau_\mathrm{SHK}$) and the arrival of the expansion fan or the contact surface (with the latter being germane for non-tailored experiments); the end wall probe location for the \stnshk\ simulation is denoted by $x_\mathrm{EW}$. The trade-off parameter, $\lambda$, allows the modeler to decide which objective is to be emphasized in the multi-objective problem. The target test pressure is given by $p_5$, and the bar operater (i.e., $\bar p$) indicates that the pressure at the end wall is temporally averaged over the test time. The length and diameter of the driver section is denoted by $L_\mathrm{DRIVER}$ and $D_\mathrm{DRIVER}$, respectively.
+where the test time is given by $\tau_\mathrm{test}$ and is defined as the interval between the time of shock reflection ($\tau_\mathrm{shk}$) and the arrival of the expansion fan or the contact surface (with the latter being germane for non-tailored experiments); the end wall probe location for the \stnshk\ simulation is denoted by $x_\mathrm{ew}$. The trade-off parameter, $\lambda$, allows the modeler to decide which objective is to be emphasized in the multi-objective problem. The target test pressure is given by $p_5$, and the bar operater (i.e., $\bar p$) indicates that the pressure at the end wall is temporally averaged over the test time. The length and diameter of the driver section is denoted by $L_\mathrm{driver}$ and $D_\mathrm{driver}$, respectively.
 
 The first objective acts to reduce the pressure rise in the simulated pressure trace while the secondary objective acts to yield a pressure trace that is near the expected test condition. Furthermore, if one defines $\boldsymbol\chi=\left[\p_\tau\log p,\sqrt{\lambda}\left(\bar p/p_5-1\right)\right]^\top$, then the objective function is simply given by $\|\boldsymbol{\chi}\|_2^2\in[0,\infty)$, and it is clear that the optimal set is given by $\Theta=\{\boldsymbol{\theta}\in\mathcal D\ |\ \|\boldsymbol\chi\|_2^2=0\}$, where $\mathcal{D}$ is the design space of the optimization problem (assuming $\boldsymbol\chi = 0$ is feasible). The choice of the norm for the optimization problem is an additional hyperparameter; however, the Euclidean norm is chosen ab initio due its smoothness properties.
 
@@ -501,9 +501,9 @@ The primary goal in solving the optimization problem, given by Eq.~\ref{EQ_OPT},
 
 Gaussian Processes are a popular model surrogate for the output of computer simulations since they interpolate between known outputs (unlike standard parametric regressors), and they provide a probabilistic interpretation of the interpolated points (unlike non-parametric models such as splines). The latter property can be expanded into a useful metric to decide where to sample in a global search. More details about the use of Gaussian Processes in the global optimization procedure are given in ref.~\cite{GROGAN_THESIS18}.
 
-The Gaussian Process sampling method is applied to the driver insert optimization problem detailed by Eq.~\ref{EQ_OPT}, and the resulting pressure traces and optimized geometry are shown in Fig.~\ref{FIG_OPT}. The initial configuration is that of Hong~\emph{et al.}~\cite{HONG_PANG_VASU_DAVIDSON_HANSON_SW2009} with the matching \stnshk\ results of this study shown in Fig.~\ref{FIG_HONG}. A comparative table of results is reported in Table~\ref{TABLE_OPT}. The pressure rise for a given pressure trace is approximated by first extracting the test region ($t\in[\tau_\mathrm{SHK},\tau_\mathrm{SHK}+\tau_\mathrm{TEST}]$) and then finding the logarithmic difference in the pressure over the time:
+The Gaussian Process sampling method is applied to the driver insert optimization problem detailed by Eq.~\ref{EQ_OPT}, and the resulting pressure traces and optimized geometry are shown in Fig.~\ref{FIG_OPT}. The initial configuration is that of Hong~\emph{et al.}~\cite{HONG_PANG_VASU_DAVIDSON_HANSON_SW2009} with the matching \stnshk\ results of this study shown in Fig.~\ref{FIG_HONG}. A comparative table of results is reported in Table~\ref{TABLE_OPT}. The pressure rise for a given pressure trace is approximated by first extracting the test region ($t\in[\tau_\mathrm{shk},\tau_\mathrm{shk}+\tau_\mathrm{test}]$) and then finding the logarithmic difference in the pressure over the time:
 \begin{equation}\label{EQ_PR}
-\left . \frac{\p \log p}{\p t}\right |_{x=x_\mathrm{EW}}\approx\frac{1}{\tau_\mathrm{SHK}}\log\left (\frac{ p(x_\mathrm{EW},\tau_\mathrm{SHK}+\tau_\mathrm{TEST})}{p(x_\mathrm{EW},\tau_\mathrm{SHK})}\right)\ .
+\left . \frac{\p \log p}{\p t}\right |_{x=x_\mathrm{ew}}\approx\frac{1}{\tau_\mathrm{shk}}\log\left (\frac{ p(x_\mathrm{ew},\tau_\mathrm{shk}+\tau_\mathrm{test})}{p(x_\mathrm{ew},\tau_\mathrm{shk})}\right)\ .
 \end{equation}
 The pressure rise computation is tantamount to determining the mean pressure rise over the test interval. 
 
@@ -537,7 +537,7 @@ As given in Table~\ref{TABLE_OPT}, the optimized insert geometry yields the smal
 	\resizebox{120mm}{!}{
 		\begin{tabular}{|c|c|c|c|c|c|c|c|}
 			\hline
-			Data Src.& Ins. Geom. & $L_\mathrm{INSERT}/L_\mathrm{DRIVER}$	& $D_\mathrm{INSERT}/D_\mathrm{DRIVER}$				& $\alpha$	& $p_5$ [bar] & $\p \log p/\p t$ [\%/ms]   	 	 \\ 
+			Data Src.& Ins. Geom. & $L_\mathrm{insert}/L_\mathrm{driver}$	& $D_\mathrm{insert}/D_\mathrm{driver}$				& $\alpha$	& $p_5$ [bar] & $\p \log p/\p t$ [\%/ms]   	 	 \\ 
 			\hline
 			Exp. & None & -- & -- & -- & 18.5 & 10.3\\
 			Sim. & None & -- & -- & -- &  20.8 & 8.3\\
@@ -570,8 +570,8 @@ The authors gratefully acknowledge financial support through the Air Force Offic
 \section{Supplementary Material}
 The \stnshk\ solver can be found at \url{https://github.com/IhmeGroup/StanShock}. Included in this repository is the source code with several examples.
 %\bibliographystyle{spbasic}      % basic style, author-year citations
-\bibliographystyle{spmpsci}      % mathematics and physical sciences
-%\bibliographystyle{spphys}       % APS-like style for physics
+%\bibliographystyle{spmpsci}      % mathematics and physical sciences
+\bibliographystyle{spphys}       % APS-like style for physics
 \bibliography{SW2018}  % name your BibTeX data base
 
 \end{document}
