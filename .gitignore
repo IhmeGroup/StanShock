@@ -1,0 +1,7 @@
+# extra latex files
+*.log
+*.out
+*.synctex.gz
+*.bbl
+*.blg
+*.aux
