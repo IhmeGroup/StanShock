@@ -177,6 +177,7 @@ The chemical source term is given by
 \end{equation}
 where $\Delta e_{\mathrm{f},n}^\circ(T_\mathrm{ref})$ is the formation energy at the reference temperature  of the $n^\mathrm{th}$ species, and $\w_n$ is the volumetric mass production rate of the $n^\mathrm{th}$ species. Furthermore, the area source terms are given by 
 \begin{equation}
+\label{EQ_SAREA}
 \mathbf{s}_\mathrm{area}=
 -\mathbf{q}\frac{\p\ln A}{\p t} -(\mathbf{f}_\mathrm{a}-p\hat{\mathbf{e}}_{N+1})\frac{\p\ln A}{\p x}\ ,
 \end{equation}
@@ -184,7 +185,7 @@ where $A$ is the cross-sectional area, and $\hat{\mathbf{e}}_{N+1}$ is the unit 
 \begin{equation}
 D=D_\mathrm{o}-D_\mathrm{i} ,
 \end{equation}
-where $D_\mathrm{o}$ and $D_\mathrm{i}$ are the outer and inner diameters, respectively. Note that for sections of the shock tube without a driver insert, $D=D_\mathrm{o}$. In standard use, the term $\partial_t \ln A$ will be zero; however, the term is implemented to simulate the finite opening time of a shock tube diaphragm as future research.
+where $D_\mathrm{o}$ and $D_\mathrm{i}$ are the outer and inner diameters, respectively. Note that for sections of the shock tube without a driver insert, $D=D_\mathrm{o}$. Commonly, the term $\partial_t \ln A$ in Eq.~\ref{EQ_SAREA} will be zero; however, this term is implemented to enable the consideration of a finite opening time of the shock tube diaphragm.
 
 Finally, the boundary layer source terms are modeled as 
 \begin{equation}\label{EQ_BLSRC}
@@ -261,7 +262,7 @@ Shock tube experiments often utilize differing driver and driven gases to tailor
 Consistency with the double-flux model requires adequate modeling of the contact surface. Hence, the low-dissipation Harten-Lax-van Leer-Contact (HLLC) flux for multi-species flows is utilized~\cite{TORO_BOOK,GROGAN_THESIS18}. The HLLC flux is an approximate solution to the Riemann problem for the Euler equations and is a three-wave flux model.
 %##########################################################################################################
 \subsubsection{Edge Interpolation}
-The computation of the fluxes on the right and left edges of the cell requires the interpolation of the cell-averaged values for the characteristic variables to each edge. The flux computation utilizes the cell's specific heat ratio in accordance with the double-flux model. Additionally, it is noted that the double-flux model requires two flux computations per cell rather than one; however, this additional cost has been found to be negligible -- particularly for detailed reacting simulations, where the computational cost is dominated by the temporal integration of the reaction chemistry. 
+The computation of the fluxes on the right and left edges of the cell requires the interpolation of the cell-averaged values for the characteristic variables to each edge. The flux computation utilizes the cell's specific heat ratio in accordance with the double-flux model. Additionally, it is noted that the double-flux model requires two flux computations per cell rather than one; however, this additional cost has been found to be negligible -- particularly for reacting simulations with detailed chemical kinetics, where the computational cost is dominated by the temporal integration of the reaction chemistry. 
 
 After the characteristic variables are interpolated to the edges, they are transformed into conserved variables for use in the HLLC flux computation. While the use of the characteristic variables as interpolant increases the computational cost of the simulation, significant reductions in oscillations are found near discontinuities when compared to the use of primitive or conservative variables as the interpolant~\cite{HOUIM_KUO_JCP_2011}. 
 
@@ -320,9 +321,9 @@ Verification of \stnshk's variable-area modeling capability is shown in Fig.~\re
 \end{equation} 
 The analytical solution of this case is found via classical steady, one-dimensional, isentropic flow relations~\cite{SAAD_BOOK}:
 \begin{subeqnarray}
-	AM\left[\frac{2}{\gamma+1}\left(1+\frac{\gamma-1}{2}M^2\right)\right]^{-\frac{\gamma+1}{2(\gamma-1)}}=\mathrm{const.}\ ,\\
-	\frac{p}{p_0}=\left(1+\frac{\gamma-1}{2}M^2\right)^{\frac{\gamma}{\gamma-1}}\ ,\\
-	\frac{\rho}{\rho_0}=\left(\frac{p}{p_0}\right)^{\frac{1}{\gamma}}\ ,
+	AM\left[\frac{2}{\gamma+1}\left(1+\frac{\gamma-1}{2}M^2\right)\right]^{-\frac{\gamma+1}{2(\gamma-1)}}&=&\mathrm{const.}\ ,\\
+	\frac{p}{p_0}&=&\left(1+\frac{\gamma-1}{2}M^2\right)^{\frac{\gamma}{\gamma-1}}\ ,\\
+	\frac{\rho}{\rho_0}&=&\left(\frac{p}{p_0}\right)^{\frac{1}{\gamma}}\ ,
 \end{subeqnarray}
 where $M$ is the Mach number, and the subscript "0" indicates the stagnation value. The inlet and outlet boundary conditions are supersonic, and the inflow state is $[T,M,p,\gamma]=[300\,\text{K},6/5 ,10^5\,\text{Pa},7/5]$. The domain is initialized to the inflow state and allowed to evolve temporally to a steady solution. Comparisons of simulation results and theoretical solutions are shown in Fig.~\ref{FIG_IN}. \stnshk\ is demonstrated to accurately reproduce the analytical solution for the flow quantities. Hence, \stnshk\ is verified to reproduce the analytical solution of quasi-1D gas dynamics.
 \begin{figure}[!ht!]
@@ -392,21 +393,21 @@ The results in Fig.~\ref{FIG_VAL} indicate \stnshk's utility in the design of ex
 \begin{figure}[!h!]
 	\centering
 	\subfigure[\label{FIG_VAL_CONSTANT_AREA}Case 1]{
-		\includegraphics[width=60mm]{testCase_constantArea}}
+		\includegraphics[width=0.475\textwidth]{testCase_constantArea}}
 	\subfigure[\label{FIG_VAL_STEP_AREA}Case 2]{
-		\includegraphics[width=60mm]{testCase_stepChange}}
+		\includegraphics[width=0.475\textwidth]{testCase_stepChange}}
 	\end{figure}
 	\begin{figure}[!h!]
 		\centering
 	\subfigure[\label{FIG_VAL_DRIVER_INSERT}Case 3]{
-		\includegraphics[width=60mm]{testCase_driverInsert}}
+		\includegraphics[width=0.475\textwidth]{testCase_driverInsert}}
 	\subfigure[\label{FIG_VAL_DISSIMILAR_GAS}Case 4]{
-		\includegraphics[width=60mm]{testCase_dissimilarGas}}
+		\includegraphics[width=0.475\textwidth]{testCase_dissimilarGas}}
 	\caption{\label{FIG_VAL} Validation results for the test cases described in Table~\ref{TABLE_CASE}. The pressure trace is taken at the end wall of the shock tube. One thousand cells were utilized for these solutions.}
 \end{figure}	
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \subsubsection{Sensitivity of the Boundary Layer Model}
-Since the boundary layer model discussed in Sec.~\ref{SEC_MODEL} relies on empirical correlations for the skin friction coefficient and the Nusselt number, a degree of variation in the model performance can be expected due to the uncertainty in the model parameters. Furthermore, tuning these model parameters may be appropriate to account for the unique design features of a particular shock tube (e.g, non-circular cross-section and bends). Hence, the sensitivity of \stnshk\ to the skin friction and heat transfer terms is examined by separately perturbing these terms by a multiplicative factor.  Furthermore, since small diameter shock tubes are of interest in their capability to provide a large sample size of chemical kinetic measurements~\cite{TRANTER_LYNCH_RSI2013}, the sensitivity of the gas dynamics to a reduction in the shock tube diameter is investigated.
+Since the boundary layer model discussed in Sec.~\ref{SEC_MODEL} relies on empirical correlations for the skin friction coefficient and the Nusselt number, a degree of variation in the model performance can be expected due to the uncertainty in the model parameters. Furthermore, tuning these model parameters may be appropriate to account for the unique design features of a particular shock tube (e.g, non-circular cross-section and bends). Hence, the sensitivity of \stnshk\ to the skin friction and heat transfer terms is examined by separately perturbing these terms by a multiplicative factor.  Furthermore, since small diameter shock tubes are of interest due to their capability for providing a large sample size of chemical kinetic measurements~\cite{TRANTER_LYNCH_RSI2013}, the sensitivity of the gas dynamics to a reduction in the shock tube diameter is investigated.
 
 \begin{figure}[!h!]
 	\centering
@@ -421,12 +422,12 @@ Since the boundary layer model discussed in Sec.~\ref{SEC_MODEL} relies on empir
 
 The results of these calculations are shown in Fig.~\ref{FIG_SENSANAL} for a range of initial pressure ratios with a driven section pressure of $p_1=1$ bar. The initial temperature and velocity are set to 300 K and 0 m/s, respectively, throughout the domain. Argon is utilized for the driver and driven gas in a shock tube with a uniform cross-section with a baseline diameter of 5 cm, a driver length of 3 m, and a driven length of 5 m; 500 cells are used to compute the quantities shown. The ideal quantities are computed using normal shock relations, which do not include the effect of the boundary layer. Incident shock Mach number attenuation is computed using the difference between the ideal incident Mach number and that taken from \stnshk.
 
-It is evident from Fig.~\ref{FIG_SENSANAL_PR} that the predicted pressure rise shows a substantial sensitivity to the heat transfer while it is relatively insensitive to the skin friction coefficient. The increase in the test pressure is primarily due to the convective boundary layer in front of the reflected shock; that is, pressure disturbances due to the heat loss transmit through the reflected shock into the test gas. Heat loss to the walls occur in the quiescent post-shock test gas; however, this effect tends to reduce the test pressure, and hence, it is unlikely to control the dynamics of the test pressure. The tendency for a nearly quiescent gas to loose pressure can be easily shown with simple thermodynamic relations and is well-known phenomena in rapid compression machine experiments~\cite{SUNG_CURRAN_PECS2014}. Interestingly, this model implies that a reduction in the sidewall heat transfer could be an effective means of decreasing the rise in test pressure.
+It is evident from Fig.~\ref{FIG_SENSANAL_PR} that the predicted pressure rise shows a substantial sensitivity to the heat transfer while it is relatively insensitive to the skin friction coefficient. The increase in the test pressure is primarily due to the convective boundary layer in front of the reflected shock; that is, pressure disturbances due to heat loss transmit through the reflected shock into the test gas. Heat loss to the walls occurs in the quiescent post-shock test gas; however, this effect tends to reduce the test pressure, and hence, it is unlikely to control the dynamics of the test pressure. The tendency for a nearly quiescent gas to loose pressure can be easily shown with simple thermodynamic relations and is a well-known phenomena in rapid compression machine experiments~\cite{LEE_HOCHGREB_CF1998,IHME_CF2012}. Interestingly, this model implies that a reduction in the sidewall heat transfer could be an effective means of decreasing the rise in test pressure.
 
 
-An increase in the skin friction yields a much more potent effect on the predicted test pressure than the heat transfer as demonstrated in Fig.~\ref{FIG_SENSANAL_P5}. Additionally, incident shock attenuation is shown to increase for increases in both the skin friction and the heat transfer.
+An increase in the skin friction yields a much more potent effect on the predicted test pressure than the heat transfer as demonstrated in Fig.~\ref{FIG_SENSANAL_P5}. Additionally, the incident shock attenuation is shown to increase with increasing skin friction and heat transfer.
 
- Unsurprisingly, the reduction in the shock tube diameter significantly increased the rate of the test pressure's rise, reduced the test pressure, and increased the incident shock wave's attenuation. For the rate of the rise in the test pressure, reducing the diameter by a factor of two is shown to have a nearly equivalent effect as increasing the heat transfer by a factor of two; this is due to the boundary layer source term in the energy equation being covariant and contravariant with the heat transfer and the tube diameter, respectively. 
+As expected, the reduction in the shock tube diameter significantly increases the rate of the rise in test pressure, reduces the test pressure, and increases the attenuation of the incident shock wave. For the rate of the rise in the test pressure, reducing the diameter by a factor of two is shown to have a nearly equivalent effect as increasing the heat transfer by a factor of two. This is due to the boundary layer source term in the energy equation being covariant and contravariant with the heat transfer and the tube diameter, respectively. 
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -482,9 +483,9 @@ Hong~\emph{et al.}~\cite{HONG_PANG_VASU_DAVIDSON_HANSON_SW2009} developed a meth
 
 First, \stnshk\ is employed to simulate the configuration of Hong~\emph{et al.} to ensure that reasonable replications of the experimental pressure traces are obtained for the base geometry without an insert and the optimal geometry with an insert. The pressure traces reported by Hong~\emph{et al.} are compared to the output of \stnshk\ in Fig.~\ref{FIG_HONG}. For these simulations, the driver pressure is $p_4=12$ bar and the driven pressure is $p_1=0.48$ bar. The driver gas is pure helium, while the driven gas is argon. The initial temperature is taken to be 283 K. The experimental pressure traces are obtained from the Stanford High Pressure Shock Tube~\cite{HONG_PANG_VASU_DAVIDSON_HANSON_SW2009}. The simulations utilize 500 cells and the solution is obtained within a minute on a laptop.  
 
-The analytical model of Hong~\emph{et al.} assumes a linear decrement in the driver area, which yields a parabolic end-section for the insert. However, to ease the production of the inserts, they are coarsely discretized; a depiction of the continuous and discretized geometries is shown in Fig.~\ref{FIG_HONG_A}. Interestingly, the simulation shows that the discretization of the geometry damps the rise in test pressure beyond the continuous geometry. Since the discrete geometry is used in the experiment, it is unsurprising that it is a better match to the test pressure trace than the analytical geometry. Additionally, the experiment shows a small bump in the experimental pressure trace that is not present in the \stnshk\ simulation. This is likely due to interactions of the contact surface with the reflected shock and the end wall.
+The analytical model of Hong~\emph{et al.} assumes a linear decrement in the driver area, which yields a parabolic end-section for the insert. However, to ease the production of the inserts, they are coarsely discretized; a depiction of the continuous and discretized geometries is shown in Fig.~\ref{FIG_HONG_A}. Interestingly, the simulation shows that the discretization of the geometry reduces the rise in test pressure compared to that for the  continuous geometry. Since the discrete geometry is used in the experiment, it is unsurprising that it is a better match to the test pressure trace than the analytical geometry. Additionally, the experiment shows a small bump in the experimental pressure trace that is not present in the \stnshk\ simulation. This is likely due to interactions of the contact surface with the reflected shock and the end wall.
  
- While \stnshk\ can effectively model material interfaces by utilizing the double flux model discussed in Sec.~\ref{SEC_MODEL}, a quasi-1D solver is incapable of modeling complex mixing processes occurring during the rupturing of the diaphragm. Additionally, the boundary layer effects are fully coupled to the model for the contact surface. Improved agreement could possibly be found by utilizing a smoothed interface between the driver and driven gasses rather a step-function to better approach the physics of the initial incident shock formation. Additionally, the shock tube may be simulated with a semi-infinite domain with only the test section by utilizing a supersonic inflow a the state ($p_2,\ T_2$) as is done in high-fidelity simulations~\cite{GROGAN_PCI2015}; this would help isolate the effect of the contact surface for a particular experimental condition.
+ While \stnshk\ can effectively model material interfaces by utilizing the double flux model discussed in Sec.~\ref{SEC_MODEL}, a quasi-1D solver is incapable of modeling complex mixing processes occurring during the rupturing of the diaphragm. Improved agreement could possibly be found by utilizing a smoothed interface between the driver and driven gasses rather than a step function to better approach the physics of the initial incident shock formation. Additionally, the shock tube may be simulated with a semi-infinite domain with only the test section by utilizing a supersonic inflow at state ($p_2, T_2$) as is done in high-fidelity simulations~\cite{GROGAN_PCI2015}; this would help isolate the effect of the contact surface for a particular experimental condition.
 
  Overall, it is surmised that \stnshk\ does a reasonable job at reproducing the experimental pressure traces -- particularly during the test time (about 5.5--7.5 ms). Hence, confidence is gained with respect to \stnshk's ability to reproduce the results of non-optimal and optimal configurations, and a optimization procedure may be employed with assurance that additional designs sampled from the parameter space for this experiment will likely correspond to realistic gas dynamics. 
 
@@ -532,9 +533,9 @@ As desired, the pressure trace for the optimized insert is shown to be relativel
 \begin{figure}[!ht!]
 	\centering
 	\subfigure[\label{FIG_XTOPT_INS}Without Insert]{
-		\includegraphics[width=40mm]{driverInsert_XTNoIns.pdf}}
+		\includegraphics[width=0.475\textwidth]{driverInsert_XTNoIns.pdf}}
 	\subfigure[\label{FIG_XTOPT_NOINS} Optimized Insert]{
-		\includegraphics[width=40mm]{driverInsert_XTIns.pdf}}
+		\includegraphics[width=0.475\textwidth]{driverInsert_XTIns.pdf}}
 	\caption{\label{FIG_XTOPT}$x$-$t$ diagrams of pressure for cases (a) without driver insert and (b) with optimized driver insert cases, given in the last two rows of Table~\ref{TABLE_OPT}. The driver pressure is $p_4=12$ bar and the driven pressure is $p_1=0.48$ bar. The driver gas is pure helium, while the driven gas is argon. The initial temperature is taken to be 283 K. The geometry is shown in Fig.~\ref{FIG_OPT_A}.}
 \end{figure}
 
@@ -543,7 +544,7 @@ As given in Table~\ref{TABLE_OPT}, the optimized insert geometry yields the smal
 \begin{table}[!t!]
 	\centering
 	\footnotesize
-	\resizebox{120mm}{!}{
+	\resizebox{\textwidth}{!}{
 		\begin{tabular}{|c|c|c|c|c|c|c|c|}
 			\hline
 			Data Src.& Ins. Geom. & $L_\mathrm{insert}/L_\mathrm{driver}$	& $D_\mathrm{insert}/D_\mathrm{driver}$				& $\alpha$	& $p_5$ [bar] & $\p \log p/\p t$ [\%/ms]   	 	 \\ 
@@ -581,6 +582,7 @@ The \stnshk\ solver can be found at \url{https://github.com/IhmeGroup/StanShock}
 %\bibliographystyle{spbasic}      % basic style, author-year citations
 %\bibliographystyle{spmpsci}      % mathematics and physical sciences
 \bibliographystyle{spphys}       % APS-like style for physics
+%\bibliographystyle{unsrt}       % APS-like style for physics
 \bibliography{SW2018}  % name your BibTeX data base
 
 \end{document}
