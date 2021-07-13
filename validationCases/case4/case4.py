@@ -149,9 +149,9 @@ for iX, VNorm in enumerate(VNorms):
         ssbl.gamma[iX] = gas4.cp/gas4.cv
 
 #Solve
-t0 = time.clock()
+t0 = time.perf_counter()
 ssbl.advanceSimulation(tFinal)
-t1 = time.clock()
+t1 = time.perf_counter()
 print("The process took ", t1-t0)
 
 #Solve without boundayr layer model
@@ -195,9 +195,9 @@ for iX, VNorm in enumerate(VNorms):
         ssnbl.gamma[iX] = gas4.cp/gas4.cv
 
 #Solve
-t0 = time.clock()
+t0 = time.perf_counter()
 ssnbl.advanceSimulation(tFinal)
-t1 = time.clock()
+t1 = time.perf_counter()
 print("The process took ", t1-t0)
 
 #import shock tube data
@@ -218,3 +218,4 @@ plt.xlabel("$t\ [\mathrm{ms}]$")
 plt.ylabel("$p\ [\mathrm{bar}]$")
 plt.legend(loc="lower right")
 plt.tight_layout()
+plt.show()

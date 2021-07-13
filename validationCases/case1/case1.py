@@ -144,9 +144,9 @@ ssbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
 ssbl.addProbe(max(ssbl.x)) #end wall probe
 
 #Solve
-t0 = time.clock()
+t0 = time.perf_counter()
 ssbl.advanceSimulation(tFinal)
-t1 = time.clock()
+t1 = time.perf_counter()
 print("The process took ", t1-t0)
 
 #without  boundary layer model
@@ -164,9 +164,9 @@ ssnbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
 ssnbl.addProbe(max(ssnbl.x)) #end wall probe
 
 #Solve
-t0 = time.clock()
+t0 = time.perf_counter()
 ssnbl.advanceSimulation(tFinal)
-t1 = time.clock()
+t1 = time.perf_counter()
 print("The process took ", t1-t0)
 
 #import shock tube data
@@ -187,3 +187,4 @@ plt.xlabel("$t\ [\mathrm{ms}]$")
 plt.ylabel("$p\ [\mathrm{bar}]$")
 plt.legend(loc="lower right")
 plt.tight_layout()
+plt.show()
