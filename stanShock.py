@@ -20,7 +20,7 @@
 
 #necessary modules
 import numpy as np
-from numba import double, jit
+from numba import double, njit, int64
 import cantera as ct
 import matplotlib.pyplot as plt
 from scipy.optimize import root
@@ -29,9 +29,14 @@ from scipy.optimize import root
 mt=3 #number of ghost nodes
 mn=3 #number of 1D Euler equations
 
-#compiled functions: these functions employ numba to do just-in-time compilation
-##%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-def WENO5_python(r,u,p,Y,gamma):
+# Type signatures for numba
+double1D = double[:]
+double2D = double[:, :]
+double3D = double[:, :, :]
+
+
+@njit(double3D(double1D, double1D, double1D, double2D, double1D))
+def WENO5(r,u,p,Y,gamma):
     '''
     Method: WENO5
     ------------------------------------------------------------.----------
@@ -225,9 +230,10 @@ def WENO5_python(r,u,p,Y,gamma):
                 #apply limiter
                 PLR[N,iFace,iVar]=P[iCell,iVar]+0.5*phi*(P[iCell,iVar]-P[iCellm1,iVar])
     return PLR
-WENO5 = jit(double[:,:,:] (double[:],double[:],double[:],double[:,:],double[:])) (WENO5_python)
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-def LF_python(rLR,uLR,pLR,YLR,gamma):
+
+
+@njit(double2D(double2D, double2D, double2D, double3D, double1D))
+def LF(rLR,uLR,pLR,YLR,gamma):
     '''
     Method: LF
     ------------------------------------------------------------.----------
@@ -276,9 +282,10 @@ def LF_python(rLR,uLR,pLR,YLR,gamma):
             FBar=0.5*(FLR[0,iFace,iDim]+FLR[1,iFace,iDim])
             F[iFace,iDim]=FBar-0.5*lambdaMax*(U[1,iDim]-U[0,iDim])
     return F
-LF = jit(double[:,:] (double[:,:], double[:,:],double[:,:], double[:,:,:],double[:])) (LF_python)
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-def HLLC_python(rLR,uLR,pLR,YLR,gamma):
+
+
+@njit(double2D(double2D, double2D, double2D, double3D, double1D))
+def HLLC(rLR,uLR,pLR,YLR,gamma):
     '''
     Method: HLLC
     ------------------------------------------------------------.----------
@@ -363,9 +370,10 @@ def HLLC_python(rLR,uLR,pLR,YLR,gamma):
             for iDim in range(nDim): F[iFace,iDim]=FLR[K,iFace,iDim]+SFace*(UStar[iDim]-U[iDim])
     
     return F
-HLLC = jit(double[:,:] (double[:,:], double[:,:],double[:,:], double[:,:,:],double[:])) (HLLC_python)
-##############################################################################
-def getR_python(Y,molecularWeights):
+
+
+@njit(double1D(double2D, double1D))
+def getR(Y,molecularWeights):
     '''
     function: getR_python
     --------------------------------------------------------------------------
@@ -388,9 +396,10 @@ def getR_python(Y,molecularWeights):
         molecularWeight=1.0/molecularWeight
         R[iX] = ct.gas_constant/molecularWeight
     return R
-getR = jit(double[:] (double[:,:],double[:])) (getR_python)
-##############################################################################
-def getCp_python(T,Y,TTable,a,b):
+
+
+@njit(double1D(double1D, double2D, double1D, double2D, double2D))
+def getCp(T,Y,TTable,a,b):
     '''
     function: getCp_python
     --------------------------------------------------------------------------
@@ -413,7 +422,7 @@ def getCp_python(T,Y,TTable,a,b):
     dT = TTable[1]-TTable[0] #assume constant steps in table
     TMax = TTable[-1]+dT
     #determine the indices
-    indices = np.zeros(nX,dtype=int)
+    indices = np.zeros(nX,dtype=int64)
     for iX in range(nX): indices[iX] = int((T[iX]-TMin)/dT)
     #determine cp
     cp = np.zeros(nX)
@@ -425,8 +434,8 @@ def getCp_python(T,Y,TTable,a,b):
             bbar += Y[iX,iSp]*(a[index,iSp]/2.0*(T[iX]+TTable[index])+b[index,iSp])
         cp[iX]=bbar
     return cp
-getCp = jit(double[:] (double[:],double[:,:],double[:],double[:],double[:])) (getCp_python)
-##############################################################################
+
+
 class thermoTable(object):
     '''
     Class: thermoTable
