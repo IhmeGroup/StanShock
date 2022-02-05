@@ -139,12 +139,12 @@ def flameSpeed(gas,flameThickness,returnFlame=False):
     except:
         f.solve(loglevel=loglevel)
     f.show_solution()
-    print('mixture-averaged flamespeed = {0:7f} m/s'.format(f.u[0]))
+    print('mixture-averaged flamespeed = {0:7f} m/s'.format(f.velocity[0]))
     #f.show_solution()
     if returnFlame:
-        return f.u[0], f
+        return f.velocity[0], f
     else: 
-        return f.u[0]
+        return f.velocity[0]
 #==============================================================================
 # 
 # def ignUV(gas,tmax,N):
