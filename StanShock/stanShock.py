@@ -1590,6 +1590,7 @@ class stanShock(object):
         from sklearn.gaussian_process.kernels import RBF #RBF is the gaussian correlation
         from sklearn.gaussian_process import GaussianProcessRegressor
         from scipy.stats import norm
+        from scipy.optimize import newton
         #Check for boundary layer terms
         if not self.includeBoundaryLayerTerms: 
             self.includeBoundaryLayerTerms=True
