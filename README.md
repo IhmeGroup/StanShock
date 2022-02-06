@@ -46,6 +46,9 @@ For example, from the _validationCases/case1_ directory
     export PYTHONPATH=../../
     python case1.py
 
+Note that the matplotlib plots in these examples use LaTeX to render the fonts. 
+See [here](https://matplotlib.org/stable/tutorials/text/usetex.html) for more information on the requirements.
+Alternatively, one may remove the LaTeX rendering of fonts in these examples (e.g., commenting out `plt.rc('text',usetex=True)`).
 ## Structure
 Files include:
 
