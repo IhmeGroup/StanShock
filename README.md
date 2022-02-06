@@ -54,5 +54,20 @@ Files include:
 	{laminarFlame,optimization,case{1..4}}.py (python driver scripts)
 	case{1..4}.csv (experimental shock tube data for the validation cases)
 
+## Test
+To run the test suite, first ensure that the test dependencies are installed: 
+
+    python -m pip install -r requirements-test.txt
+
+The tests may be run from the project directory using
+
+    python -m unittest discover
+
+For a breakdown of the test coverage, run from the project directory
+
+    coverage run -m unittest discover
+    coverage html
+
+This will create an HTML report, which can be explored by a browser.
 ## Contact
 For timely responses, please report any issues or bugs to kevin.p.grogan@gmail.com. 
