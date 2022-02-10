@@ -18,6 +18,7 @@ You should have received a copy of the GNU Lesser General Public License
 along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+
 import numpy as np
 from numba import double, njit, int64
 import cantera as ct
@@ -30,7 +31,6 @@ mt = 3
 
 mn = 3
 """Number of 1D Euler equations for the solver."""
-
 
 # Type signatures for numba
 _double_1D = double[:]
@@ -108,17 +108,23 @@ def WENO5(r, u, p, Y, gamma):
     R = np.zeros((nVar, nVar))
     L = np.zeros((nVar, nVar))
     CStencil = np.empty((nStencil, nVar))  # all the characteristic values in the stencil
+
     for iFace in range(nFaces):  # iterate through each cell right edge
         iCell = iFace + 2  # face is on the right side of the cell
+
         # find the average at the face (use ordering of Houim and Kuo, JCP2011)
         rAverage = 0.5 * (r[iCell] + r[iCell + 1])
         uAverage = 0.5 * (u[iCell] + u[iCell + 1])
         pAverage = 0.5 * (p[iCell] + p[iCell + 1])
         gammaAverage = 0.5 * (gamma[iCell] + gamma[iCell + 1])
-        for kSp in range(nSp): YAverage[kSp] = 0.5 * (Y[iCell, kSp] + Y[iCell + 1, kSp])
+
+        for kSp in range(nSp):
+            YAverage[kSp] = 0.5 * (Y[iCell, kSp] + Y[iCell + 1, kSp])
+
         eAverage = pAverage / (rAverage * (gammaAverage - 1.0)) + 0.5 * uAverage ** 2.0
         hAverage = eAverage + pAverage / rAverage
         cAverage = np.sqrt(gammaAverage * pAverage / rAverage)
+
         # compute the eigenvector matrices using the face average
         # right matrix
         for i in range(nSp):
@@ -127,44 +133,58 @@ def WENO5(r, u, p, Y, gamma):
             R[i, i + 1] = 1.0
             R[-2, i + 1] = uAverage
             R[-1, i + 1] = 0.5 * uAverage ** 2.0
+
         R[-2, 0] = uAverage - cAverage
         R[-1, 0] = hAverage - uAverage * cAverage
         R[-2, -1] = uAverage + cAverage
         R[-1, -1] = hAverage + uAverage * cAverage
+
         # left matrix
         gammaHat = gammaAverage - 1.0
         phi = 0.5 * gammaHat * uAverage ** 2.0
         firstRowConstant = 0.5 * (phi + uAverage * cAverage)
         lastRowConstant = 0.5 * (phi - uAverage * cAverage)
+
         for i in range(nSp):
             for j in range(nSp):
                 L[i + 1, j] = -YAverage[i] * phi
+
             L[i + 1, i] = L[i + 1, i] + cAverage ** 2.0
             L[0, i] = firstRowConstant
             L[-1, i] = lastRowConstant
             L[i + 1, -2] = YAverage[i] * gammaHat * uAverage
             L[i + 1, -1] = -YAverage[i] * gammaHat
+
         L[0, -2] = -0.5 * (gammaHat * uAverage + cAverage)
         L[-1, -2] = -0.5 * (gammaHat * uAverage - cAverage)
         L[0, -1] = gammaHat / 2.0
         L[-1, -1] = gammaHat / 2.0
         L /= cAverage ** 2.0
+
         for iVar in range(nVar):
             for iStencil in range(nStencil):
                 iCellStencil = iStencil - 2 + iCell
+
                 # compute the conservative variables
-                for kSp in range(nSp): U[kSp] = r[iCellStencil] * Y[iCellStencil, kSp]
+                for kSp in range(nSp):
+                    U[kSp] = r[iCellStencil] * Y[iCellStencil, kSp]
+
                 U[-2] = r[iCellStencil] * u[iCellStencil]
                 U[-1] = p[iCellStencil] / (gammaAverage - 1.0) + 0.5 * r[iCellStencil] * u[iCellStencil] ** 2.0
+
                 # compute the characteristic variables in the stencil
                 CStencil[iStencil, iVar] = 0.0
                 for jVar in range(nVar):
                     CStencil[iStencil, iVar] += L[iVar, jVar] * U[jVar]
+
         # perform the WENO interpolation in the characteristic variables
         for N in range(nLR):  # !left edge and right edge
-            for iVar in range(nVar): U[iVar] = 0.0
+            for iVar in range(nVar):
+                U[iVar] = 0.0
+
             for iVar in range(nVar):
                 NO = N + 2  # !offset index
+
                 # Find smoothness parameters
                 B[0] = B1 * (CStencil[0 + NO, iVar] - 2.0 * CStencil[1 + NO, iVar] + CStencil[
                     2 + NO, iVar]) ** 2.0 + B2 * (
@@ -175,10 +195,12 @@ def WENO5(r, u, p, Y, gamma):
                 B[2] = B1 * (CStencil[-2 + NO, iVar] - 2.0 * CStencil[-1 + NO, iVar] + CStencil[
                     0 + NO, iVar]) ** 2.0 + B2 * (
                                CStencil[-2 + NO, iVar] - 4.0 * CStencil[-1 + NO, iVar] + 3.0 * CStencil[
-                               0 + NO, iVar]) ** 2
+                           0 + NO, iVar]) ** 2
+
                 # Find the interpolated values at the cell edges
                 ATOT = 0.0
                 CW = 0.0
+
                 for iStencil in range(mt):  # iterate through each stencil
                     iStencilO = NO - iStencil  # offset iStencil index
                     CINT = W[N, iStencil, 0] * CStencil[0 + iStencilO, iVar] + W[N, iStencil, 1] * CStencil[
@@ -186,19 +208,29 @@ def WENO5(r, u, p, Y, gamma):
                     A = D[N, iStencil] / ((epWENO + B[iStencil]) ** 2)
                     ATOT += A
                     CW += CINT * A
+
                 CiVar = CW / ATOT
+
                 # compute the conservative vector using the eigenvector matrix
-                for jVar in range(nVar): U[jVar] += R[jVar, iVar] * CiVar
+                for jVar in range(nVar):
+                    U[jVar] += R[jVar, iVar] * CiVar
+
             rLR = 0.0
-            for kSp in range(nSp): rLR += U[kSp]
+            for kSp in range(nSp):
+                rLR += U[kSp]
+
             uLR = U[-2] / rLR
             eLR = U[-1] / rLR
             pLR = rLR * (gammaAverage - 1.0) * (eLR - 0.5 * uLR ** 2.0)
+
             # fill primitive matrix in the following order (r,u,p,Y)
             PLR[N, iFace, 0] = rLR
             PLR[N, iFace, 1] = uLR
             PLR[N, iFace, 2] = pLR
-            for kSp in range(nSp): PLR[N, iFace, kSp + mn] = U[kSp] / rLR
+
+            for kSp in range(nSp):
+                PLR[N, iFace, kSp + mn] = U[kSp] / rLR
+
     # apply first order interpolation at boundaries
     for N in range(nLR):
         for iFace in range(mt):
@@ -206,23 +238,31 @@ def WENO5(r, u, p, Y, gamma):
             PLR[N, iFace, 0] = r[iCell + N]
             PLR[N, iFace, 1] = u[iCell + N]
             PLR[N, iFace, 2] = p[iCell + N]
-            for kSp in range(nSp): PLR[N, iFace, kSp + mn] = Y[iCell + N, kSp]
+
+            for kSp in range(nSp):
+                PLR[N, iFace, kSp + mn] = Y[iCell + N, kSp]
+
         for iFace in range(nFaces - mt, nFaces):
             iCell = iFace + 2
             PLR[N, iFace, 0] = r[iCell + N]
             PLR[N, iFace, 1] = u[iCell + N]
             PLR[N, iFace, 2] = p[iCell + N]
-            for kSp in range(nSp): PLR[N, iFace, kSp + mn] = Y[iCell + N, kSp]
+
+            for kSp in range(nSp):
+                PLR[N, iFace, kSp + mn] = Y[iCell + N, kSp]
+
     # create primitive matrix
     P = np.zeros((nCells + 2 * mt, nVar + 1))
     P[:, 0] = r[:]
     P[:, 1] = u[:]
     P[:, 2] = p[:]
     P[:, mn:] = Y[:, :]
+
     # apply limiter
     alpha = 2.0
     threshold = 1e-6
     epsilon = 1.0e-15
+
     for N in range(nLR):
         for iFace in range(nFaces):
             for iVar in range(nVar + 1):
@@ -231,10 +271,14 @@ def WENO5(r, u, p, Y, gamma):
                 iCellp1 = iCell + 1 - 2 * N
                 iCellm2 = iCell - 2 + 4 * N
                 iCellp2 = iCell + 2 - 4 * N
+
                 # check the error threshold for smooth regions
                 error = abs((-P[iCellm2, iVar] + 4.0 * P[iCellm1, iVar] + 4.0 * P[iCellp1, iVar] - P[
                     iCellp2, iVar] + epsilon) / (6.0 * P[iCell, iVar] + epsilon) - 1.0)
-                if error < threshold: continue
+
+                if error < threshold:
+                    continue
+
                 # compute limiter
                 if P[iCell, iVar] != P[iCellm1, iVar]:
                     phi = min(alpha, alpha * (P[iCellp1, iVar] - P[iCell, iVar]) / (P[iCell, iVar] - P[iCellm1, iVar]))
@@ -242,8 +286,10 @@ def WENO5(r, u, p, Y, gamma):
                     phi = max(0.0, phi)
                 else:
                     phi = alpha
+
                 # apply limiter
                 PLR[N, iFace, iVar] = P[iCell, iVar] + 0.5 * phi * (P[iCell, iVar] - P[iCellm1, iVar])
+
     return PLR
 
 
@@ -277,7 +323,9 @@ def LF(rLR, uLR, pLR, YLR, gamma):
                 np.sqrt(gamma[iFace] * pLR[1, iFace] / rLR[1, iFace]))
         u = max(abs(uLR[0, iFace]), abs(uLR[1, iFace]))
         lambdaMax = max(lambdaMax, u + a)
+
     lambdaMax *= 0.9
+
     # find the regular flux
     FLR = np.empty((2, nFaces, nDim))
     for K in range(nLR):
@@ -285,8 +333,10 @@ def LF(rLR, uLR, pLR, YLR, gamma):
             FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace]
             FLR[K, iFace, 1] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
             FLR[K, iFace, 2] = uLR[K, iFace] * (
-                        gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace] + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0)
-            for kSp in range(nSp): FLR[K, iFace, mn + kSp] = rLR[K, iFace] * uLR[K, iFace] * YLR[K, iFace, kSp]
+                    gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace] + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0)
+
+            for kSp in range(nSp):
+                FLR[K, iFace, mn + kSp] = rLR[K, iFace] * uLR[K, iFace] * YLR[K, iFace, kSp]
 
     # compute the modeled flux
     F = np.empty((nFaces, mn + nSp))
@@ -296,10 +346,14 @@ def LF(rLR, uLR, pLR, YLR, gamma):
             U[K, 0] = rLR[K, iFace]
             U[K, 1] = rLR[K, iFace] * uLR[K, iFace]
             U[K, 2] = pLR[K, iFace] / (gamma[iFace] - 1.0) + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
-            for kSp in range(nSp): U[K, mn + kSp] = rLR[K, iFace] * YLR[K, iFace, kSp]
+
+            for kSp in range(nSp):
+                U[K, mn + kSp] = rLR[K, iFace] * YLR[K, iFace, kSp]
+
         for iDim in range(nDim):
             FBar = 0.5 * (FLR[0, iFace, iDim] + FLR[1, iFace, iDim])
             F[iFace, iDim] = FBar - 0.5 * lambdaMax * (U[1, iDim] - U[0, iDim])
+
     return F
 
 
@@ -330,6 +384,7 @@ def HLLC(rLR, uLR, pLR, YLR, gamma):
     qLR = np.empty((2, nFaces))
     SLR = np.empty((2, nFaces))
     SStar = np.empty(nFaces)
+
     for iFace in range(nFaces):
         aLR[0, iFace] = np.sqrt(gamma[iFace] * pLR[0, iFace] / rLR[0, iFace])
         aLR[1, iFace] = np.sqrt(gamma[iFace] * pLR[1, iFace] / rLR[1, iFace])
@@ -338,19 +393,23 @@ def HLLC(rLR, uLR, pLR, YLR, gamma):
         rBar = 0.5 * (rLR[0, iFace] + rLR[1, iFace])
         pPVRS = pBar - 0.5 * (uLR[1, iFace] - uLR[0, iFace]) * rBar * aBar
         pStar = max(0.0, pPVRS)
+
         qLR[0, iFace] = np.sqrt(
-            1.0 + (gamma[iFace] + 1.0) / (2.0 * gamma[iFace]) * (pStar / pLR[0, iFace] - 1.0)) if pStar > pLR[
-            0, iFace] else 1.0
+            1.0 + (gamma[iFace] + 1.0) / (2.0 * gamma[iFace]) * (pStar / pLR[0, iFace] - 1.0)) \
+            if pStar > pLR[0, iFace] \
+            else 1.0
         qLR[1, iFace] = np.sqrt(
-            1.0 + (gamma[iFace] + 1.0) / (2.0 * gamma[iFace]) * (pStar / pLR[1, iFace] - 1.0)) if pStar > pLR[
-            1, iFace] else 1.0
+            1.0 + (gamma[iFace] + 1.0) / (2.0 * gamma[iFace]) * (pStar / pLR[1, iFace] - 1.0)) \
+            if pStar > pLR[1, iFace] \
+            else 1.0
+
         SLR[0, iFace] = uLR[0, iFace] - aLR[0, iFace] * qLR[0, iFace]
         SLR[1, iFace] = uLR[1, iFace] + aLR[1, iFace] * qLR[1, iFace]
         SStar[iFace] = pLR[1, iFace] - pLR[0, iFace]
         SStar[iFace] += rLR[0, iFace] * uLR[0, iFace] * (SLR[0, iFace] - uLR[0, iFace])
         SStar[iFace] -= rLR[1, iFace] * uLR[1, iFace] * (SLR[1, iFace] - uLR[1, iFace])
         SStar[iFace] /= rLR[0, iFace] * (SLR[0, iFace] - uLR[0, iFace]) - rLR[1, iFace] * (
-                    SLR[1, iFace] - uLR[1, iFace])
+                SLR[1, iFace] - uLR[1, iFace])
 
     # find the regular flux
     FLR = np.empty((2, nFaces, nDim))
@@ -359,42 +418,59 @@ def HLLC(rLR, uLR, pLR, YLR, gamma):
             FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace]
             FLR[K, iFace, 1] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
             FLR[K, iFace, 2] = uLR[K, iFace] * (
-                        gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace] + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0)
-            for kSp in range(nSp): FLR[K, iFace, 3 + kSp] = rLR[K, iFace] * uLR[K, iFace] * YLR[K, iFace, kSp]
+                    gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace] + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0)
+
+            for kSp in range(nSp):
+                FLR[K, iFace, 3 + kSp] = rLR[K, iFace] * uLR[K, iFace] * YLR[K, iFace, kSp]
 
     # compute the modeled flux
     F = np.empty((nFaces, mn + nSp))
     U = np.empty(mn + nSp)
     UStar = np.empty(mn + nSp)
     YFace = np.empty(nSp)
+
     for iFace in range(nFaces):
         if 0.0 <= SLR[0, iFace]:
-            for iDim in range(nDim): F[iFace, iDim] = FLR[0, iFace, iDim]
+            for iDim in range(nDim):
+                F[iFace, iDim] = FLR[0, iFace, iDim]
+
         elif 0.0 >= SLR[1, iFace]:
-            for iDim in range(nDim): F[iFace, iDim] = FLR[1, iFace, iDim]
+            for iDim in range(nDim):
+                F[iFace, iDim] = FLR[1, iFace, iDim]
+
         else:
             SStarFace = SStar[iFace]
             K = 0 if 0.0 <= SStarFace else 1
             rFace = rLR[K, iFace]
             uFace = uLR[K, iFace]
             pFace = pLR[K, iFace]
-            for kSp in range(nSp): YFace[kSp] = YLR[K, iFace, kSp]
+
+            for kSp in range(nSp):
+                YFace[kSp] = YLR[K, iFace, kSp]
+
             gammaFace = gamma[iFace]
             SFace = SLR[K, iFace]
             # conservative variable vector
             U[0] = rFace
             U[1] = rFace * uFace
             U[2] = pFace / (gammaFace - 1.0) + 0.5 * rFace * uFace ** 2.0
-            for kSp in range(nSp): U[mn + kSp] = rFace * YFace[kSp]
+
+            for kSp in range(nSp):
+                U[mn + kSp] = rFace * YFace[kSp]
+
             # star conservative variable vector
             prefactor = rFace * (SFace - uFace) / (SFace - SStarFace)
             UStar[0] = prefactor
             UStar[1] = prefactor * SStarFace
             UStar[2] = prefactor * (
                     U[2] / rFace + (SStarFace - uFace) * (SStarFace + pFace / (rFace * (SFace - uFace))))
-            for iSp in range(nSp): UStar[mn + iSp] = prefactor * YFace[iSp]
+
+            for iSp in range(nSp):
+                UStar[mn + iSp] = prefactor * YFace[iSp]
+
             # flux update
-            for iDim in range(nDim): F[iFace, iDim] = FLR[K, iFace, iDim] + SFace * (UStar[iDim] - U[iDim])
+            for iDim in range(nDim):
+                F[iFace, iDim] = FLR[K, iFace, iDim] + SFace * (UStar[iDim] - U[iDim])
 
     return F
 
@@ -417,13 +493,17 @@ def get_R(Y, molecularWeights):
     # find dimensions
     nX = len(Y[:, 0])
     nSp = len(Y[0, :])
+
     # determine R
     R = np.zeros(nX)
     for iX in range(nX):
         molecularWeight = 0.0
-        for iSp in range(nSp): molecularWeight += Y[iX, iSp] / molecularWeights[iSp]
+        for iSp in range(nSp):
+            molecularWeight += Y[iX, iSp] / molecularWeights[iSp]
+
         molecularWeight = 1.0 / molecularWeight
         R[iX] = ct.gas_constant / molecularWeight
+
     return R
 
 
@@ -448,22 +528,30 @@ def get_Cp(T, Y, TTable, a, b):
     # find dimensions
     nX = len(Y[:, 0])
     nSp = len(Y[0, :])
+
     # find table extremes
     TMin = TTable[0]
     dT = TTable[1] - TTable[0]  # assume constant steps in table
     TMax = TTable[-1] + dT
+
     # determine the indices
     indices = np.zeros(nX, dtype=int64)
-    for iX in range(nX): indices[iX] = int((T[iX] - TMin) / dT)
+    for iX in range(nX):
+        indices[iX] = int((T[iX] - TMin) / dT)
+
     # determine cp
     cp = np.zeros(nX)
     for iX in range(nX):
-        if (T[iX] < TMin) or (T[iX] > TMax): raise Exception("Temperature not within table")
+        if (T[iX] < TMin) or (T[iX] > TMax):
+            raise Exception("Temperature not within table")
+
         index = indices[iX]
         bbar = 0.0
         for iSp in range(nSp):
             bbar += Y[iX, iSp] * (a[index, iSp] / 2.0 * (T[iX] + TTable[index]) + b[index, iSp])
+
         cp[iX] = bbar
+
     return cp
 
 
@@ -493,11 +581,13 @@ class ThermoTable:
         self.a = np.zeros((nT, nSp))  # matrix of species first order coefficients
         self.b = np.zeros((nT, nSp))  # matrix of species zeroth order coefficients
         self.molecularWeights = gas.molecular_weights
+
         # determine the coefficients
         for kSp, species in enumerate(gas.species()):
             # initialize with actual cp
             cpk = species.thermo.cp(self.T[0]) / self.molecularWeights[kSp]
             hk = species.thermo.h(self.T[0]) / self.molecularWeights[kSp]
+
             for kT, Tk in enumerate(self.T):
                 # compute next
                 Tkp1 = Tk + self.dT
@@ -508,7 +598,7 @@ class ThermoTable:
                 self.a[kT, kSp] = 2.0 / self.dT * (dh / self.dT - cpk)
                 self.b[kT, kSp] = cpk - self.a[kT, kSp] * Tk
                 # update
-                cpk = self.a[kT, kSp] * (Tkp1) + self.b[kT, kSp]
+                cpk = self.a[kT, kSp] * Tkp1 + self.b[kT, kSp]
                 hk = hkp1
 
     def get_R(self, Y):
@@ -555,13 +645,17 @@ class ThermoTable:
 
         """
 
-        if any(np.logical_or(T < self.TMin, T > self.TMax)): raise Exception("Temperature not within table")
+        if any(np.logical_or(T < self.TMin, T > self.TMax)):
+            raise Exception("Temperature not within table")
+
         nT = len(T)
         indices = [int((Tk - self.TMin) / self.dT) for Tk in T]
         h0 = np.zeros(nT)
+
         for k, index in enumerate(indices):
             bbar = self.a[index, :] / 2.0 * (T[k] + self.T[index]) + self.b[index, :]
             h0[k] = np.dot(Y[k, :], self.h[index] - bbar * self.T[index])
+
         return h0
 
     def get_gamma(self, T, Y):
@@ -677,16 +771,18 @@ class SkinFriction:
         cf[laminarIndices] = 16.0 / Re[laminarIndices]
         turbulentIndices = Re > self.ReCrit
         cf[turbulentIndices] = np.interp(Re[turbulentIndices], self.ReTable, self.cfTable)
-        if np.any(Re > self.ReMax): raise Exception(
-            "Error: Reynolds number exceeds the maximum value of %f: skinFriction Table bounds must be adjusted" % (
-                self.ReMax))
+
+        if np.any(Re > self.ReMax):
+            raise Exception(f"Error: Reynolds number exceeds the maximum value of {self.ReMax}: skinFriction "
+                            "Table bounds must be adjusted")
+
         return cf
 
 
 class StanShock:
     """
     This is a class defined to encapsulate the data and methods used for the
-    1D gasdynamics solver stanShock.
+    1D gas dynamics solver stanShock.
     """
 
     def __init__(self, gas, **kwargs):
@@ -807,13 +903,16 @@ class StanShock:
         self.inReactingRegion = lambda x, t: True  # the reacting region of the shock tube.
         self.includeDiffusion = False  # exclude diffusion
         self.thickening = None
+
         # overwrite the default data
         for key in kwargs:
-            if key in self.__dict__.keys(): self.__dict__[key] = kwargs[key]
+            if key in self.__dict__.keys():
+                self.__dict__[key] = kwargs[key]
             if key == 'initializeRiemannProblem':
                 initializeRiemannProblem(self, kwargs[key][0], kwargs[key][1], kwargs[key][2])
             if key == 'initializeDiffuseInterface':
                 initializeDiffuseInterface(self, kwargs[key][0], kwargs[key][1], kwargs[key][2], kwargs[key][3])
+
         if not self.n == len(self.x) == len(self.r) == len(self.u) == len(self.p) == len(self.gamma):
             raise Exception("Initialization Error")
 
@@ -840,7 +939,9 @@ class StanShock:
 
         if probeLocation > np.max(self.x) or probeLocation < np.min(self.x):
             raise Exception("Invalid Probe Location")
-        if probeName == None: probeName = "probe" + str(len(self.probes))
+        if probeName is None:
+            probeName = "probe" + str(len(self.probes))
+
         newProbe = self.Probe()
         newProbe.probeLocation = probeLocation
         newProbe.skipSteps = 0
@@ -849,12 +950,12 @@ class StanShock:
 
     class XTDiagram:
         """
-        This class is used to store the relavant data for the XT diagram.
+        This class is used to store the relevant data for the XT diagram.
         """
 
         def __init__(self):
             self.name = None
-            self.skipSteps = 0  # number of timesteps to skip
+            self.skipSteps = 0  # number of time steps to skip
             self.variable = []  # list of numpy arrays of the variable w.r.t x
             self.t = []  # list of times
             self.x = None  # numpy array of x (the interpolated grid)
@@ -867,7 +968,7 @@ class StanShock:
             XTDiagram: the XTDiagram object
             
         """
-        
+
         variable = XTDiagram.name
         gasSpecies = [species.lower() for species in self.gas.species_names]
         if variable in ["density", "r", "rho"]:
@@ -894,10 +995,11 @@ class StanShock:
         
         Args:
             variable: string of the variable
-            skipSteps: 
+            skipSteps:
+            x:
 
         """
-        
+
         newXTDiagram = self.XTDiagram()
         variable = variable.lower()
         newXTDiagram.skipSteps = skipSteps
@@ -922,7 +1024,7 @@ class StanShock:
             limits :  tuple of maximum and minimum for the pcolor (vMin,vMax)
 
         """
-        
+
         plt.figure()
         t = [t * 1000.0 for t in XTDiagram.t]
         X, T = np.meshgrid(XTDiagram.x, t)
@@ -931,27 +1033,27 @@ class StanShock:
             variableMatrix[k, :] = variablek
         variable = XTDiagram.name
         if variable in ["density", "r", "rho"]:
-            plt.title("$\\rho\ [\mathrm{kg/m^3}]$")
+            plt.title(r"$\rho\ [\mathrm{kg/m^3}]$")
         elif variable in ["velocity", "u"]:
-            plt.title("$u\ [\mathrm{m/s}]$")
+            plt.title(r"$u\ [\mathrm{m/s}]$")
         elif variable in ["pressure", "p"]:
             variableMatrix /= 1.0e5  # convert to bar
-            plt.title("$p\ [\mathrm{bar}]$")
+            plt.title(r"$p\ [\mathrm{bar}]$")
         elif variable in ["temperature", "t"]:
-            plt.title("$T\ [\mathrm{K}]$")
+            plt.title(r"$T\ [\mathrm{K}]$")
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            plt.title("$\gamma$")
+            plt.title(r"$\gamma$")
         else:
-            plt.title("$\mathrm{" + variable + "}$")
+            plt.title(r"$\mathrm{" + variable + "}$")
         if limits is None:
             plt.pcolormesh(X, T, variableMatrix, cmap='jet')
         else:
             plt.pcolormesh(X, T, variableMatrix, cmap='jet', vmin=limits[0], vmax=limits[1])
-        plt.xlabel("$x\ [\mathrm{m}]$")
-        plt.ylabel("$t\ [\mathrm{ms}]$")
+        plt.xlabel(r"$x\ [\mathrm{m}]$")
+        plt.ylabel(r"$t\ [\mathrm{ms}]$")
         plt.axis([min(XTDiagram.x), max(XTDiagram.x), min(t), max(t)])
         plt.colorbar()
-    
+
     @staticmethod
     def sound_speed(r, p, gamma):
         """
@@ -961,7 +1063,7 @@ class StanShock:
             speed of sound
         
         """
-        
+
         return np.sqrt(gamma * p / r)
 
     def wave_speed(self):
@@ -972,33 +1074,39 @@ class StanShock:
             speed of acoustic wave
             
         """
-        
+
         return abs(self.u) + self.sound_speed(self.r, self.p, self.gamma)
 
     def time_step(self):
         """
-        This method determines the maximal timestep in accord with the CFL
+        This method determines the maximal time step in accord with the CFL
         condition.
         
         Returns:
-            timestep
+            time step
         
         """
-        
+
         localDts = self.dx / self.wave_speed()
         if self.includeDiffusion:
             T = self.thermoTable.get_temperature(self.r, self.p, self.Y)
             cv = self.thermoTable.get_Cp(T, self.Y) / self.gamma
             alpha, nu, diff = np.zeros_like(T), np.zeros_like(T), np.zeros_like(T)
+
             for i, Ti in enumerate(T):
                 # compute gas properties
                 self.gas.TP = Ti, self.p[i]
-                if self.gas.n_species > 1: self.gas.Y = self.Y[i, :]
+
+                if self.gas.n_species > 1:
+                    self.gas.Y = self.Y[i, :]
+
                 nu[i] = self.gas.viscosity / self.gas.density
                 alpha[i] = self.gas.thermal_conductivity / self.gas.density / cv[i] * self.F[i]
                 diff[i] = np.max(self.gas.mix_diff_coeffs) * self.F[i]
+
             viscousDts = 0.5 * self.dx ** 2.0 / np.maximum(4.0 / 3.0 * nu, np.maximum(alpha, diff))
             localDts = np.minimum(localDts, viscousDts)
+
         return self.cfl * min(localDts)
 
     def apply_boundary_conditions(self, rLR, uLR, pLR, YLR):
@@ -1021,7 +1129,7 @@ class StanShock:
             YLR: species ressure on left and right face [2,n+1,nsp]
         
         """
-        
+
         for ibc in [0, 1]:
             NAssign = ibc
             NUse = 1 - ibc
@@ -1030,12 +1138,14 @@ class StanShock:
             uLR[NAssign, iX] = uLR[NUse, iX]
             pLR[NAssign, iX] = pLR[NUse, iX]
             YLR[NAssign, iX, :] = YLR[NUse, iX, :]
+
             if type(self.boundaryConditions[ibc]) is str:
                 if self.boundaryConditions[ibc].lower() == 'reflecting' or \
                         self.boundaryConditions[ibc].lower() == 'symmetry':
                     uLR[NAssign, iX] = 0.0
                 elif self.verbose and self.boundaryConditions[ibc].lower() != 'outflow':
                     print("""Unrecognized Boundary Condition. Applying outflow by default.\n""")
+
             else:
                 # assign Dirichlet conditions to (r,u,p,Y)
                 if self.boundaryConditions[ibc][0] is not None:
@@ -1046,8 +1156,9 @@ class StanShock:
                     pLR[NAssign, iX] = self.boundaryConditions[ibc][2]
                 if self.boundaryConditions[ibc][3] is not None:
                     YLR[NAssign, iX, :] = self.boundaryConditions[ibc][3]
-        return (rLR, uLR, pLR, YLR)
-    
+
+        return rLR, uLR, pLR, YLR
+
     @staticmethod
     def primitive_to_conservative(r, u, p, Y, gamma):
         """
@@ -1067,11 +1178,12 @@ class StanShock:
             rY: species density matrix
         
         """
+
         ru = r * u
         E = p / (gamma - 1.0) + 0.5 * r * u ** 2.0
         rY = Y * r.reshape((-1, 1))
         return r, ru, E, rY
-    
+
     @staticmethod
     def conservative_to_primitive(r, ru, E, rY, gamma):
         """
@@ -1091,15 +1203,18 @@ class StanShock:
             Y: species mass fraction matrix [x,species]
         
         """
-        
+
         u = ru / r
         p = (gamma - 1.0) * (E - 0.5 * r * u ** 2.0)
         Y = rY / r.reshape((-1, 1))
+
         # bound
         Y[Y > 1.0] = 1.0
         Y[Y < 0.0] = 0.0
+
         # scale
         Y = Y / np.sum(Y, axis=1).reshape((-1, 1))
+
         return r, u, p, Y
 
     def flux(self, r, u, p, Y, gamma):
@@ -1117,21 +1232,24 @@ class StanShock:
             rhs: the update due to the flux
         
         """
-        
+
         # find the left and right WENO states from the WENO interpolation
         nx = len(r)
         PLR = WENO5(r, u, p, Y, gamma)
+
         # extract and apply boundary conditions
         rLR = PLR[:, :, 0]
         uLR = PLR[:, :, 1]
         pLR = PLR[:, :, 2]
         YLR = PLR[:, :, mt:]
         rLR, uLR, pLR, YLR = self.apply_boundary_conditions(rLR, uLR, pLR, YLR)
+
         # calculate the flux
         fL = self.fluxFunction(rLR, uLR, pLR, YLR, gamma[mt:-mt + 1])
         fR = self.fluxFunction(rLR, uLR, pLR, YLR, gamma[mt - 1:-mt])
         rhs = np.zeros((nx, mn + self.__nsp))
         rhs[mt:-mt, :] = -(fR[1:] - fL[:-1]) / self.dx
+
         return rhs
 
     def viscous_flux(self, r, u, p, Y, gamma):
@@ -1165,7 +1283,7 @@ class StanShock:
                 f: modeled viscous fluxes [nFaces,mn+nSp]
             
             """
-            
+
             # get the temperature, pressure, and composition for each cell (including the two ghosts)
             nT = self.n + 2
             T = np.zeros(nT)
@@ -1181,27 +1299,35 @@ class StanShock:
             viscosity = np.zeros(nT)
             conductivity = np.zeros(nT)
             diffusivities = np.zeros((nT, self.__nsp))
+
             for i, Ti in enumerate(T):
                 # compute gas properties
                 self.gas.TP = Ti, p[i]
-                if self.gas.n_species > 1: self.gas.Y = Y[i, :]
+
+                if self.gas.n_species > 1:
+                    self.gas.Y = Y[i, :]
+
                 viscosity[i] = self.gas.viscosity
                 conductivity[i] = self.gas.thermal_conductivity * F[i]
                 diffusivities[i, :] = self.gas.mix_diff_coeffs * F[i]
-                # compute the gas properties at the face
+
+            # compute the gas properties at the face
             viscosity = (viscosity[1:] + viscosity[:-1]) / 2.0
             conductivity = (conductivity[1:] + conductivity[:-1]) / 2.0
             diffusivities = (diffusivities[1:, :] + diffusivities[:-1, :]) / 2.0
             r = ((rLR[0, :] + rLR[1, :]) / 2.0).reshape(-1, 1)
+
             # get the central differences
             dudx = (uLR[1, :] - uLR[0, :]) / self.dx
             dTdx = (T[1:] - T[:-1]) / self.dx
             dYdx = (YLR[1, :, :] - YLR[0, :, :]) / self.dx
+
             # compute the fluxes
             f = np.zeros((nT - 1, mn + self.__nsp))
             f[:, 1] = 4.0 / 3.0 * viscosity * dudx
             f[:, 2] = conductivity * dTdx
             f[:, mn:] = r * diffusivities * dYdx
+
             return f
 
         # first order interpolation to the edge states and apply boundary conditions
@@ -1211,10 +1337,12 @@ class StanShock:
         YLR = np.concatenate((Y[mt - 1:-mt, :].reshape(1, -1, self.__nsp), Y[mt:-mt + 1, :].reshape(1, -1, self.__nsp)),
                              axis=0)
         rLR, uLR, pLR, YLR = self.apply_boundary_conditions(rLR, uLR, pLR, YLR)
+
         # calculate the flux
         f = viscous_flux_function(self, rLR, uLR, pLR, YLR)
         rhs = np.zeros((self.n + 2 * mt, mn + self.__nsp))
         rhs[mt:-mt, :] = (f[1:, :] - f[:-1, :]) / self.dx  # central difference
+
         return rhs
 
     def advance_advection(self, dt):
@@ -1226,6 +1354,7 @@ class StanShock:
             dt: time step
         
         """
+
         # initialize
         r = np.ones(self.n + 2 * mt)
         u = np.ones(self.n + 2 * mt)
@@ -1236,6 +1365,7 @@ class StanShock:
         (r[mt:-mt], u[mt:-mt], p[mt:-mt], Y[mt:-mt, :], gamma[mt:-mt]) = \
             (self.r, self.u, self.p, self.Y, self.gamma)
         (r, ru, E, rY) = self.primitive_to_conservative(r, u, p, Y, gamma)
+
         # 1st stage of RK3
         rhs = self.flux(r, u, p, Y, gamma)
         r1 = r + dt * rhs[:, 0]
@@ -1243,6 +1373,7 @@ class StanShock:
         E1 = E + dt * rhs[:, 2]
         rY1 = rY + dt * rhs[:, mn:]
         (r1, u1, p1, Y1) = self.conservative_to_primitive(r1, ru1, E1, rY1, gamma)
+
         # 2nd stage of RK3
         rhs = self.flux(r1, u1, p1, Y1, gamma)
         r2 = 0.75 * r + 0.25 * r1 + 0.25 * dt * rhs[:, 0]
@@ -1250,6 +1381,7 @@ class StanShock:
         E2 = 0.75 * E + 0.25 * E1 + 0.25 * dt * rhs[:, 2]
         rY2 = 0.75 * rY + 0.25 * rY1 + 0.25 * dt * rhs[:, mn:]
         (r2, u2, p2, Y2) = self.conservative_to_primitive(r2, ru2, E2, rY2, gamma)
+
         # 3rd stage of RK3
         rhs = self.flux(r2, u2, p2, Y2, gamma)
         r = (1.0 / 3.0) * r + (2.0 / 3.0) * r2 + (2.0 / 3.0) * dt * rhs[:, 0]
@@ -1257,6 +1389,7 @@ class StanShock:
         E = (1.0 / 3.0) * E + (2.0 / 3.0) * E2 + (2.0 / 3.0) * dt * rhs[:, 2]
         rY = (1.0 / 3.0) * rY + (2.0 / 3.0) * rY2 + (2.0 / 3.0) * dt * rhs[:, mn:]
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
+
         # update
         T0 = self.thermoTable.get_temperature(r[mt:-mt], p[mt:-mt], Y[mt:-mt])
         gamma[mt:-mt] = self.thermoTable.get_gamma(T0, Y[mt:-mt])
@@ -1280,14 +1413,16 @@ class StanShock:
                 dt: time step
             
             """
-            
+
             # unpack the input
             r = args[0]
             F = args[1]
             Y = y[:-1]
             T = y[-1]
+
             # set the state for the gas object
             self.gas.TDY = T, r, Y
+
             # gas properties
             cv = self.gas.cv_mass
             nSp = self.gas.n_species
@@ -1295,40 +1430,49 @@ class StanShock:
             wHatDot = self.gas.net_production_rates  # kmol/m^3.s
             wDot = wHatDot * W  # kg/m^3.s
             eRT = self.gas.standard_int_energies_RT
+
             # compute the derivatives
             YDot = wDot / r
             TDot = -np.sum(eRT * wHatDot) * ct.gas_constant * T / (r * cv)
             f = np.zeros(nSp + 1)
             f[:-1] = YDot
             f[-1] = TDot
+
             return f / F
 
         from scipy import integrate
+
         # get indices
         indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k], self.t)]
         Ts = self.thermoTable.get_temperature(self.r[indices], self.p[indices], self.Y[indices, :])
+
         # initialize integrator
         y0 = np.zeros(self.gas.n_species + 1)
         integrator = integrate.ode(dydt).set_integrator('lsoda')
+
         for TIndex, k in enumerate(indices):
             # initialize
             y0[:-1] = self.Y[k, :]
             y0[-1] = Ts[TIndex]
-            args = [self.r[k], self.F[k]];
+            args = [self.r[k], self.F[k]]
             integrator.set_initial_value(y0, 0.0)
             integrator.set_f_params(args)
+
             # solve
             integrator.integrate(dt)
+
             # clip and normalize
             Y = integrator.y[:-1]
             Y[Y > 1.0] = 1.0
             Y[Y < 0.0] = 0.0
             Y /= np.sum(Y)
+
             # update
             self.Y[k, :] = Y
             T = integrator.y[-1]
             self.gas.TDY = T, self.r[k], Y
             self.p[k] = self.gas.P
+
         # update gamma
         T = self.thermoTable.get_temperature(self.r, self.p, self.Y)
         self.gamma = self.thermoTable.get_gamma(T, self.Y)
@@ -1352,37 +1496,44 @@ class StanShock:
                 dt: time step
             
             """
-            
+
             # unpack the input and initialize
             x, gamma = args
             r, ru, E = y
             p = (gamma - 1.0) * (E - 0.5 * ru ** 2.0 / r)
             f = np.zeros(3)
+
             # create quasi-1D right hand side
-            if self.dlnAdt != None:
+            if self.dlnAdt is not None:
                 dlnAdt = self.dlnAdt(x, t)[0]
                 f[0] -= r * dlnAdt
                 f[1] -= ru * dlnAdt
                 f[2] -= E * dlnAdt
-            if self.dlnAdx != None:
+
+            if self.dlnAdx is not None:
                 dlnAdx = self.dlnAdx(x, t)[0]
                 f[0] -= ru * dlnAdx
                 f[1] -= (ru ** 2.0 / r) * dlnAdx
                 f[2] -= (ru / r * (E + p)) * dlnAdx
+
             return f
 
         from scipy import integrate
+
         # initialize integrator
         y0 = np.zeros(3)
         integrator = integrate.ode(dydt).set_integrator('lsoda')
         (r, ru, E, _) = self.primitive_to_conservative(self.r, self.u, self.p, self.Y, self.gamma)
+
         # determine the indices
         iIn = []
         eIn = np.arange(self.x.shape[0])
+
         if self.dlnAdt is not None:
             dlnAdt = self.dlnAdt(self.x, self.t)
             iIn = np.arange(self.x.shape[0])[dlnAdt != 0.0]
             eIn = np.arange(self.x.shape[0])[dlnAdt == 0.0]
+
         # integrate implicitly
         for i in iIn:
             # initialize
@@ -1390,27 +1541,34 @@ class StanShock:
             args = np.array([self.x[i]]), self.gamma[i]
             integrator.set_initial_value(y0, self.t)
             integrator.set_f_params(args)
+
             # solve
             integrator.integrate(self.t + dt)
+
             # update
             r[i], ru[i], E[i] = integrator.y
+
         # integrate explicitly
         rhs = np.zeros((mn, eIn.shape[0]))
-        if self.dlnAdt != None:
+
+        if self.dlnAdt is not None:
             dlnAdt = self.dlnAdt(self.x, self.t)[eIn]
             rhs[0] -= r[eIn] * dlnAdt
             rhs[1] -= ru[eIn] * dlnAdt
             rhs[2] -= E[eIn] * dlnAdt
-        if self.dlnAdx != None:
+
+        if self.dlnAdx is not None:
             dlnAdx = self.dlnAdx(self.x, self.t)[eIn]
             rhs[0] -= ru[eIn] * dlnAdx
             rhs[1] -= (ru[eIn] ** 2.0 / r[eIn]) * dlnAdx
             rhs[2] -= (self.u[eIn] * (E[eIn] + self.p[eIn])) * dlnAdx
+
         # update
         r[eIn] += dt * rhs[0]
         ru[eIn] += dt * rhs[1]
         E[eIn] += dt * rhs[2]
         rY = r.reshape((r.shape[0], 1)) * self.Y
+
         (self.r, self.u, self.p, _) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)
         T = self.thermoTable.get_temperature(self.r, self.p, self.Y)
         self.gamma = self.thermoTable.get_gamma(T, self.Y)
@@ -1440,59 +1598,73 @@ class StanShock:
                 Nu: Nusselt number
             
             """
-            
+
             # define the transitional Reynolds number
             ReCrit = 2300
             ReLowTurbulent = 2e5  # taken frkom figure 14-5 of Kayes for Pr=0.7
             Nu = np.zeros_like(Re)
+
             # laminar portion of the flow
             laminarIndices = np.logical_and(Re > 0.0, Re <= ReCrit)
             Nu[laminarIndices] = 3.657  # from the analytical solution
+
             # low turbulent portion of the flow (accounts for isothermal wall)
             lowTurublentIndices = np.logical_and(Re > ReCrit, Re <= ReLowTurbulent)
             ReLT, PrLT = Re[lowTurublentIndices], Pr[lowTurublentIndices]
+
             Nu[lowTurublentIndices] = 0.021 * PrLT ** 0.5 * ReLT ** 0.8  # empircal correlation for isothermal case
             # highly turbulent portion of the flow (data shows that boundary condition is less important)
             # highTurublentIndices = Re > ReLowTurbulent
             highTurublentIndices = Re > 2300.0
             ReHT, PrHT, cfHT = Re[highTurublentIndices], Pr[highTurublentIndices], cf[highTurublentIndices]
             Nu[highTurublentIndices] = ReHT * PrHT * cfHT / 2.0 / (
-                        0.88 + 13.39 * (PrHT ** (2.0 / 3.0) - 0.78) * np.sqrt(cfHT / 2.0))
+                    0.88 + 13.39 * (PrHT ** (2.0 / 3.0) - 0.78) * np.sqrt(cfHT / 2.0))
+
             return Nu
 
         if self.DOuter is None or self.Tw is None:
             raise Exception("stanShock improperly initialized for boundary layer terms")
+
         nX = len(self.x)
         if self.DInner is None:
             D = self.DOuter(self.x)
             H = D
+
         else:
             D = self.DOuter(self.x) - self.DInner(self.x)
             H = D
             noInsert = self.DInner(self.x) == 0.0
             H[noInsert] = D[noInsert]
+
         # compute gas properties
         T = self.thermoTable.get_temperature(self.r, self.p, self.Y)
         cp = self.thermoTable.get_Cp(T, self.Y)
         viscosity = np.zeros(nX)
         conductivity = np.zeros(nX)
+
         for i, Ti in enumerate(T):
             # compute gas properties
             self.gas.TP = Ti, self.p[i]
             if self.gas.n_species > 1: self.gas.Y = self.Y[i, :]
             viscosity[i] = self.gas.viscosity
             conductivity[i] = self.gas.thermal_conductivity
+
         # compute non-dimensional numbers
         Re = abs(self.r * self.u * H / viscosity)
         Pr = cp * viscosity / conductivity
+
         # skin friction coefficent
-        if self.cf is None: self.cf = SkinFriction()  # initialize the functor
+        if self.cf is None:
+            self.cf = SkinFriction()  # initialize the functor
         cf = self.cf(Re)
+
         # shear stress on wall
         shear = cf * (0.5 * self.r * self.u ** 2.0) * (np.sign(self.u))
+
         # Stanton number and heat transfer to wall
         Nu = nusseltNumber(Re, Pr, cf)
         qloss = Nu * conductivity / H * (T - self.Tw)
+
         # update
         (r, ru, E, rY) = self.primitive_to_conservative(self.r, self.u, self.p, self.Y, self.gamma)
         ru -= shear * 4.0 / D * dt
@@ -1581,7 +1753,7 @@ class StanShock:
         for XTDiagram in self.XTDiagrams.values():
             if iters % (XTDiagram.skipSteps + 1) == 0:
                 self._update_XT_diagram(XTDiagram)
-    
+
     @staticmethod
     def pressure_rise(t, p, peakWidth=10):
         """
@@ -1625,26 +1797,38 @@ class StanShock:
             tFinal: final time
         
         """
-        
+
         iters = 0
         while self.t < tFinal:
             dt = min(tFinal - self.t, self.time_step())
+
             # advance advection and chemistry with Strang Splitting
-            if self.reacting: self.advance_chemistry(dt / 2.0)
+            if self.reacting:
+                self.advance_chemistry(dt / 2.0)
+
             self.advance_advection(dt)
-            if self.reacting: self.advance_chemistry(dt / 2.0)
+
+            if self.reacting:
+                self.advance_chemistry(dt / 2.0)
+
             # advance other terms
-            if self.includeDiffusion: self.advance_diffusion(dt)
-            if self.dlnAdt != None or self.dlnAdx != None: self.advance_quasi_1D(dt)
-            if self.includeBoundaryLayerTerms: self.advance_boundary_layer(dt)
+            if self.includeDiffusion:
+                self.advance_diffusion(dt)
+
+            if self.dlnAdt is not None or self.dlnAdx is not None:
+                self.advance_quasi_1D(dt)
+
+            if self.includeBoundaryLayerTerms:
+                self.advance_boundary_layer(dt)
+
             # perform other updates
             self.t += dt
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
             iters += 1
+
             if self.verbose and iters % self.outputEvery == 0:
-                print("Iteration: %i. Current time: %f. Final time: %f. Time step: %e." \
-                      % (iters, self.t, tFinal, dt))
+                print(f"Iteration: {iters}. Current time: {self.t}. Final time: {tFinal}. Time step: {dt:e}.")
 
     def optimize_driver_insert(self, tFinal, tradeoffParam=1.0,
                                tTest=None, p5=None, eps=1e-4, maxIter=100):
@@ -1665,7 +1849,7 @@ class StanShock:
             maxIter:  maximum number of iterations
 
         """
-        
+
         from sklearn.gaussian_process.kernels import RBF  # RBF is the gaussian correlation
         from sklearn.gaussian_process import GaussianProcessRegressor
         from scipy.stats import norm
@@ -1770,15 +1954,21 @@ class StanShock:
             # delete previous probes and create an endwall probe
             self.probes = []
             self.add_probe(probeLocation, skipSteps=0, probeName="endwall probe")
+
             # solve
-            if self.verbose: print("Solving Optimization. Iteration=%i, L=%.3f, D=%.3f, alpha=%.3f" % (
-            self.optimizationIteration, LInsert, DInsert, alpha))
+            if self.verbose:
+                print(f"Solving Optimization. Iteration={self.optimizationIteration}, L={LInsert:.3f}, "
+                      f"D={DInsert:.3f}, alpha={alpha:.3f}")
+
             self.t = 0.0
             self.advance_simulation(tFinal)
             self.optimizationIteration += 1
+
             # return
             dlnpdt, p5Act = self.pressure_rise(np.array(self.probes[0].t), np.array(self.probes[0].p))
-            if self.verbose: print("Finished with optimization iteration. dlnpdt=%f, p5=%f" % (dlnpdt, p5Act))
+            if self.verbose:
+                print(f"Finished with optimization iteration. dlnpdt={dlnpdt}, p5={p5Act}")
+
             return (dlnpdt * tTest) ** 2.0 + tradeoffParam * (p5Act / p5 - 1.0) ** 2.0
 
         def midpoint_vector(x_min, x_max, nMidpoints):
@@ -1807,14 +1997,20 @@ class StanShock:
             for D in midpoint_vector(DMin, DMax, nGrid):
                 for a in midpoint_vector(alphaMin, alphaMax(L), nGrid):
                     self.designs.append((L, D, a))
+
         # solve for each grid point on the initial parameter space
         nDesigns = len(self.designs)
+        if self.verbose:
+            print(f"Solving initial grid of {nDesigns} points.")
+
         self.yOpt = []  # evaluated points
-        if self.verbose: print("Solving initial grid of %i points." % (nDesigns))
-        for iDesign, design in enumerate(self.designs): self.yOpt.append(optimization_function(design))
+        for iDesign, design in enumerate(self.designs):
+            self.yOpt.append(optimization_function(design))
+
         # initialize the Gaussian Random Process as a surrogate
         kernel = 1.0 * RBF(length_scale=1.0, length_scale_bounds=(1e-1, 10.0))  # iniitialize
         gp = GaussianProcessRegressor(kernel=kernel)
+
         # determine the grid to search over with the surrogate model
         nHat = 30
         XHat = []
@@ -1822,19 +2018,23 @@ class StanShock:
             for D in midpoint_vector(DMin, DMax, nHat):
                 for a in midpoint_vector(alphaMin, alphaMax(L), nHat):
                     XHat.append((L, D, a))
+
         XHat = np.array(XHat)
+
         # iterate until optimum is found
         ymin = min(self.yOpt)
-        if self.verbose: print("Finding Optimum.")
         minImprovement = eps / 10.0
         maxImprovement = minImprovement + 1.0
-        while ymin > eps \
-                and self.optimizationIteration < maxIter \
-                and maxImprovement > minImprovement:
+
+        if self.verbose:
+            print("Finding Optimum.")
+
+        while ymin > eps and self.optimizationIteration < maxIter and maxImprovement > minImprovement:
             # fit the GP
             X = np.array(self.designs)
             gp.fit(X, np.array(self.yOpt))
             YHat = gp.predict(XHat)
+
             # find the improvement
             parameters = gp.kernel_.get_params()
             sigmaSqrd = parameters['k1__constant_value']
@@ -1851,17 +2051,21 @@ class StanShock:
             s = np.sqrt(sSqrds[ind])
             T = (ymin - YHat[ind]) / s
             ExpImprovements[ind] = s * (T * norm.cdf(T) + norm.pdf(T))
+
             # find the maximum improvement and compute the new datum
             maxImprovement = np.max(ExpImprovements)
             self.designs.append(XHat[np.argmax(ExpImprovements), :])
             self.yOpt.append(optimization_function(self.designs[-1]))
-            if self.verbose: print(
-                "Minimum of current iteration: %f. Expected improvement of the next iteration: %f" % (
-                ymin, maxImprovement))
+
+            if self.verbose:
+                print(f"Minimum of current iteration: {ymin}. Expected improvement of "
+                      f"the next iteration: {maxImprovement}")
+
         if self.optimizationIteration >= maxIter and self.verbose:
             print("No minimum found within tolerance.")
         elif maxImprovement <= minImprovement and self.verbose:
             print("Search stopped due to no sample points found yielding enough improvement.")
         elif self.verbose:
             print("Minimum Found. Setting to minimum state.")
+
         optimization_function(self.designs[np.argmin(self.yOpt)])
