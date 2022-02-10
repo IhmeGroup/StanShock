@@ -146,7 +146,7 @@ ssbl.addProbe(max(ssbl.x)) #end wall probe
 
 #Solve
 t0 = time.perf_counter()
-ssbl.advanceSimulation(tFinal)
+ssbl.advance_simulation(tFinal)
 t1 = time.perf_counter()
 print("The process took ", t1-t0)
 
@@ -166,7 +166,7 @@ ssnbl.addProbe(max(ssnbl.x)) #end wall probe
 
 #Solve
 t0 = time.perf_counter()
-ssnbl.advanceSimulation(tFinal)
+ssnbl.advance_simulation(tFinal)
 t1 = time.perf_counter()
 print("The process took ", t1-t0)
 

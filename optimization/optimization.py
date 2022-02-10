@@ -99,7 +99,7 @@ t0 = time.clock()
 tTest = 2e-3
 tradeoffParam=1.0
 eps = 0.01**2.0+tradeoffParam*0.01**2.0
-ss.optimizeDriverInsert(tFinal,p5=p5,tTest=tTest,tradeoffParam=tradeoffParam,eps=eps)
+ss.optimize_driver_insert(tFinal, p5=p5, tTest=tTest, tradeoffParam=tradeoffParam, eps=eps)
 t1 = time.clock()
 print("The process took ", t1-t0)
 
@@ -116,17 +116,17 @@ ss = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
                    DOuter= DOuter,
                    DInner= ss.DInner,
                    dlnAdx=ss.dlnAdx)
-ss.addXTDiagram("p")
-ss.addXTDiagram("T")
+ss.add_XT_diagram("p")
+ss.add_XT_diagram("T")
 ss.addProbe(max(ss.x)) #end wall probe
 t0 = time.clock()
-ss.advanceSimulation(tFinal)
+ss.advance_simulation(tFinal)
 t1 = time.clock()
 print("The process took ", t1-t0)
 pInsert = np.array(ss.probes[0].p)
 tInsert = np.array(ss.probes[0].t)
-ss.plotXTDiagram(ss.XTDiagrams["t"],limits=[200.0,1800.0])
-ss.plotXTDiagram(ss.XTDiagrams["p"],limits=[0.5,25])
+ss.plot_XT_diagram(ss.XTDiagrams["t"], limits=[200.0, 1800.0])
+ss.plot_XT_diagram(ss.XTDiagrams["p"], limits=[0.5, 25])
 xInsert = ss.x
 DOuterInsert = ss.DOuter(ss.x)
 DInnerInsert = ss.DInner(ss.x)
@@ -142,17 +142,17 @@ ss = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
                    Tw=T1, #assume wall temperature is in thermal eq. with gas
                    DOuter= DOuter,
                    dlnAdx= dlnAdx)
-ss.addXTDiagram("p")
-ss.addXTDiagram("T")
+ss.add_XT_diagram("p")
+ss.add_XT_diagram("T")
 ss.addProbe(max(ss.x)) #end wall probe
 t0 = time.clock()
-ss.advanceSimulation(tFinal)
+ss.advance_simulation(tFinal)
 t1 = time.clock()
 print("The process took ", t1-t0)
 pNoInsert = np.array(ss.probes[0].p)
 tNoInsert = np.array(ss.probes[0].t)
-ss.plotXTDiagram(ss.XTDiagrams["t"],limits=[200.0,1800.0])
-ss.plotXTDiagram(ss.XTDiagrams["p"],limits=[0.5,25])
+ss.plot_XT_diagram(ss.XTDiagrams["t"], limits=[200.0, 1800.0])
+ss.plot_XT_diagram(ss.XTDiagrams["p"], limits=[0.5, 25])
 
 #plot
 plt.figure()

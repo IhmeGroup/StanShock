@@ -18,7 +18,7 @@
     along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 '''
 import sys; sys.path.append('../../')
-from stanShock import stanShock
+from stanshock import StanShock
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -112,18 +112,18 @@ dlnAdx = lambda x,t: dAdx(x)/A(x)
 boundaryConditions=['reflecting','reflecting']
 state1 = (gas1,u1)
 state4 = (gas4,u4)
-ssbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                   boundaryConditions=boundaryConditions, 
-                   cfl=.9,
-                   outputEvery=100,
-                   includeBoundaryLayerTerms=True,
-                   Tw=T1, #assume wall temperature is in thermal eq. with gas
-                   DInner= DInner, 
-                   DOuter= DOuter,
-                   dlnAdx=dlnAdx)
-ssbl.addProbe(max(ssbl.x)) #end wall probe
-ssbl.addXTDiagram("p")
-ssbl.addXTDiagram("T")
+ssbl = StanShock(gas1, initializeRiemannProblem=(state4, state1, geometry),
+                 boundaryConditions=boundaryConditions,
+                 cfl=.9,
+                 outputEvery=100,
+                 includeBoundaryLayerTerms=True,
+                 Tw=T1,  #assume wall temperature is in thermal eq. with gas
+                 DInner= DInner,
+                 DOuter= DOuter,
+                 dlnAdx=dlnAdx)
+ssbl.add_probe(max(ssbl.x)) #end wall probe
+ssbl.add_XT_diagram("p")
+ssbl.add_XT_diagram("T")
 
 #adjust for partial filling strategy
 XN2Lower = 0.80 #assume smearing during fill
@@ -150,7 +150,7 @@ for iX, VNorm in enumerate(VNorms):
 
 #Solve
 t0 = time.perf_counter()
-ssbl.advanceSimulation(tFinal)
+ssbl.advance_simulation(tFinal)
 t1 = time.perf_counter()
 print("The process took ", t1-t0)
 
@@ -158,18 +158,18 @@ print("The process took ", t1-t0)
 boundaryConditions=['reflecting','reflecting']
 gas1.TP = T1,p1
 gas4.TP = T4,p4 
-ssnbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                   boundaryConditions=boundaryConditions, 
-                   cfl=.9,
-                   outputEvery=100,
-                   includeBoundaryLayerTerms=False,
-                   Tw=T1, #assume wall temperature is in thermal eq. with gas
-                   DInner= DInner, 
-                   DOuter= DOuter,
-                   dlnAdx=dlnAdx)
-ssnbl.addProbe(max(ssnbl.x)) #end wall probe
-ssnbl.addXTDiagram("p")
-ssnbl.addXTDiagram("T")
+ssnbl = StanShock(gas1, initializeRiemannProblem=(state4, state1, geometry),
+                  boundaryConditions=boundaryConditions,
+                  cfl=.9,
+                  outputEvery=100,
+                  includeBoundaryLayerTerms=False,
+                  Tw=T1,  #assume wall temperature is in thermal eq. with gas
+                  DInner= DInner,
+                  DOuter= DOuter,
+                  dlnAdx=dlnAdx)
+ssnbl.add_probe(max(ssnbl.x)) #end wall probe
+ssnbl.add_XT_diagram("p")
+ssnbl.add_XT_diagram("T")
 
 #adjust for partial filling strategy
 XN2Lower = 0.80 #assume smearing during fill
@@ -196,7 +196,7 @@ for iX, VNorm in enumerate(VNorms):
 
 #Solve
 t0 = time.perf_counter()
-ssnbl.advanceSimulation(tFinal)
+ssnbl.advance_simulation(tFinal)
 t1 = time.perf_counter()
 print("The process took ", t1-t0)
 

@@ -18,7 +18,7 @@
     along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 '''
 import sys; sys.path.append('../')
-from stanShock import stanShock
+from stanshock import StanShock
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -67,12 +67,12 @@ xUpper, xLower = xCenter +L*f, xCenter-L*f
 
 geometry=(nX,xLower,xUpper,(xUpper+xLower)/2.0)
 boundaryConditions = (gasUnburned.density,uUnburned,None,gasUnburned.Y),(None,None,gasBurned.P,None)
-ss = stanShock(gas,initializeRiemannProblem=(unburnedState,burnedState,geometry),
-                   boundaryConditions=boundaryConditions, 
-                   cfl=.9,
-                   reacting=True,
-                   includeDiffusion=True,
-                   outputEvery=10)
+ss = StanShock(gas, initializeRiemannProblem=(unburnedState, burnedState, geometry),
+               boundaryConditions=boundaryConditions,
+               cfl=.9,
+               reacting=True,
+               includeDiffusion=True,
+               outputEvery=10)
 
 #interpolate flame solution
 ss.r = np.interp(ss.x,flame.grid,flame.density)
@@ -81,13 +81,13 @@ ss.p[:] = flame.P
 for iSp in range(gas.n_species): 
     ss.Y[:,iSp] = np.interp(ss.x,flame.grid,flame.Y[iSp,:])
 T = ss.thermoTable.getTemperature(ss.r,ss.p,ss.Y)
-ss.gamma = ss.thermoTable.getGamma(T,ss.Y)
+ss.gamma = ss.thermoTable.get_gamma(T, ss.Y)
 #calculate the final time
 tFinal = ntFlowThrough*(xUpper-xLower)/(uUnburned+uBurned)*2.0
 
 #Solve
 t0 = time.clock()
-ss.advanceSimulation(tFinal)
+ss.advance_simulation(tFinal)
 t1 = time.clock()
 print("The process took ", t1-t0)
 
