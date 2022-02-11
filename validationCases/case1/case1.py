@@ -1,22 +1,23 @@
 #!/usr/bin/env python2
 # -*- coding: utf-8 -*-
-'''
-    Copyright 2017 Kevin Grogan
+"""
+Copyright 2017 Kevin Grogan
 
-    This file is part of StanShock.
+This file is part of StanShock.
 
-    StanShock is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License.
+StanShock is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation, either version 3 of the License.
 
-    StanShock is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+StanShock is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
 
-    You should have received a copy of the GNU Lesser General Public License
-    along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
-'''
+You should have received a copy of the GNU Lesser General Public License
+along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
 import sys; sys.path.append('../../')
 from stanshock import StanShock
 import numpy as np
@@ -24,6 +25,14 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 import time
 import cantera as ct
+
+
+# Set default parameters
+StanShock.cfl = 0.9
+StanShock.boundary_conditions = ['reflecting', 'reflecting']
+StanShock.output_freq = 100
+StanShock.n = 1000
+
 
 def isFloat(value):
     '''
@@ -36,6 +45,7 @@ def isFloat(value):
         return True
     except ValueError:
         return False
+
 
 def loadData(fileName):
     '''
@@ -54,6 +64,8 @@ def loadData(fileName):
             cleanDictRow = {key:(float(dictRow[key]) if isFloat(dictRow[key]) else dictRow[key]) for key in dictRow}
             rawData.append(cleanDictRow)
     return rawData
+
+
 def getPressureData(fileName):
     '''
     function getPressureData
@@ -70,6 +82,7 @@ def getPressureData(fileName):
     p = np.array([example["Pressure (atm)"] for example in rawData])
     p *= ct.one_atm
     return (t,p)
+
 
 #=============================================================================
 #provided condtions for Case 1
@@ -107,41 +120,44 @@ p4*=1.05 #account for diaphragm
 gas4.TP = T4,p4 
 
 #set up geometry
-nX = 1000 #mesh resolution
 xLower = -LDriver
 xUpper = LDriven
 xShock = 0.0
-geometry=(nX,xLower,xUpper,xShock)
 DeltaD = DDriven-DDriver
-DeltaX = (xUpper-xLower)/float(nX)*10 #diffuse area change for numerical stability
+DeltaX = (xUpper-xLower)/float(StanShock.n)*10  # diffuse area change for numerical stability
+
+
 def D(x):
     diameter = DDriven+(DeltaD/DeltaX)*(x-xShock)
     diameter[x<(xShock-DeltaX)]=DDriver
     diameter[x>xShock]=DDriven
     return diameter
+
+
 def dDdx(x):
     dDiameterdx = np.ones(len(x))*(DeltaD/DeltaX)
     dDiameterdx[x<(xShock-DeltaX)]=0.0
     dDiameterdx[x>xShock]=0.0
     return dDiameterdx
+
+
 A = lambda x: np.pi/4.0*D(x)**2.0
 dAdx = lambda x: np.pi/2.0*D(x)*dDdx(x)
-dlnAdx = lambda x,t: dAdx(x)/A(x)
+dlnAdx = lambda x, t: dAdx(x)/A(x)
 
-#set up solver parameters
+
+# set up solver parameters
 print("Solving with boundary layer terms")
-boundaryConditions=['reflecting','reflecting']
-state1 = (gas1,u1)
-state4 = (gas4,u4)
-ssbl = StanShock(gas1, initializeRiemannProblem=(state4, state1, geometry),
-                 boundaryConditions=boundaryConditions,
-                 cfl=.9,
-                 outputEvery=100,
-                 includeBoundaryLayerTerms=True,
-                 DOuter=D,
-                 Tw=T1,  #assume wall temperature is in thermal eq. with gas
-                 dlnAdx=dlnAdx)
-ssbl.add_probe(max(ssbl.x)) #end wall probe
+state1 = (gas1, u1)
+state4 = (gas4, u4)
+
+ssbl = StanShock.riemann_problem(
+    gas1, state4, state1, (xLower, xUpper),
+    boundary_layer=True, DOuter=D, Tw=T1, dlnAdx=dlnAdx)
+
+# assume wall temperature is in thermal eq. with gas
+
+ssbl.add_probe(max(ssbl.x))  # end wall probe
 
 #Solve
 t0 = time.perf_counter()
@@ -149,19 +165,13 @@ ssbl.advance_simulation(tFinal)
 t1 = time.perf_counter()
 print("The process took ", t1-t0)
 
-#without  boundary layer model
+# Without boundary layer model
 print("Solving without boundary layer model")
-boundaryConditions=['reflecting','reflecting']
-gas1.TP = T1,p1
-gas4.TP = T4,p4 
-ssnbl = StanShock(gas1, initializeRiemannProblem=(state4, state1, geometry),
-                  boundaryConditions=boundaryConditions,
-                  cfl=.9,
-                  outputEvery=100,
-                  includeBoundaryLayerTerms=False,
-                  DOuter=D,
-                  dlnAdx=dlnAdx)
-ssnbl.add_probe(max(ssnbl.x)) #end wall probe
+gas1.TP = T1, p1
+gas4.TP = T4, p4
+
+ssnbl = StanShock.riemann_problem(gas1, state4, state1, (xLower, xUpper), DOuter=D, dlnAdx=dlnAdx)
+ssnbl.add_probe(max(ssnbl.x))  # end wall probe
 
 #Solve
 t0 = time.perf_counter()
@@ -177,7 +187,7 @@ tExp+=timeDifference
 #make plots of probe and XT diagrams
 plt.close("all")
 mpl.rcParams['font.size']=fontsize
-plt.rc('text',usetex=True)
+# plt.rc('text',usetex=True)
 plt.figure(figsize=(4,4))
 plt.plot(np.array(ssnbl.probes[0].t)*1000.0,np.array(ssnbl.probes[0].p)/1.0e5,'k',label="$\mathrm{Without\ BL\ Model}$",linewidth=2.0)
 plt.plot(np.array(ssbl.probes[0].t)*1000.0,np.array(ssbl.probes[0].p)/1.0e5,'r',label="$\mathrm{With\ BL\ Model}$",linewidth=2.0)

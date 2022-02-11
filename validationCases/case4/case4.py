@@ -122,8 +122,8 @@ ssbl = StanShock(gas1, initializeRiemannProblem=(state4, state1, geometry),
                  DOuter= DOuter,
                  dlnAdx=dlnAdx)
 ssbl.add_probe(max(ssbl.x)) #end wall probe
-ssbl.add_XT_diagram("p")
-ssbl.add_XT_diagram("T")
+ssbl.add_xt_diagram("p")
+ssbl.add_xt_diagram("T")
 
 #adjust for partial filling strategy
 XN2Lower = 0.80 #assume smearing during fill
@@ -168,8 +168,8 @@ ssnbl = StanShock(gas1, initializeRiemannProblem=(state4, state1, geometry),
                   DOuter= DOuter,
                   dlnAdx=dlnAdx)
 ssnbl.add_probe(max(ssnbl.x)) #end wall probe
-ssnbl.add_XT_diagram("p")
-ssnbl.add_XT_diagram("T")
+ssnbl.add_xt_diagram("p")
+ssnbl.add_xt_diagram("T")
 
 #adjust for partial filling strategy
 XN2Lower = 0.80 #assume smearing during fill

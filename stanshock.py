@@ -18,6 +18,7 @@ You should have received a copy of the GNU Lesser General Public License
 along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+from typing import Callable, Dict, List, Tuple
 
 import numpy as np
 from numba import double, njit, int64
@@ -783,142 +784,239 @@ class StanShock:
     """
     This is a class defined to encapsulate the data and methods used for the
     1D gas dynamics solver stanShock.
+
+    Attributes:
+        cfl: Stability condition
+        dx: Grid spacing
+        n: Grid size
+        boundary_conditions:
+        verbose: Flag for console output.
+        output_freq: Frequency of simulation outputs in iterations.
+        boundary_layer: Flag for solving for boundary layer terms.
+        diffusion: Flag for solving for diffusion terms.
+        reacting: Flag for solving for source terms.
+        reacting_region: Callable that takes x and t as inputs and returns a boolean for reacting.
+        x: Node position [m].
+        t: Time [ms].
+        gas: Cantera solution object for the gas.
+        r: Density [kg/m3].
+        u: Velocity [m/s].
+        p: Pressure [Pa].
+        gamma: Specific heat ratio.
+        F: Thickening.
+        Y: Species mass fractions.
+
     """
 
-    def __init__(self, gas, **kwargs):
+    # Default parameters
+    cfl: float = 1.0
+    dx: float = 1.0
+    n: int = 10
+    boundary_conditions: Tuple[str, str] = ['outflow', 'outflow']
+    verbose: bool = True
+    output_freq: int = 1
+    boundary_layer: bool = False
+    diffusion: bool = False
+    reacting: bool = False
+    reacting_region: Callable[[float, float], bool] = lambda x, t: True
+
+    # Type hinting for instance variables
+    x: np.ndarray
+    t: float
+    gas: ct.Solution
+    r: np.ndarray
+    u: np.ndarray
+    p: np.ndarray
+    gamma: np.ndarray
+    F: np.ndarray
+    Y: np.ndarray
+    probes: List["StanShock.Probe"]
+    xt_diagrams: Dict[str, "StanShock.XTDiagram"]
+
+    def __init__(
+        self,
+        gas: ct.Solution,
+        *,
+        boundary_layer: bool = None,
+        **kwargs
+    ):
         """
         Initialization of the object with default values. The keyword arguments
         allow the user to initialize the state.
         """
 
-        def initializeRiemannProblem(self, left_state, right_state, geometry):
-            """
-            This helper function initializes a Riemann Problem.
-
-            Args:
-                left_state: a tuple containing the Cantera solution object at the
-                           the desired thermodynamic state and the velocity:
-                           (canterSolution,u)
-                right_state: a tuple containing the Cantera solution object at the
-                           the desired thermodynamic state and the velocity:
-                           (canterSolution,u)
-                geometry: a tuple containing the relevant geometry for the
-                           problem: (numberCells,xMinimum,xMaximum,shockLocation)
-
-            """
-
-            if left_state[0].species_names != gas.species_names or \
-                    right_state[0].species_names != gas.species_names:
-                raise Exception("Inputed gasses must be the same as the initialized gas.")
-            self.n = geometry[0]
-            self.x = np.linspace(geometry[1], geometry[2], self.n)
-            self.dx = self.x[1] - self.x[0]
-            # initialization for left state
-            self.r = np.ones(self.n) * left_state[0].density
-            self.u = np.ones(self.n) * left_state[1]
-            self.p = np.ones(self.n) * left_state[0].P
-            self.Y = np.zeros((self.n, gas.n_species))
-            for kSp in range(self.__nsp): self.Y[:, kSp] = left_state[0].Y[kSp]
-            self.gamma = np.ones(self.n) * (left_state[0].cp / left_state[0].cv)
-            # right state
-            index = self.x >= geometry[3]
-            self.r[index] = right_state[0].density
-            self.u[index] = right_state[1]
-            self.p[index] = right_state[0].P
-            for kSp in range(self.__nsp): self.Y[index, kSp] = right_state[0].Y[kSp]
-            self.gamma[index] = right_state[0].cp / right_state[0].cv
-            self.F = np.ones_like(self.r)
-
-        def initializeDiffuseInterface(self, left_state, right_state, geometry, delta):
-            """
-            This helper function initializes an interface smoothed over a distance.
-
-            Args:
-                left_state: a tuple containing the Cantera solution object at the
-                           the desired thermodynamic state and the velocity:
-                           (canterSolution,u)
-                right_state:  a tuple containing the Cantera solution object at the
-                           the desired thermodynamic state and the velocity:
-                           (canterSolution,u)
-                geometry: a tuple containing the relevant geometry for the
-                           problem: (numberCells,xMinimum,xMaximum,shockLocation)
-                delta:   distance over which the interface is smoothed linearly
-
-            """
-
-            if left_state[0].species_names != gas.species_names or \
-                    right_state[0].species_names != gas.species_names:
-                raise Exception("Inputed gasses must be the same as the initialized gas.")
-            self.n = geometry[0]
-            self.x = np.linspace(geometry[1], geometry[2], self.n)
-            self.dx = self.x[1] - self.x[0]
-            xShock = geometry[3]
-            leftGas = left_state[0]
-            uLeft = left_state[1]
-            gammaLeft = leftGas.cp / leftGas.cv
-            rightGas = right_state[0]
-            uRight = right_state[1]
-            gammaRight = rightGas.cp / rightGas.cv
-            # initialization for left state
-            self.r = smoothing_function(self.x, xShock, delta, leftGas.density, rightGas.density)
-            self.u = smoothing_function(self.x, xShock, delta, uLeft, uRight)
-            self.p = smoothing_function(self.x, xShock, delta, leftGas.P, rightGas.P)
-            self.Y = np.zeros((self.n, self.gas.n_species))
-            for kSp in range(self.__nsp): self.Y[:, kSp] = smoothing_function(self.x, xShock, delta, leftGas.Y[kSp],
-                                                                              rightGas.Y[kSp])
-            self.gamma = smoothing_function(self.x, xShock, delta, gammaLeft, gammaRight)
-            self.F = np.ones_like(self.r)
-
-        # initilize the class
-        self.cfl = 1.0  # stability condition
-        self.dx = 1.0  # grid spacing
-        self.n = 10  # grid size
-        self.boundaryConditions = ['outflow', 'outflow']
         self.x = np.linspace(0.0, self.dx * (self.n - 1), self.n)
-        self.gas = gas  # cantera solution object for the gas
-        self.r = np.ones(self.n) * gas.density  # density
-        self.u = np.zeros(self.n)  # velocity
-        self.p = np.ones(self.n) * gas.P  # pressure
-        self.gamma = np.ones(self.n) * gas.cp / gas.cv  # specific heat ratio
-        self.F = np.ones(self.n)  # thickening
-        self.t = 0.0  # time
+        self.t = 0.0
+
+        self.gas = gas
+        self.r = np.ones(self.n) * gas.density
+        self.u = np.zeros(self.n)
+        self.p = np.ones(self.n) * gas.P
+        self.gamma = np.ones(self.n) * gas.cp / gas.cv
+
+        self.F = np.ones(self.n)
         self.__nsp = gas.n_species  # number os chemical species
-        self.Y = np.zeros((self.n, gas.n_species))  # species mass fractions
+        self.Y = np.zeros((self.n, gas.n_species))
         self.Y[:, 0] = np.ones(self.n)
-        self.verbose = True  # console output switch
-        self.outputEvery = 1  # number of iterations of simulation advancement between updates
         self.dlnAdt = None  # area of the shock tube as a function of time (needed for quasi-1D)
         self.dlnAdx = None  # area of the shock tube as a function of x (needed for quasi-1D)
         self.fluxFunction = HLLC
-        self.probes = []  # list of probe objects
-        self.XTDiagrams = dict()  # dictionary of XT diagram objects
-        self.includeBoundaryLayerTerms = False  # setting this to true solves the boundary layer terms
+
+        self.probes = []
+        self.xt_diagrams = dict()
+
         self.cf = None  # skin friction functor
         self.DInner = None  # Inner diameter of the shock tube as a function of x (needed for BL)
         self.DOuter = None  # Outer diameter of the shock tube as a function of x (needed for BL)
         self.Tw = None  # temperature of the wall (needed for BL)
         self.thermoTable = ThermoTable(gas)  # thermodynamic table object
         self.optimizationIteration = 0  # counter to keep track of optimization
-        self.reacting = False  # flag to solver about whether to solve source terms
-        self.inReactingRegion = lambda x, t: True  # the reacting region of the shock tube.
-        self.includeDiffusion = False  # exclude diffusion
         self.thickening = None
+
+        if boundary_layer is not None:
+            self.boundary_layer = boundary_layer
 
         # overwrite the default data
         for key in kwargs:
             if key in self.__dict__.keys():
                 self.__dict__[key] = kwargs[key]
-            if key == 'initializeRiemannProblem':
-                initializeRiemannProblem(self, kwargs[key][0], kwargs[key][1], kwargs[key][2])
-            if key == 'initializeDiffuseInterface':
-                initializeDiffuseInterface(self, kwargs[key][0], kwargs[key][1], kwargs[key][2], kwargs[key][3])
 
         if not self.n == len(self.x) == len(self.r) == len(self.u) == len(self.p) == len(self.gamma):
             raise Exception("Initialization Error")
 
+    @classmethod
+    def riemann_problem(
+        cls,
+        gas: ct.Solution,
+        left_state: Tuple[ct.Solution, float],
+        right_state: Tuple[ct.Solution, float],
+        x_bounds: Tuple[float, float],
+        *,
+        x_shock: float = 0,
+        n: int = None,
+        **kwargs
+    ):
+        """
+        This helper function initializes a Riemann Problem.
+
+        Args:
+            gas:
+            left_state: a tuple containing the Cantera solution object at the
+                       the desired thermodynamic state and the velocity:
+                       (canterSolution,u)
+            right_state: a tuple containing the Cantera solution object at the
+                       the desired thermodynamic state and the velocity:
+                       (canterSolution,u)
+            x_bounds: Left and right bounds of x.
+            x_shock: Location of shock.
+            n: Number of nodes.
+
+        """
+
+        ss = cls(gas, **kwargs)
+
+        if left_state[0].species_names != gas.species_names or \
+                right_state[0].species_names != gas.species_names:
+            raise Exception("Inputted gasses must be the same as the initialized gas.")
+
+        if n is not None:
+            ss.n = n  # Else use default
+
+        ss.x = np.linspace(*x_bounds, ss.n)
+        ss.dx = ss.x[1] - ss.x[0]
+
+        # initialization for left state
+        ss.r = np.ones(ss.n) * left_state[0].density
+        ss.u = np.ones(ss.n) * left_state[1]
+        ss.p = np.ones(ss.n) * left_state[0].P
+        ss.Y = np.zeros((ss.n, gas.n_species))
+
+        for kSp in range(ss.__nsp):
+            ss.Y[:, kSp] = left_state[0].Y[kSp]
+
+        ss.gamma = np.ones(ss.n) * (left_state[0].cp / left_state[0].cv)
+        
+        # right state
+        index = ss.x >= x_shock
+        ss.r[index] = right_state[0].density
+        ss.u[index] = right_state[1]
+        ss.p[index] = right_state[0].P
+
+        for kSp in range(ss.__nsp):
+            ss.Y[index, kSp] = right_state[0].Y[kSp]
+
+        ss.gamma[index] = right_state[0].cp / right_state[0].cv
+        ss.F = np.ones_like(ss.r)
+        
+        if not ss.n == len(ss.x) == len(ss.r) == len(ss.u) == len(ss.p) == len(ss.gamma):
+            raise Exception("Initialization Error")
+
+        return ss
+
+    @classmethod
+    def diffuse_interface(
+        cls,
+        gas: ct.Solution,
+        left_state: Tuple[ct.Solution, float],
+        right_state: Tuple[ct.Solution, float],
+        geometry: Tuple[int, float, float, float],
+        delta: float,
+        **kwargs
+    ):
+        """
+        This helper function initializes an interface smoothed over a distance.
+
+        Args:
+            gas: 
+            left_state: a tuple containing the Cantera solution object at the
+                       the desired thermodynamic state and the velocity:
+                       (canterSolution,u)
+            right_state:  a tuple containing the Cantera solution object at the
+                       the desired thermodynamic state and the velocity:
+                       (canterSolution,u)
+            geometry: a tuple containing the relevant geometry for the
+                       problem: (numberCells,xMinimum,xMaximum,shockLocation)
+            delta:   distance over which the interface is smoothed linearly
+
+        """
+        
+        ss = cls(gas, **kwargs)
+        
+        if left_state[0].species_names != gas.species_names or \
+                right_state[0].species_names != gas.species_names:
+            raise Exception("Inputted gasses must be the same as the initialized gas.")
+        
+        ss.n = geometry[0]
+        ss.x = np.linspace(geometry[1], geometry[2], ss.n)
+        ss.dx = ss.x[1] - ss.x[0]
+        xShock = geometry[3]
+        leftGas = left_state[0]
+        uLeft = left_state[1]
+        gammaLeft = leftGas.cp / leftGas.cv
+        rightGas = right_state[0]
+        uRight = right_state[1]
+        gammaRight = rightGas.cp / rightGas.cv
+
+        # initialization for left state
+        ss.r = smoothing_function(ss.x, xShock, delta, leftGas.density, rightGas.density)
+        ss.u = smoothing_function(ss.x, xShock, delta, uLeft, uRight)
+        ss.p = smoothing_function(ss.x, xShock, delta, leftGas.P, rightGas.P)
+        ss.Y = np.zeros((ss.n, ss.gas.n_species))
+
+        for kSp in range(ss.__nsp):
+            ss.Y[:, kSp] = smoothing_function(ss.x, xShock, delta, leftGas.Y[kSp], rightGas.Y[kSp])
+
+        ss.gamma = smoothing_function(ss.x, xShock, delta, gammaLeft, gammaRight)
+        ss.F = np.ones_like(ss.r)
+
+        if not ss.n == len(ss.x) == len(ss.r) == len(ss.u) == len(ss.p) == len(ss.gamma):
+            raise Exception("Initialization Error")
+
+        return ss
+
     class Probe:
         """
-        This class is used to store the relavant data for the probe.
+        This class is used to store the relevant data for the probe.
         """
 
         def __init__(self):
@@ -960,7 +1058,48 @@ class StanShock:
             self.t = []  # list of times
             self.x = None  # numpy array of x (the interpolated grid)
 
-    def _update_XT_diagram(self, XTDiagram):
+        def plot(self, limits=None):
+            """
+            This method creates a contour plot of the XTDiagram data.
+
+            Args:
+                limits: tuple of maximum and minimum for the pcolor (vMin,vMax)
+
+            """
+
+            t = [t * 1000.0 for t in self.t]
+            X, T = np.meshgrid(self.x, t)
+
+            variableMatrix = np.zeros(X.shape)
+            for k, variablek in enumerate(self.variable):
+                variableMatrix[k, :] = variablek
+
+            variable = self.name
+            if variable in ["density", "r", "rho"]:
+                plt.title(r"$\rho\ [\mathrm{kg/m^3}]$")
+            elif variable in ["velocity", "u"]:
+                plt.title(r"$u\ [\mathrm{m/s}]$")
+            elif variable in ["pressure", "p"]:
+                variableMatrix /= 1e5  # convert to bar
+                plt.title(r"$p\ [\mathrm{bar}]$")
+            elif variable in ["temperature", "t"]:
+                plt.title(r"$T\ [\mathrm{K}]$")
+            elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
+                plt.title(r"$\gamma$")
+            else:
+                plt.title(r"$\mathrm{" + variable + "}$")
+
+            if limits is None:
+                plt.pcolormesh(X, T, variableMatrix, cmap='jet')
+            else:
+                plt.pcolormesh(X, T, variableMatrix, cmap='jet', vmin=limits[0], vmax=limits[1])
+
+            plt.xlabel(r"$x\ [\mathrm{m}]$")
+            plt.ylabel(r"$t\ [\mathrm{ms}]$")
+            plt.axis([min(self.x), max(self.x), min(t), max(t)])
+            plt.colorbar()
+
+    def _update_xt_diagram(self, XTDiagram):
         """
         This method updates the XT diagram.
         
@@ -989,7 +1128,7 @@ class StanShock:
             raise Exception("Invalid Variable Name")
         XTDiagram.t.append(self.t)
 
-    def add_XT_diagram(self, variable, skipSteps=0, x=None):
+    def add_xt_diagram(self, variable, skipSteps=0, x=None):
         """
         This method initiates the XT diagram.
         
@@ -1011,48 +1150,9 @@ class StanShock:
             raise Exception("Invalid Interpolation Grid")
         else:
             newXTDiagram.x = self.x
-        self._update_XT_diagram(newXTDiagram)
+        self._update_xt_diagram(newXTDiagram)
         # store the XT Diagram
-        self.XTDiagrams[variable] = newXTDiagram
-
-    def plot_XT_diagram(self, XTDiagram, limits=None):
-        """
-        This method creates a contour plot of the XTDiagram data.
-        
-        Args:
-            XTDiagram: XTDiagram object; obtained from the XTDiagrams dictionary
-            limits :  tuple of maximum and minimum for the pcolor (vMin,vMax)
-
-        """
-
-        plt.figure()
-        t = [t * 1000.0 for t in XTDiagram.t]
-        X, T = np.meshgrid(XTDiagram.x, t)
-        variableMatrix = np.zeros(X.shape)
-        for k, variablek in enumerate(XTDiagram.variable):
-            variableMatrix[k, :] = variablek
-        variable = XTDiagram.name
-        if variable in ["density", "r", "rho"]:
-            plt.title(r"$\rho\ [\mathrm{kg/m^3}]$")
-        elif variable in ["velocity", "u"]:
-            plt.title(r"$u\ [\mathrm{m/s}]$")
-        elif variable in ["pressure", "p"]:
-            variableMatrix /= 1.0e5  # convert to bar
-            plt.title(r"$p\ [\mathrm{bar}]$")
-        elif variable in ["temperature", "t"]:
-            plt.title(r"$T\ [\mathrm{K}]$")
-        elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            plt.title(r"$\gamma$")
-        else:
-            plt.title(r"$\mathrm{" + variable + "}$")
-        if limits is None:
-            plt.pcolormesh(X, T, variableMatrix, cmap='jet')
-        else:
-            plt.pcolormesh(X, T, variableMatrix, cmap='jet', vmin=limits[0], vmax=limits[1])
-        plt.xlabel(r"$x\ [\mathrm{m}]$")
-        plt.ylabel(r"$t\ [\mathrm{ms}]$")
-        plt.axis([min(XTDiagram.x), max(XTDiagram.x), min(t), max(t)])
-        plt.colorbar()
+        self.xt_diagrams[variable] = newXTDiagram
 
     @staticmethod
     def sound_speed(r, p, gamma):
@@ -1088,7 +1188,7 @@ class StanShock:
         """
 
         localDts = self.dx / self.wave_speed()
-        if self.includeDiffusion:
+        if self.diffusion:
             T = self.thermoTable.get_temperature(self.r, self.p, self.Y)
             cv = self.thermoTable.get_Cp(T, self.Y) / self.gamma
             alpha, nu, diff = np.zeros_like(T), np.zeros_like(T), np.zeros_like(T)
@@ -1139,23 +1239,23 @@ class StanShock:
             pLR[NAssign, iX] = pLR[NUse, iX]
             YLR[NAssign, iX, :] = YLR[NUse, iX, :]
 
-            if type(self.boundaryConditions[ibc]) is str:
-                if self.boundaryConditions[ibc].lower() == 'reflecting' or \
-                        self.boundaryConditions[ibc].lower() == 'symmetry':
+            if type(self.boundary_conditions[ibc]) is str:
+                if self.boundary_conditions[ibc].lower() == 'reflecting' or \
+                        self.boundary_conditions[ibc].lower() == 'symmetry':
                     uLR[NAssign, iX] = 0.0
-                elif self.verbose and self.boundaryConditions[ibc].lower() != 'outflow':
+                elif self.verbose and self.boundary_conditions[ibc].lower() != 'outflow':
                     print("""Unrecognized Boundary Condition. Applying outflow by default.\n""")
 
             else:
                 # assign Dirichlet conditions to (r,u,p,Y)
-                if self.boundaryConditions[ibc][0] is not None:
-                    rLR[NAssign, iX] = self.boundaryConditions[ibc][0]
-                if self.boundaryConditions[ibc][1] is not None:
-                    uLR[NAssign, iX] = self.boundaryConditions[ibc][1]
-                if self.boundaryConditions[ibc][2] is not None:
-                    pLR[NAssign, iX] = self.boundaryConditions[ibc][2]
-                if self.boundaryConditions[ibc][3] is not None:
-                    YLR[NAssign, iX, :] = self.boundaryConditions[ibc][3]
+                if self.boundary_conditions[ibc][0] is not None:
+                    rLR[NAssign, iX] = self.boundary_conditions[ibc][0]
+                if self.boundary_conditions[ibc][1] is not None:
+                    uLR[NAssign, iX] = self.boundary_conditions[ibc][1]
+                if self.boundary_conditions[ibc][2] is not None:
+                    pLR[NAssign, iX] = self.boundary_conditions[ibc][2]
+                if self.boundary_conditions[ibc][3] is not None:
+                    YLR[NAssign, iX, :] = self.boundary_conditions[ibc][3]
 
         return rLR, uLR, pLR, YLR
 
@@ -1443,7 +1543,7 @@ class StanShock:
         from scipy import integrate
 
         # get indices
-        indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k], self.t)]
+        indices = [k for k in range(self.n) if self.reacting_region(self.x[k], self.t)]
         Ts = self.thermoTable.get_temperature(self.r[indices], self.p[indices], self.Y[indices, :])
 
         # initialize integrator
@@ -1750,9 +1850,9 @@ class StanShock:
         """
 
         # update diagrams
-        for XTDiagram in self.XTDiagrams.values():
+        for XTDiagram in self.xt_diagrams.values():
             if iters % (XTDiagram.skipSteps + 1) == 0:
-                self._update_XT_diagram(XTDiagram)
+                self._update_xt_diagram(XTDiagram)
 
     @staticmethod
     def pressure_rise(t, p, peakWidth=10):
@@ -1812,13 +1912,13 @@ class StanShock:
                 self.advance_chemistry(dt / 2.0)
 
             # advance other terms
-            if self.includeDiffusion:
+            if self.diffusion:
                 self.advance_diffusion(dt)
 
             if self.dlnAdt is not None or self.dlnAdx is not None:
                 self.advance_quasi_1D(dt)
 
-            if self.includeBoundaryLayerTerms:
+            if self.boundary_layer:
                 self.advance_boundary_layer(dt)
 
             # perform other updates
@@ -1827,7 +1927,7 @@ class StanShock:
             self.update_XT_diagrams(iters)
             iters += 1
 
-            if self.verbose and iters % self.outputEvery == 0:
+            if self.verbose and iters % self.output_freq == 0:
                 print(f"Iteration: {iters}. Current time: {self.t}. Final time: {tFinal}. Time step: {dt:e}.")
 
     def optimize_driver_insert(self, tFinal, tradeoffParam=1.0,
@@ -1854,8 +1954,8 @@ class StanShock:
         from sklearn.gaussian_process import GaussianProcessRegressor
         from scipy.stats import norm
         # Check for boundary layer terms
-        if not self.includeBoundaryLayerTerms:
-            self.includeBoundaryLayerTerms = True
+        if not self.boundary_layer:
+            self.boundary_layer = True
             if self.verbose: print("WARNING: Boundary Layer Terms Included")
         if self.DOuter is None or self.dlnAdx is None:
             raise Exception("Driver optimization must have DOuter and dlnAdx definied")
