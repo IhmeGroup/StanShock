@@ -422,7 +422,7 @@ def getCp(T,Y,TTable,a,b):
     dT = TTable[1]-TTable[0] #assume constant steps in table
     TMax = TTable[-1]+dT
     #determine the indices
-    indices = np.zeros(nX,dtype=int64)
+    indices = np.zeros(nX,dtype=np.int64)
     for iX in range(nX): indices[iX] = int((T[iX]-TMin)/dT)
     #determine cp
     cp = np.zeros(nX)
