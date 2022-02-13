@@ -72,5 +72,22 @@ For a breakdown of the test coverage, run from the project directory
     coverage html
 
 This will create an HTML report, which can be explored by a browser.
+
+## Citation
+To cite StanShock, please refer the following article:
+
+```
+@article{stanshock2020,
+    Author = {Grogan, K. and Ihme, M.},
+    Title = {StanShock: a gas-dynamic model for shock tube simulations with non-ideal effects and chemical kinetics},
+    Journal = {Shock Waves},
+    Year = {2020},
+    Volume = {30},
+    Number = {4},
+    Pages = {425--438},
+    Doi = {10.1007/s00193-019-00935-x},
+}
+```
 ## Contact
-For timely responses, please report any issues or bugs to kevin.p.grogan@gmail.com. 
+Please report any issues to the GitHub [site](https://github.com/IhmeGroup/StanShock). 
+If you are interested in contributing or collaborating, please contact kevin.p.grogan@gmail.com.
