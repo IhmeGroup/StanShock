@@ -17,13 +17,17 @@
     You should have received a copy of the GNU Lesser General Public License
     along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 '''
-from StanShock.stanShock import stanShock
+import os
+from typing import Optional
+import time
+
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-import time
 import cantera as ct
 import imageio
+
+from StanShock.stanShock import stanShock
 
 
 #=============================================================================
@@ -33,7 +37,7 @@ def getPressureData(fileName):
     ==========================================================================
     This function returns the formatted pressure vs time data
         Inputs:
-            fileNamefile name of csv data
+            fileName = name of csv data
         Outputs: 
              t = time [s]
              p = pressure [Pa]
@@ -58,10 +62,12 @@ def getPressureData(fileName):
     return (t,p)
 
 
-if __name__ == "__main__":
+def main(data_filename: str = "data/validation/case4.png",
+         mech_filename: str = "data/mechanisms/N2O2HeAr.xml",
+         show_results: bool = True,
+         results_location: Optional[str] = None) -> None:
     #=============================================================================
     #provided condtions for Case4
-    fileName = "case4.png"
     T1 = T4 = 292.05
     p1 = 390.0*133.322
     p4 = 82.0*6894.76*0.9
@@ -79,9 +85,8 @@ if __name__ == "__main__":
     #Set up gasses and determine the initial pressures
     u1 = 0.0;
     u4 = 0.0; #initially 0 velocity
-    mech="N2O2HeAr.xml"
-    gas1 = ct.Solution(mech)
-    gas4 = ct.Solution(mech)
+    gas1 = ct.Solution(mech_filename)
+    gas4 = ct.Solution(mech_filename)
     T4 = T1; #assumed
     gas1.TPX = T1,p1,"O2:0.21,AR:0.79"
     gas4.TPX = T4,p4,"HE:0.25,N2:0.75"
@@ -100,8 +105,8 @@ if __name__ == "__main__":
         nX = x.shape[0]
         return DDriven*np.ones(nX)
     def DInner(x):
-            diameter = np.interp(x,xInterp,dInterp)
-            return diameter
+        diameter = np.interp(x,xInterp,dInterp)
+        return diameter
     def dDOuterdx(x): return np.zeros(nX)
     def dDInnerdx(x):
         dDiameterdx = np.interp(x,xInterp[:-1],dDInterpdxInterp)
@@ -115,14 +120,14 @@ if __name__ == "__main__":
     state1 = (gas1,u1)
     state4 = (gas4,u4)
     ssbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       outputEvery=100,
-                       includeBoundaryLayerTerms=True,
-                       Tw=T1, #assume wall temperature is in thermal eq. with gas
-                       DInner= DInner,
-                       DOuter= DOuter,
-                       dlnAdx=dlnAdx)
+                     boundaryConditions=boundaryConditions,
+                     cfl=.9,
+                     outputEvery=100,
+                     includeBoundaryLayerTerms=True,
+                     Tw=T1, #assume wall temperature is in thermal eq. with gas
+                     DInner= DInner,
+                     DOuter= DOuter,
+                     dlnAdx=dlnAdx)
     ssbl.addProbe(max(ssbl.x)) #end wall probe
     ssbl.addXTDiagram("p")
     ssbl.addXTDiagram("T")
@@ -161,14 +166,14 @@ if __name__ == "__main__":
     gas1.TP = T1,p1
     gas4.TP = T4,p4
     ssnbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       outputEvery=100,
-                       includeBoundaryLayerTerms=False,
-                       Tw=T1, #assume wall temperature is in thermal eq. with gas
-                       DInner= DInner,
-                       DOuter= DOuter,
-                       dlnAdx=dlnAdx)
+                      boundaryConditions=boundaryConditions,
+                      cfl=.9,
+                      outputEvery=100,
+                      includeBoundaryLayerTerms=False,
+                      Tw=T1, #assume wall temperature is in thermal eq. with gas
+                      DInner= DInner,
+                      DOuter= DOuter,
+                      dlnAdx=dlnAdx)
     ssnbl.addProbe(max(ssnbl.x)) #end wall probe
     ssnbl.addXTDiagram("p")
     ssnbl.addXTDiagram("T")
@@ -203,7 +208,7 @@ if __name__ == "__main__":
     print("The process took ", t1-t0)
 
     #import shock tube data
-    tExp, pExp = getPressureData(fileName)
+    tExp, pExp = getPressureData(data_filename)
     timeDifference = (18.6-6.40)/1000.0 #difference between the test data and simulation times
     tExp+=timeDifference
 
@@ -220,4 +225,19 @@ if __name__ == "__main__":
     plt.ylabel("$p\ [\mathrm{bar}]$")
     plt.legend(loc="lower right")
     plt.tight_layout()
-    plt.show()
+    if show_results:
+        plt.show()
+
+    if results_location is not None:
+        np.savez(
+            os.path.join(results_location, "case4.npz"),
+            pressure_with_boundary_layer=ssbl.probes[0].p,
+            pressure_without_boundary_layer=ssnbl.probes[0].p,
+            time_with_boundary_layer=ssbl.probes[0].t,
+            time_without_boundary_layer=ssnbl.probes[0].t
+        )
+        plt.savefig(os.path.join(results_location, "case4.png"))
+
+
+if __name__ == "__main__":
+    main()

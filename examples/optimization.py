@@ -17,16 +17,22 @@
     You should have received a copy of the GNU Lesser General Public License
     along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 '''
-from StanShock.stanShock import stanShock, smoothingFunction, dSFdx
+import os
+from typing import Optional
+import time
+
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-import time
 import cantera as ct
-from scipy.optimize import newton    
+from scipy.optimize import newton
+
+from StanShock.stanShock import stanShock, smoothingFunction, dSFdx
 
 
-if __name__ == "__main__":
+def main(mech_filename: str = "data/mechanisms/HeliumArgon.xml",
+         show_results: bool = True,
+         results_location: Optional[str] = None) -> None:
     #parameters
     fontsize = 12
     tFinal = 7.5e-3
@@ -58,25 +64,24 @@ if __name__ == "__main__":
 
     #compute the gas dynamics
     def res(Ms1):
-        return p5/p1-((2.0*g1*Ms1**2.0-(g1-1.0))/(g1+1.0))\
-                    *((-2.0*(g1-1.0)+Ms1**2.0*(3.0*g1-1.0))/(2.0+Ms1**2.0*(g1-1.0)))
+        return p5/p1-((2.0*g1*Ms1**2.0-(g1-1.0))/(g1+1.0)) \
+               *((-2.0*(g1-1.0)+Ms1**2.0*(3.0*g1-1.0))/(2.0+Ms1**2.0*(g1-1.0)))
     Ms1 = newton(res,2.0)
     Ms1*= MachReduction
-    T5oT1 = (2.0*(g1-1.0)*Ms1**2.0+3.0-g1)\
-           *((3.0*g1-1.0)*Ms1**2.0-2.0*(g1-1.0))\
-           /((g1+1.0)**2.0*Ms1**2.0)
+    T5oT1 = (2.0*(g1-1.0)*Ms1**2.0+3.0-g1) \
+            *((3.0*g1-1.0)*Ms1**2.0-2.0*(g1-1.0)) \
+            /((g1+1.0)**2.0*Ms1**2.0)
     T1 = T5/T5oT1
     a1oa4 = np.sqrt(W4/W1)
-    p4op1 = (1.0+2.0*g1/(g1+1.0)*(Ms1**2.0-1.0))\
-           *(1.0-(g4-1.0)/(g4+1.0)*a1oa4*(Ms1-1.0/Ms1))**(-2.0*g4/(g4-1.0))
+    p4op1 = (1.0+2.0*g1/(g1+1.0)*(Ms1**2.0-1.0)) \
+            *(1.0-(g4-1.0)/(g4+1.0)*a1oa4*(Ms1-1.0/Ms1))**(-2.0*g4/(g4-1.0))
     p4 = p1*p4op1
 
     #set up the gasses
     u1 = 0.0;
     u4 = 0.0; #initially 0 velocity
-    mech="HeliumArgon.xml"
-    gas1 = ct.Solution(mech)
-    gas4 = ct.Solution(mech)
+    gas1 = ct.Solution(mech_filename)
+    gas4 = ct.Solution(mech_filename)
     T4 = T1; #assumed
     gas1.TPX = T1,p1,"AR:1"
     gas4.TPX = T4,p4,"HE:1"
@@ -86,13 +91,13 @@ if __name__ == "__main__":
     state1 = (gas1,u1)
     state4 = (gas4,u4)
     ss = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       outputEvery=100,
-                       includeBoundaryLayerTerms=True,
-                       Tw=T1, #assume wall temperature is in thermal eq. with gas
-                       DOuter= DOuter,
-                       dlnAdx=dlnAdx)
+                   boundaryConditions=boundaryConditions,
+                   cfl=.9,
+                   outputEvery=100,
+                   includeBoundaryLayerTerms=True,
+                   Tw=T1, #assume wall temperature is in thermal eq. with gas
+                   DOuter= DOuter,
+                   dlnAdx=dlnAdx)
 
     #Solve
     t0 = time.perf_counter()
@@ -108,14 +113,14 @@ if __name__ == "__main__":
     gas1.TPX = T1,p1,"AR:1"
     gas4.TPX = T4,p4,"HE:1"
     ss = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       outputEvery=100,
-                       includeBoundaryLayerTerms=True,
-                       Tw=T1, #assume wall temperature is in thermal eq. with gas
-                       DOuter= DOuter,
-                       DInner= ss.DInner,
-                       dlnAdx=ss.dlnAdx)
+                   boundaryConditions=boundaryConditions,
+                   cfl=.9,
+                   outputEvery=100,
+                   includeBoundaryLayerTerms=True,
+                   Tw=T1, #assume wall temperature is in thermal eq. with gas
+                   DOuter= DOuter,
+                   DInner= ss.DInner,
+                   dlnAdx=ss.dlnAdx)
     ss.addXTDiagram("p")
     ss.addXTDiagram("T")
     ss.addProbe(max(ss.x)) #end wall probe
@@ -135,13 +140,13 @@ if __name__ == "__main__":
     gas1.TPX = T1,p1,"AR:1"
     gas4.TPX = T4,p4,"HE:1"
     ss = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       outputEvery=100,
-                       includeBoundaryLayerTerms=True,
-                       Tw=T1, #assume wall temperature is in thermal eq. with gas
-                       DOuter= DOuter,
-                       dlnAdx= dlnAdx)
+                   boundaryConditions=boundaryConditions,
+                   cfl=.9,
+                   outputEvery=100,
+                   includeBoundaryLayerTerms=True,
+                   Tw=T1, #assume wall temperature is in thermal eq. with gas
+                   DOuter= DOuter,
+                   dlnAdx= dlnAdx)
     ss.addXTDiagram("p")
     ss.addXTDiagram("T")
     ss.addProbe(max(ss.x)) #end wall probe
@@ -170,3 +175,22 @@ if __name__ == "__main__":
     plt.ylabel("$D\ [\mathrm{m}]$")
     plt.legend(loc="best")
     plt.tight_layout()
+    if show_results:
+        plt.show()
+
+    if results_location is not None:
+        np.savez(
+            os.path.join(results_location, "optimization.npz"),
+            pressure_with_insert=pInsert,
+            pressure_without_insert=pNoInsert,
+            insert_diameter=DInnerInsert,
+            shock_tube_diameter=DOuterInsert,
+            position=xInsert,
+            time_with_insert=tInsert,
+            time_without_insert=tNoInsert
+        )
+        plt.savefig(os.path.join(results_location, "optimization.png"))
+
+
+if __name__ == "__main__":
+    main()

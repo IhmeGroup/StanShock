@@ -17,64 +17,25 @@
     You should have received a copy of the GNU Lesser General Public License
     along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 '''
-from StanShock.stanShock import stanShock, smoothingFunction, dSFdx
+import os
+from typing import Optional
+
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
 import time
 import cantera as ct
 
-def isFloat(value):
-    '''
-    function isfloat
-    ==========================================================================
-    hacky python way to detect floats
-    ''' 
-    try:
-        float(value)
-        return True
-    except ValueError:
-        return False
-
-def loadData(fileName):
-    '''
-    function loadData
-    ==========================================================================
-    This function loads the raw data contained in the csv file and initiates
-    a list of dictionaries containg the data
-        fileName: file name of csv data
-        Return: list of dictionaries for each example
-    '''
-    import csv
-    rawData=[]
-    with open(fileName) as csvFile:
-        reader = csv.DictReader(csvFile)
-        for dictRow in reader:
-            cleanDictRow = {key:(float(dictRow[key]) if isFloat(dictRow[key]) else dictRow[key]) for key in dictRow}
-            rawData.append(cleanDictRow)
-    return rawData
-def getPressureData(fileName):
-    '''
-    function getPressureData
-    ==========================================================================
-    This function returns the formatted pressure vs time data
-        Inputs:
-            fileNamefile name of csv data
-        Outputs: 
-             t = time [s]
-             p = pressure [Pa]
-    '''   
-    rawData = loadData(fileName)
-    t = np.array([example["Time (s)"] for example in rawData])
-    p = np.array([example["Pressure (atm)"] for example in rawData])
-    p *= ct.one_atm
-    return (t,p)
+from StanShock.stanShock import stanShock, smoothingFunction, dSFdx
+from StanShock.utils import getPressureData
 
 
-if __name__ == "__main__":
+def main(data_filename: str = "data/validation/case3.csv",
+         mech_filename: str = "data/mechanisms/Nitrogen.xml",
+         show_results: bool = True,
+         results_location: Optional[str] = None) -> None:
     #=============================================================================
     #provided condtions for case 3
-    fileName = "case3.csv"
     Ms = 2.409616
     T1 = 292.25
     p1 = 1999.83552
@@ -98,9 +59,8 @@ if __name__ == "__main__":
     #Set up gasses and determine the initial pressures
     u1 = 0.0;
     u4 = 0.0; #initially 0 velocity
-    mech="Nitrogen.xml"
-    gas1 = ct.Solution(mech)
-    gas4 = ct.Solution(mech)
+    gas1 = ct.Solution(mech_filename)
+    gas4 = ct.Solution(mech_filename)
     T4 = T1; #assumed
     gas1.TP = T1,p1
     gas4.TP = T4,p1 #use p1 as a place holder
@@ -122,11 +82,11 @@ if __name__ == "__main__":
     DeltaSmoothingFunction = (xUpper-xLower)/float(nX)*10.0
     def DOuter(x): return DDriven*np.ones(nX)
     def DInner(x):
-            diameter = np.zeros(nX)
-            diameter+= smoothingFunction(x,xLower+LInnerInsert,DeltaSmoothingFunction,DInnerInsert,0.0)
-            diameter+= smoothingFunction(x,xLower+LOuterInsert,DeltaSmoothingFunction,DOuterInsertFront-DInnerInsert,0.0)
-            diameter+= smoothingFunction(x,xLower+LOuterInsert/2.0,LOuterInsert,DOuterInsertBack-DOuterInsertFront,0.0)
-            return diameter
+        diameter = np.zeros(nX)
+        diameter+= smoothingFunction(x,xLower+LInnerInsert,DeltaSmoothingFunction,DInnerInsert,0.0)
+        diameter+= smoothingFunction(x,xLower+LOuterInsert,DeltaSmoothingFunction,DOuterInsertFront-DInnerInsert,0.0)
+        diameter+= smoothingFunction(x,xLower+LOuterInsert/2.0,LOuterInsert,DOuterInsertBack-DOuterInsertFront,0.0)
+        return diameter
     def dDOuterdx(x): return np.zeros(nX)
     def dDInnerdx(x):
         dDiameterdx = np.zeros(nX)
@@ -144,14 +104,14 @@ if __name__ == "__main__":
     state1 = (gas1,u1)
     state4 = (gas4,u4)
     ssbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       outputEvery=100,
-                       includeBoundaryLayerTerms=True,
-                       Tw=T1, #assume wall temperature is in thermal eq. with gas
-                       DInner= DInner,
-                       DOuter= DOuter,
-                       dlnAdx=dlnAdx)
+                     boundaryConditions=boundaryConditions,
+                     cfl=.9,
+                     outputEvery=100,
+                     includeBoundaryLayerTerms=True,
+                     Tw=T1, #assume wall temperature is in thermal eq. with gas
+                     DInner= DInner,
+                     DOuter= DOuter,
+                     dlnAdx=dlnAdx)
     ssbl.addProbe(max(ssbl.x)) #end wall probe
 
     #Solve
@@ -166,13 +126,13 @@ if __name__ == "__main__":
     gas1.TP = T1,p1
     gas4.TP = T4,p4
     ssnbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       outputEvery=100,
-                       includeBoundaryLayerTerms=False,
-                       DInner= DInner,
-                       DOuter= DOuter,
-                       dlnAdx=dlnAdx)
+                      boundaryConditions=boundaryConditions,
+                      cfl=.9,
+                      outputEvery=100,
+                      includeBoundaryLayerTerms=False,
+                      DInner= DInner,
+                      DOuter= DOuter,
+                      dlnAdx=dlnAdx)
     ssnbl.addProbe(max(ssnbl.x)) #end wall probe
 
     #Solve
@@ -182,7 +142,7 @@ if __name__ == "__main__":
     print("The process took ", t1-t0)
 
     #import shock tube data
-    tExp, pExp = getPressureData(fileName)
+    tExp, pExp = getPressureData(data_filename)
     timeDifference = (12.211-8.10)/1000.0 #difference between the test data and simulation times
     tExp+=timeDifference
 
@@ -199,4 +159,20 @@ if __name__ == "__main__":
     plt.ylabel("$p\ [\mathrm{bar}]$")
     plt.legend(loc="lower right")
     plt.tight_layout()
-    plt.show()
+    if show_results:
+        plt.show()
+
+    if results_location is not None:
+        np.savez(
+            os.path.join(results_location, "case3.npz"),
+            pressure_with_boundary_layer=ssbl.probes[0].p,
+            pressure_without_boundary_layer=ssnbl.probes[0].p,
+            time_with_boundary_layer=ssbl.probes[0].t,
+            time_without_boundary_layer=ssnbl.probes[0].t
+        )
+        plt.savefig(os.path.join(results_location, "case3.png"))
+
+
+
+if __name__ == "__main__":
+    main()

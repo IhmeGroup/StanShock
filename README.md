@@ -28,23 +28,23 @@ The requirements are listed in the _requirements.txt_ file. One may install thes
 `python -m pip install -r requirements.txt`
 
 ## Usage
-Included are six examples:
+Included are six examples in the _examples_ folder:
 ```
-laminarFlame (laminar flame test case of stoichiometric H2/Air)
-optimization (driver insert optimization)
-validationCases (four validation test cases)
-│─── case1 (baseline)
-│─── case2 (step change in driver/driven area)
-│─── case3 (driver insert case)
-│─── case4 (disparate driver/driven mixtures)
+laminarFlame.py (laminar flame test case of stoichiometric H2/Air)
+optimization.py (driver insert optimization)
+validation (four validation test cases)
+│─── case1.py (baseline)
+│─── case2.py (step change in driver/driven area)
+│─── case3.py (driver insert case)
+│─── case4.py (disparate driver/driven mixtures)
 ```
 
 These may be run from their containing directories. 
 Ensure that your _PYTHONPATH_ environment variable is set appropriately.
-For example, from the _validationCases/case1_ directory
+For example, from the project directory
 
-    export PYTHONPATH=../../
-    python case1.py
+    export PYTHONPATH=.
+    python examples/validation/case1.py
 
 Note that the matplotlib plots in these examples use LaTeX to render the fonts. 
 See [here](https://matplotlib.org/stable/tutorials/text/usetex.html) for more information on the requirements.

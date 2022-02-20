@@ -17,43 +17,46 @@
     You should have received a copy of the GNU Lesser General Public License
     along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
 '''
+import os
+from typing import Optional
+
 from StanShock.stanShock import stanShock
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-from ignDelay import flameSpeed
+from StanShock.ignDelay import flameSpeed
 import time
 import cantera as ct
 
-if __name__ == "__main__":
+
+def main(mech_filename: str = "data/mechanisms/Hong.xml",
+         show_results: bool = True,
+         results_location: Optional[str] = None) -> None:
     #user parameters
     TU=300.0
     p = 1e5
-    mech = "Hong.xml"
-    dt=1e-3
     estFlameThickness=1e-2
     ntFlowThrough=.1
-    eps=0.05
     fontsize=12
     f = 0.1 #factor to reduce Cantera domain
 
 
     #find the initial state of the fluids
-    gas = ct.Solution(mech)
+    gas = ct.Solution(mech_filename)
     unburnedState = TU,p,"H2:2,O2:1,N2:3.76"
     gas.TPX = unburnedState
 
     #get the flame thickness
-    flameSpeed, flame = flameSpeed(gas,estFlameThickness,returnFlame=True)
+    _, flame = flameSpeed(gas,estFlameThickness,returnFlame=True)
     TU, TB = flame.T[0] ,flame.T[-1]
     flameThickness=(TB-TU)/max(np.gradient(flame.T,flame.grid))
 
     #get flame parameters
-    gasUnburned = ct.Solution(mech)
+    gasUnburned = ct.Solution(mech_filename)
     gasUnburned.TPY = flame.T[0], flame.P, flame.Y[:,0]
     uUnburned = flame.velocity[0]
     unburnedState = gasUnburned, uUnburned
-    gasBurned = ct.Solution(mech)
+    gasBurned = ct.Solution(mech_filename)
     gasBurned.TPY = flame.T[-1], flame.P, flame.Y[:,-1]
     uBurned = flame.velocity[-1]
     burnedState = gasBurned, uBurned
@@ -68,11 +71,11 @@ if __name__ == "__main__":
     geometry=(nX,xLower,xUpper,(xUpper+xLower)/2.0)
     boundaryConditions = (gasUnburned.density,uUnburned,None,gasUnburned.Y),(None,None,gasBurned.P,None)
     ss = stanShock(gas,initializeRiemannProblem=(unburnedState,burnedState,geometry),
-                       boundaryConditions=boundaryConditions,
-                       cfl=.9,
-                       reacting=True,
-                       includeDiffusion=True,
-                       outputEvery=10)
+                   boundaryConditions=boundaryConditions,
+                   cfl=.9,
+                   reacting=True,
+                   includeDiffusion=True,
+                   outputEvery=10)
 
     #interpolate flame solution
     ss.r = np.interp(ss.x,flame.grid,flame.density)
@@ -112,3 +115,17 @@ if __name__ == "__main__":
     plt.plot((ss.x-xCenter)/flameThickness,ss.Y[:,iH2],'b--s')
     plt.xlabel("$x/\delta_\mathrm{F}$")
     plt.legend(loc="best")
+    if show_results:
+        plt.show()
+
+    if results_location is not None:
+        np.savez(
+            os.path.join(results_location, "laminarFlame.npz"),
+            position=ss.x,
+            temperature=ss.thermoTable.getTemperature(ss.r,ss.p,ss.Y),
+        )
+        plt.savefig(os.path.join(results_location, "laminarFlame.png"))
+
+
+if __name__ == "__main__":
+    main()
