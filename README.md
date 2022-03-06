@@ -1,8 +1,6 @@
 # StanShock
 
-StanShock is a quasi-1D gas dynamics solver designed model shock tube experiments. 
-
-The provided version stanShock has the following capabilities:
+StanShock is a quasi-1D gas dynamics solver designed model shock tube experiments. StanShock has the following capabilities:
 
 	Variable cross-sectional area
 	Boundary layer modeling
