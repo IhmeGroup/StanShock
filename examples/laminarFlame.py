@@ -24,7 +24,6 @@ from StanShock.stanShock import stanShock
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
-from StanShock.ignDelay import flameSpeed
 import time
 import cantera as ct
 
@@ -125,6 +124,40 @@ def main(mech_filename: str = "data/mechanisms/Hong.xml",
             temperature=ss.thermoTable.getTemperature(ss.r,ss.p,ss.Y),
         )
         plt.savefig(os.path.join(results_location, "laminarFlame.png"))
+
+
+def flameSpeed(gas,flameThickness,returnFlame=False):
+    '''
+    Function flameSpeed
+    ======================================================================
+    This function returns the flame speed for a gas. The cantera implementation
+    is quite unstable. Therefore, this function is not very useful
+        gas: cantera phase object at the desired state
+        flameThickness: a guess on the flame thickness
+        return: Sl
+    '''
+    #solution parameters
+    width = 5.0*flameThickness  # m
+    loglevel = 1  # amount of diagnostic output (0 to 8)
+    # Flame object
+    try:
+        f = ct.FreeFlame(gas, width=width)
+    except:
+        f = ct.FreeFlame(gas)
+    f.set_refine_criteria(ratio=3, slope=0.06, curve=0.12)
+    f.show_solution()
+    f.transport_model = 'Mix'
+    try:
+        f.solve(loglevel=loglevel, auto=True)
+    except:
+        f.solve(loglevel=loglevel)
+    f.show_solution()
+    print('mixture-averaged flamespeed = {0:7f} m/s'.format(f.velocity[0]))
+    #f.show_solution()
+    if returnFlame:
+        return f.velocity[0], f
+    else:
+        return f.velocity[0]
 
 
 if __name__ == "__main__":
