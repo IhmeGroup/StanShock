@@ -1,0 +1,86 @@
+generator: ctml2yaml
+cantera-version: 2.6.0
+date: Wed, 21 Sep 2022 11:33:46 -0400
+input-files: [N2O2HeAr.xml]
+
+phases:
+- name: LiC1
+  elements: [Ar, He, N, O]
+  species: [AR, HE, N2, O2]
+  thermo: ideal-gas
+  transport: mixture-averaged
+  state: {T: 300.0 K, P: 1.01325e+05 Pa}
+
+species:
+- name: AR
+  composition: {Ar: 1.0}
+  note: '120186'
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.366001]
+    - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.366001]
+  transport:
+    model: gas
+    geometry: atom
+    well-depth: 136.5
+    diameter: 3.33
+    dipole: 0.0
+    polarizability: 0.0
+    rotational-relaxation: 0.0
+- name: HE
+  composition: {He: 1.0}
+  note: '120186'
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 0.9153488]
+    - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 0.9153489]
+  transport:
+    model: gas
+    geometry: atom
+    well-depth: 10.2
+    diameter: 2.576
+    dipole: 0.0
+    polarizability: 0.0
+    rotational-relaxation: 0.0
+- name: O2
+  composition: {O: 2.0}
+  note: '121386'
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [3.212936, 1.127486e-03, -5.75615e-07, 1.313877e-09, -8.768554e-13, -1005.249,
+      6.034738]
+    - [3.697578, 6.135197e-04, -1.258842e-07, 1.775281e-11, -1.136435e-15, -1233.93,
+      3.189166]
+  transport:
+    model: gas
+    geometry: linear
+    well-depth: 107.4
+    diameter: 3.458
+    dipole: 0.0
+    polarizability: 1.6
+    rotational-relaxation: 3.8
+- name: N2
+  composition: {N: 2.0}
+  note: '121286'
+  thermo:
+    model: NASA7
+    temperature-ranges: [300.0, 1000.0, 5000.0]
+    data:
+    - [3.298677, 1.40824e-03, -3.963222e-06, 5.641515e-09, -2.444855e-12, -1020.9,
+      3.950372]
+    - [2.92664, 1.487977e-03, -5.684761e-07, 1.009704e-10, -6.753351e-15, -922.7977,
+      5.980528]
+  transport:
+    model: gas
+    geometry: linear
+    well-depth: 97.53
+    diameter: 3.621
+    dipole: 0.0
+    polarizability: 1.76
+    rotational-relaxation: 4.0
