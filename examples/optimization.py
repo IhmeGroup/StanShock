@@ -30,7 +30,7 @@ from scipy.optimize import newton
 from StanShock.stanShock import stanShock, smoothingFunction, dSFdx
 
 
-def main(mech_filename: str = "data/mechanisms/HeliumArgon.xml",
+def main(mech_filename: str = "data/mechanisms/HeliumArgon.yaml",
          show_results: bool = True,
          results_location: Optional[str] = None) -> None:
     #parameters

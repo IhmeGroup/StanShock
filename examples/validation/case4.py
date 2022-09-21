@@ -63,7 +63,7 @@ def getPressureData(fileName):
 
 
 def main(data_filename: str = "data/validation/case4.png",
-         mech_filename: str = "data/mechanisms/N2O2HeAr.xml",
+         mech_filename: str = "data/mechanisms/N2O2HeAr.yaml",
          show_results: bool = True,
          results_location: Optional[str] = None) -> None:
     #=============================================================================

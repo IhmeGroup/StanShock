@@ -10,7 +10,7 @@ getCp = getCp.__wrapped__
 
 
 class TestThermo(unittest.TestCase):
-    _mech = "test/resources/HeliumArgon.xml"
+    _mech = "test/resources/HeliumArgon.yaml"
 
     def test_table_computes_correct_temperatures(self):
         gas = ct.Solution(self._mech)

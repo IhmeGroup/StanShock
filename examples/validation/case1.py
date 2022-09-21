@@ -31,7 +31,7 @@ from StanShock.utils import getPressureData
 
 
 def main(data_filename: str = "data/validation/case1.csv",
-         mech_filename: str = "data/mechanisms/Nitrogen.xml",
+         mech_filename: str = "data/mechanisms/Nitrogen.yaml",
          show_results: bool = True,
          results_location: Optional[str] = None) -> None:
     # =============================================================================

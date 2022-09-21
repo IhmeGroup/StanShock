@@ -28,7 +28,7 @@ import time
 import cantera as ct
 
 
-def main(mech_filename: str = "data/mechanisms/Hong.xml",
+def main(mech_filename: str = "data/mechanisms/Hong.yaml",
          show_results: bool = True,
          results_location: Optional[str] = None) -> None:
     #user parameters
