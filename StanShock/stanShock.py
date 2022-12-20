@@ -646,88 +646,13 @@ class stanShock(object):
         initialization of the object with default values. The keyword arguments
         allow the user to initialize the state
         '''
-        #######################################################################
-        def initializeRiemannProblem(self,leftState,rightState,geometry): 
-            '''
-            Method: initializeRiemannProblem
-            ----------------------------------------------------------------------
-            This helper function initializes a Riemann Problem
-                inputs:
-                    leftState = a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
-                    rightState =  a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
-                    geometry = a tuple containing the relevant geometry for the 
-                               problem: (numberCells,xMinimum,xMaximum,shockLocation)
-            '''
-            if leftState[0].species_names!=gas.species_names or \
-              rightState[0].species_names!=gas.species_names: 
-                  raise Exception("Inputed gasses must be the same as the initialized gas.")
-            self.n=geometry[0]
-            self.x=np.linspace(geometry[1],geometry[2],self.n)
-            self.dx = self.x[1]-self.x[0]
-            #initialization for left state
-            self.r=np.ones(self.n)*leftState[0].density
-            self.u=np.ones(self.n)*leftState[1]
-            self.p=np.ones(self.n)*leftState[0].P
-            self.Y=np.zeros((self.n,gas.n_species)) 
-            for kSp in range(self.__nsp): self.Y[:,kSp]=leftState[0].Y[kSp]
-            self.gamma=np.ones(self.n)*(leftState[0].cp/leftState[0].cv)
-            #right state
-            index=self.x>=geometry[3]
-            self.r[index]=rightState[0].density
-            self.u[index]=rightState[1]
-            self.p[index]=rightState[0].P
-            for kSp in range(self.__nsp): self.Y[index,kSp]=rightState[0].Y[kSp]
-            self.gamma[index]=rightState[0].cp/rightState[0].cv  
-            self.F = np.ones_like(self.r)
-        #######################################################################
-        def initializeDiffuseInterface(self,leftState,rightState,geometry,Delta): 
-            '''
-            Method: initializeDiffuseInterface
-            ----------------------------------------------------------------------
-            This helper function initializes an interface smoothed over a distance
-                inputs:
-                    leftState = a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
-                    rightState =  a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
-                    geometry = a tuple containing the relevant geometry for the 
-                               problem: (numberCells,xMinimum,xMaximum,shockLocation)
-                    Delta =    distance over which the interface is smoothed linearly
-            '''
-            if leftState[0].species_names!=gas.species_names or \
-              rightState[0].species_names!=gas.species_names: 
-                  raise Exception("Inputed gasses must be the same as the initialized gas.")
-            self.n=geometry[0]
-            self.x=np.linspace(geometry[1],geometry[2],self.n)
-            self.dx = self.x[1]-self.x[0]
-            xShock = geometry[3]
-            leftGas = leftState[0]
-            uLeft = leftState[1]
-            gammaLeft = leftGas.cp/leftGas.cv
-            rightGas = rightState[0]
-            uRight = rightState[1]
-            gammaRight = rightGas.cp/rightGas.cv
-            #initialization for left state
-            self.r = smoothingFunction(self.x,xShock,Delta,leftGas.density,rightGas.density)
-            self.u = smoothingFunction(self.x,xShock,Delta,uLeft,uRight)
-            self.p = smoothingFunction(self.x,xShock,Delta,leftGas.P,rightGas.P)
-            self.Y=np.zeros((self.n,self.gas.n_species)) 
-            for kSp in range(self.__nsp): self.Y[:,kSp]=smoothingFunction(self.x,xShock,Delta,leftGas.Y[kSp],rightGas.Y[kSp])
-            self.gamma=smoothingFunction(self.x,xShock,Delta,gammaLeft,gammaRight)
-            self.F = np.ones_like(self.r)
-        #########################################################################
+
         #initilize the class
         self.cfl=1.0 #stability condition
         self.dx=1.0 #grid spacing
         self.n=10  #grid size
         self.boundaryConditions=['outflow','outflow']
-        self.x=np.linspace(0.0,self.dx*(self.n-1),self.n) 
+        self.x=np.linspace(0.0,self.dx*(self.n-1),self.n)
         self.gas = gas #cantera solution object for the gas
         self.r=np.ones(self.n)*gas.density #density
         self.u=np.zeros(self.n) #velocity
@@ -756,15 +681,104 @@ class stanShock(object):
         self.inReactingRegion = lambda x,t: True #the reacting region of the shock tube. 
         self.includeDiffusion= False #exclude diffusion
         self.thickening=None
+
         #overwrite the default data
         for key in kwargs:
-            if key in self.__dict__.keys(): self.__dict__[key]=kwargs[key]
-            if key=='initializeRiemannProblem':
-                initializeRiemannProblem(self,kwargs[key][0],kwargs[key][1],kwargs[key][2])
-            if key=='initializeDiffuseInterface':
-                initializeDiffuseInterface(self,kwargs[key][0],kwargs[key][1],kwargs[key][2],kwargs[key][3])
+            if key in self.__dict__.keys():
+                self.__dict__[key]=kwargs[key]
         if not self.n==len(self.x)==len(self.r)==len(self.u)==len(self.p)==len(self.gamma):
             raise Exception("Initialization Error")
+
+    @classmethod
+    def riemann_problem(cls, gas, leftState, rightState, geometry, **kwargs):
+        """
+        This helper function initializes a Riemann Problem
+            inputs:
+                leftState = a tuple containing the Cantera solution object at the
+                           the desired thermodynamic state and the velocity:
+                           (canterSolution,u)
+                rightState =  a tuple containing the Cantera solution object at the
+                           the desired thermodynamic state and the velocity:
+                           (canterSolution,u)
+                geometry = a tuple containing the relevant geometry for the
+                           problem: (numberCells,xMinimum,xMaximum,shockLocation)
+        """
+        
+        ss = cls(gas, **kwargs)
+
+        if leftState[0].species_names != gas.species_names or \
+                rightState[0].species_names != gas.species_names:
+            raise Exception("Inputed gasses must be the same as the initialized gas.")
+        
+        ss.n = geometry[0]
+        ss.x = np.linspace(geometry[1], geometry[2], ss.n)
+        ss.dx = ss.x[1] - ss.x[0]
+
+        # initialization for left state
+        ss.r = np.ones(ss.n) * leftState[0].density
+        ss.u = np.ones(ss.n) * leftState[1]
+        ss.p = np.ones(ss.n) * leftState[0].P
+        ss.Y = np.zeros((ss.n, gas.n_species))
+        for kSp in range(ss.__nsp):
+            ss.Y[:, kSp] = leftState[0].Y[kSp]
+        ss.gamma = np.ones(ss.n) * (leftState[0].cp / leftState[0].cv)
+
+        # right state
+        index = ss.x >= geometry[3]
+        ss.r[index] = rightState[0].density
+        ss.u[index] = rightState[1]
+        ss.p[index] = rightState[0].P
+        for kSp in range(ss.__nsp):
+            ss.Y[index, kSp] = rightState[0].Y[kSp]
+        ss.gamma[index] = rightState[0].cp / rightState[0].cv
+        ss.F = np.ones_like(ss.r)
+
+        return ss
+
+    @classmethod
+    def diffuse_interface(cls, gas, leftState, rightState, geometry, Delta, **kwargs):
+        """
+        This helper function initializes an interface smoothed over a distance
+            inputs:
+                leftState = a tuple containing the Cantera solution object at the
+                           the desired thermodynamic state and the velocity:
+                           (canterSolution,u)
+                rightState =  a tuple containing the Cantera solution object at the
+                           the desired thermodynamic state and the velocity:
+                           (canterSolution,u)
+                geometry = a tuple containing the relevant geometry for the
+                           problem: (numberCells,xMinimum,xMaximum,shockLocation)
+                Delta =    distance over which the interface is smoothed linearly
+        """
+
+        ss = cls(gas, **kwargs)
+
+        if leftState[0].species_names != gas.species_names or \
+                rightState[0].species_names != gas.species_names:
+            raise Exception("Inputed gasses must be the same as the initialized gas.")
+
+        ss.n = geometry[0]
+        ss.x = np.linspace(geometry[1], geometry[2], ss.n)
+        ss.dx = ss.x[1] - ss.x[0]
+        xShock = geometry[3]
+        leftGas = leftState[0]
+        uLeft = leftState[1]
+        gammaLeft = leftGas.cp / leftGas.cv
+        rightGas = rightState[0]
+        uRight = rightState[1]
+        gammaRight = rightGas.cp / rightGas.cv
+
+        ss.r = smoothingFunction(ss.x, xShock, Delta, leftGas.density, rightGas.density)
+        ss.u = smoothingFunction(ss.x, xShock, Delta, uLeft, uRight)
+        ss.p = smoothingFunction(ss.x, xShock, Delta, leftGas.P, rightGas.P)
+        ss.Y = np.zeros((ss.n, ss.gas.n_species))
+        for kSp in range(ss.__nsp):
+            ss.Y[:, kSp] = smoothingFunction(ss.x, xShock, Delta, leftGas.Y[kSp], rightGas.Y[kSp])
+        ss.gamma = smoothingFunction(ss.x, xShock, Delta, gammaLeft, gammaRight)
+        ss.F = np.ones_like(ss.r)
+
+        return ss
+
 ##############################################################################
     class __probe(object):
         '''
