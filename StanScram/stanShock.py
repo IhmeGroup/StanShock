@@ -2,20 +2,21 @@
 # -*- coding: utf-8 -*-
 '''
     Copyright 2017 Kevin Grogan
+    Copyright 2024 Matthew Bonanni
 
-    This file is part of StanShock.
+    This file is part of StanScram.
 
-    StanShock is free software: you can redistribute it and/or modify
+    StanScram is free software: you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
     the Free Software Foundation, either version 3 of the License.
 
-    StanShock is distributed in the hope that it will be useful,
+    StanScram is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU Lesser General Public License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
-    along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
+    along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
 '''
 
 #necessary modules
@@ -631,12 +632,12 @@ class skinFriction(object):
         if np.any(Re>self.ReMax): raise Exception("Error: Reynolds number exceeds the maximum value of %f: skinFriction Table bounds must be adjusted" % (self.ReMax))
         return cf
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-class stanShock(object):
+class stanScram(object):
     '''
-    Class: stanShock
+    Class: stanScram
     --------------------------------------------------------------------------
     This is a class defined to encapsulate the data and methods used for the
-    1D gasdynamics solver stanShock.
+    1D gasdynamics solver stanScram.
     '''
 ##############################################################################
     def __init__(self,gas,**kwargs):
@@ -1267,7 +1268,7 @@ class stanShock(object):
         ----------------------------------------------------------------------
         This method advances the quasi-1D terms used to model area changes in 
         the shock tube. The client must supply the functions dlnAdt and dlnAdx
-        to the StanShock object.
+        to the StanScram object.
             inputs
                 dt=time step
         '''
@@ -1385,7 +1386,7 @@ class stanShock(object):
             return Nu
         #######################################################################
         if self.DOuter is None or self.Tw is None: 
-            raise Exception("stanShock improperly initialized for boundary layer terms")
+            raise Exception("stanScram improperly initialized for boundary layer terms")
         nX=len(self.x)
         if self.DInner is None:
             D = self.DOuter(self.x)

@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from StanShock.stanShock import LF, HLLC
+from StanScram.stanScram import LF, HLLC
 
 LF = LF.__wrapped__  # unwrap for coverage testing
 HLLC = HLLC.__wrapped__

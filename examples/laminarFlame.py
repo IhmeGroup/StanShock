@@ -2,25 +2,26 @@
 # -*- coding: utf-8 -*-
 '''
     Copyright 2017 Kevin Grogan
+    Copyright 2024 Matthew Bonanni
     
-    This file is part of StanShock.
+    This file is part of StanScram.
     
-    StanShock is free software: you can redistribute it and/or modify
+    StanScram is free software: you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
     the Free Software Foundation, either version 3 of the License.
     
-    StanShock is distributed in the hope that it will be useful,
+    StanScram is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU Lesser General Public License for more details.
     
     You should have received a copy of the GNU Lesser General Public License
-    along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
+    along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
 '''
 import os
 from typing import Optional
 
-from StanShock.stanShock import stanShock
+from StanScram.stanScram import stanScram
 import numpy as np
 import matplotlib as mpl
 from matplotlib import pyplot as plt
@@ -69,7 +70,7 @@ def main(mech_filename: str = "data/mechanisms/Hong.xml",
 
     geometry=(nX,xLower,xUpper,(xUpper+xLower)/2.0)
     boundaryConditions = (gasUnburned.density,uUnburned,None,gasUnburned.Y),(None,None,gasBurned.P,None)
-    ss = stanShock(gas,initializeRiemannProblem=(unburnedState,burnedState,geometry),
+    ss = stanScram(gas,initializeRiemannProblem=(unburnedState,burnedState,geometry),
                    boundaryConditions=boundaryConditions,
                    cfl=.9,
                    reacting=True,

@@ -3,7 +3,7 @@ import unittest
 import cantera as ct
 import numpy as np
 
-from StanShock.stanShock import thermoTable, getR, getCp
+from StanScram.stanScram import thermoTable, getR, getCp
 
 getR = getR.__wrapped__  # unwrap for coverage
 getCp = getCp.__wrapped__

@@ -2,20 +2,21 @@
 # -*- coding: utf-8 -*-
 '''
     Copyright 2017 Kevin Grogan
+    Copyright 2024 Matthew Bonanni
 
-    This file is part of StanShock.
+    This file is part of StanScram.
 
-    StanShock is free software: you can redistribute it and/or modify
+    StanScram is free software: you can redistribute it and/or modify
     it under the terms of the GNU Lesser General Public License as published by
     the Free Software Foundation, either version 3 of the License.
 
-    StanShock is distributed in the hope that it will be useful,
+    StanScram is distributed in the hope that it will be useful,
     but WITHOUT ANY WARRANTY; without even the implied warranty of
     MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
     GNU Lesser General Public License for more details.
 
     You should have received a copy of the GNU Lesser General Public License
-    along with StanShock.  If not, see <https://www.gnu.org/licenses/>.
+    along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
 '''
 import os
 from typing import Optional
@@ -26,8 +27,8 @@ from matplotlib import pyplot as plt
 import time
 import cantera as ct
 
-from StanShock.stanShock import stanShock, smoothingFunction, dSFdx
-from StanShock.utils import getPressureData
+from StanScram.stanScram import stanScram, smoothingFunction, dSFdx
+from StanScram.utils import getPressureData
 
 
 def main(data_filename: str = "data/validation/case3.csv",
@@ -103,7 +104,7 @@ def main(data_filename: str = "data/validation/case3.csv",
     boundaryConditions=['reflecting','reflecting']
     state1 = (gas1,u1)
     state4 = (gas4,u4)
-    ssbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
+    ssbl = stanScram(gas1,initializeRiemannProblem=(state4,state1,geometry),
                      boundaryConditions=boundaryConditions,
                      cfl=.9,
                      outputEvery=100,
@@ -125,7 +126,7 @@ def main(data_filename: str = "data/validation/case3.csv",
     boundaryConditions=['reflecting','reflecting']
     gas1.TP = T1,p1
     gas4.TP = T4,p4
-    ssnbl = stanShock(gas1,initializeRiemannProblem=(state4,state1,geometry),
+    ssnbl = stanScram(gas1,initializeRiemannProblem=(state4,state1,geometry),
                       boundaryConditions=boundaryConditions,
                       cfl=.9,
                       outputEvery=100,

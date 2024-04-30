@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from StanShock.stanShock import WENO5, mt
+from StanScram.stanScram import WENO5, mt
 
 WENO5 = WENO5.__wrapped__  # unwrap for test coverage
 
