@@ -24,7 +24,6 @@ import numpy as np
 from numba import double, njit, int64
 import cantera as ct
 import matplotlib.pyplot as plt
-from scipy.optimize import root
 
 #Global variables (paramters) used by the solver
 mt=3 #number of ghost nodes
@@ -611,6 +610,32 @@ class stanScram(object):
         allow the user to initialize the state
         '''
         #######################################################################
+        def initializeConstant(self,state,x):
+            '''
+            Method: initializeConstant
+            ----------------------------------------------------------------------
+            This helper function initializes a constant state
+                inputs:
+                    state = a tuple containing the Cantera solution object at the
+                            the desired thermodynamic state and the velocity:
+                            (canteraSolution,u)  
+                    x = the grid for the problem
+            '''
+            # Initialize grid
+            self.n = len(x)
+            self.x = x
+            self.dx = self.x[1] - self.x[0]
+            # Initialize state
+            self.r = np.ones(self.n) * state[0].density
+            self.u = np.ones(self.n) * state[1]
+            self.p = np.ones(self.n) * state[0].P
+            self.Y = np.zeros((self.n, gas.n_species))
+            for k in range(self.__nsp):
+                self.Y[:, k] = state[0].Y[k]
+            self.gamma = np.ones(self.n) * (state[0].cp / state[0].cv)
+            # No flame thickening
+            self.F = np.ones_like(self.r)
+        #######################################################################
         def initializeRiemannProblem(self,leftState,rightState,geometry): 
             '''
             Method: initializeRiemannProblem
@@ -619,10 +644,10 @@ class stanScram(object):
                 inputs:
                     leftState = a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
-                    rightState =  a tuple containing the Cantera solution object at the
+                               (canteraSolution,u)  
+                    rightState = a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
+                               (canteraSolution,u)  
                     geometry = a tuple containing the relevant geometry for the 
                                problem: (numberCells,xMinimum,xMaximum,shockLocation)
             '''
@@ -656,10 +681,10 @@ class stanScram(object):
                 inputs:
                     leftState = a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
+                               (canteraSolution,u)  
                     rightState =  a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canterSolution,u)  
+                               (canteraSolution,u)  
                     geometry = a tuple containing the relevant geometry for the 
                                problem: (numberCells,xMinimum,xMaximum,shockLocation)
                     Delta =    distance over which the interface is smoothed linearly
@@ -703,9 +728,10 @@ class stanScram(object):
         self.Y=np.zeros((self.n,gas.n_species)) #species mass fractions
         self.Y[:,0]=np.ones(self.n)
         self.verbose=True #console output switch
-        self.outputEvery=1 #number of iterations of simulation advancement between updates
+        self.outputEvery=1 #number of iterations of simulation advancement between logging updates
         self.dlnAdt = None #area of the shock tube as a function of time (needed for quasi-1D)
         self.dlnAdx = None #area of the shock tube as a function of x (needed for quasi-1D)
+        self.sourceTerms = None #source term function
         self.fluxFunction=HLLC
         self.probes=[] #list of probe objects
         self.XTDiagrams=dict() #dictionary of XT diagram objects
@@ -719,6 +745,8 @@ class stanScram(object):
         #overwrite the default data
         for key in kwargs:
             if key in self.__dict__.keys(): self.__dict__[key]=kwargs[key]
+            if key=='initializeConstant':
+                initializeConstant(self,kwargs[key][0],kwargs[key][1])
             if key=='initializeRiemannProblem':
                 initializeRiemannProblem(self,kwargs[key][0],kwargs[key][1],kwargs[key][2])
             if key=='initializeDiffuseInterface':
@@ -841,21 +869,21 @@ class stanScram(object):
             variableMatrix[k,:]=variablek
         variable=XTDiagram.name
         if variable in ["density","r","rho"]:
-            plt.title("$\\rho\ [\mathrm{kg/m^3}]$")
+            plt.title(r"$\rho [\mathrm{kg/m^3}]$")
         elif variable in ["velocity","u"]:
-            plt.title("$u\ [\mathrm{m/s}]$")
+            plt.title(r"$u [\mathrm{m/s}]$")
         elif variable in ["pressure","p"]:
             variableMatrix /= 1.0e5 #convert to bar
-            plt.title("$p\ [\mathrm{bar}]$")
+            plt.title(r"$p [\mathrm{bar}]$")
         elif variable in ["temperature","t"]:
-            plt.title("$T\ [\mathrm{K}]$")
+            plt.title(r"$T [\mathrm{K}]$")
         elif variable in ["gamma","g","specific heat ratio", "heat capacity ratio"]:
-            plt.title("$\gamma$")
-        else: plt.title("$\mathrm{"+variable+"}$")
+            plt.title(r"$\gamma$")
+        else: plt.title(r"$\mathrm{"+variable+"}$")
         if limits is None: plt.pcolormesh(X,T,variableMatrix,cmap='jet')
         else: plt.pcolormesh(X,T,variableMatrix,cmap='jet',vmin=limits[0],vmax=limits[1])
-        plt.xlabel("$x\ [\mathrm{m}]$")
-        plt.ylabel("$t\ [\mathrm{ms}]$")
+        plt.xlabel(r"$x [\mathrm{m}]$")
+        plt.ylabel(r"$t [\mathrm{ms}]$")
         plt.axis([min(XTDiagram.x), max(XTDiagram.x), min(t), max(t)])
         plt.colorbar()
 ##############################################################################
@@ -1340,6 +1368,35 @@ class stanScram(object):
         gamma[mt:-mt]=self.thermoTable.getGamma(T0,Y[mt:-mt])
         (self.r,self.u,self.p,self.Y,self.gamma)=(r[mt:-mt],u[mt:-mt],p[mt:-mt],Y[mt:-mt],gamma[mt:-mt])
 ##############################################################################
+    def advanceSourceTerms(self,dt):
+        '''
+        Method: advanceSourceTerms
+        ----------------------------------------------------------------------
+        This method advances the source terms in the axial direction
+            inputs
+                dt=time step
+        '''
+        #initialize
+        (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
+        #1st stage of RK2
+        rhs = self.sourceTerms(r,ru,E,rY,self.gamma,self.x,self.t)
+        r1= r +dt*rhs[:,0]
+        ru1=ru+dt*rhs[:,1]
+        E1= E +dt*rhs[:,2]
+        rY1=rY+dt*rhs[:,mn:]
+        (r1,u1,p1,Y1)=self.conservativeToPrimitive(r1,ru1,E1,rY1,self.gamma)
+        #2nd stage of RK2
+        rhs = self.sourceTerms(r1,ru1,E1,rY1,self.gamma,self.x,self.t+dt)
+        r=  0.5*(r+ r1 +dt*rhs[:,0])
+        ru= 0.5*(ru+ru1+dt*rhs[:,1])
+        E=  0.5*(E +E1 +dt*rhs[:,2])
+        rY= 0.5*(rY+rY1+dt*rhs[:,mn:])
+        (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
+        #update
+        T0 = self.thermoTable.getTemperature(r,p,Y)
+        self.gamma=self.thermoTable.getGamma(T0,Y)
+        (self.r,self.u,self.p,self.Y)=(r,u,p,Y)
+##############################################################################
     def updateProbes(self,iters):
         '''
         Method: updateProbes
@@ -1401,11 +1458,12 @@ class stanScram(object):
             #advance other terms
             if self.includeDiffusion: self.advanceDiffusion(dt)
             if self.dlnAdt!=None or self.dlnAdx!=None: self.advanceQuasi1D(dt)
+            if self.sourceTerms!=None: self.advanceSourceTerms(dt)
             #perform other updates
             self.t+=dt
             self.updateProbes(iters)
             self.updateXTDiagrams(iters)
             iters+=1
             if self.verbose and iters%self.outputEvery==0: 
-                print("Iteration: %i. Current time: %f. Final time: %f. Time step: %e." \
-                % (iters,self.t,tFinal,dt))
+                print("Iteration: %i. Current time: %f. Time step: %e." \
+                % (iters,self.t,dt))
