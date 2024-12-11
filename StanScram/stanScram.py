@@ -733,6 +733,7 @@ class stanScram(object):
         self.Y[:,0]=np.ones(self.n)
         self.verbose=True #console output switch
         self.outputEvery=1 #number of iterations of simulation advancement between logging updates
+        self.h=None #height of the channel (used for plotting only)
         self.dlnAdt = None #area of the shock tube as a function of time (needed for quasi-1D)
         self.dlnAdx = None #area of the shock tube as a function of x (needed for quasi-1D)
         self.sourceTerms = None #source term function
@@ -749,7 +750,8 @@ class stanScram(object):
         self.reacting = False #flag to solver about whether to solve source terms
         self.inReactingRegion = lambda x,t: True #the reacting region of the shock tube. 
         self.includeDiffusion= False #exclude diffusion
-        self.thickening=None
+        self.thickening=None #thickening function
+        self.plotStateInterval=-1 #plot the state every n iterations
         #overwrite the default data
         for key in kwargs:
             if key in self.__dict__.keys(): self.__dict__[key]=kwargs[key]
@@ -897,36 +899,77 @@ class stanScram(object):
         plt.axis([min(XTDiagram.x), max(XTDiagram.x), min(t), max(t)])
         plt.colorbar()
 ##############################################################################
+    def add_h_plot(self, ax, scale=1.0):
+        ax1 = ax.twinx()
+        ax1.set_zorder(-np.inf)
+        ax.patch.set_visible(False)
+        ax1.plot(self.x*scale, self.h*scale, color='0.8', linestyle='--')
+        ax1.axhline(0, color='0.8', linestyle='--')
+        ax1.set_aspect('equal')
+        ax1.set_ylabel('h [mm]')
+        return ax1
+##############################################################################
     def plotState(self, filename):
         xscale = 1.0e3
         T = self.thermoTable.getTemperature(self.r, self.p, self.Y)
 
-        fig, ax = plt.subplots(6, 1, sharex=True, figsize=(6, 8))
+        fig, ax = plt.subplots(8, 1, sharex=True, figsize=(6, 9))
         ax[0].plot(self.x*xscale, self.r)
         ax[0].set_ymargin(0.1)
         ax[0].set_ylabel(r'$\rho$ [kg/m$^3$]')
+        if self.h is not None:
+            self.add_h_plot(ax[0], scale=xscale)
 
         ax[1].plot(self.x*xscale, self.u)
         ax[1].set_ymargin(0.1)
         ax[1].set_ylabel(r'$u$ [m/s]')
+        if self.h is not None:
+            self.add_h_plot(ax[1], scale=xscale)
 
         ax[2].plot(self.x*xscale, self.p)
         ax[2].set_ymargin(0.1)
         ax[2].set_ylabel(r'$p$ [Pa]')
+        if self.h is not None:
+            self.add_h_plot(ax[2], scale=xscale)
 
         ax[3].plot(self.x*xscale, T)
         ax[3].set_ymargin(0.1)
         ax[3].set_ylabel(r'$T$ [K]')
+        if self.h is not None:
+            self.add_h_plot(ax[3], scale=xscale)
 
-        ax[4].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2')])
+        M = np.zeros_like(self.x)
+        for i in range(self.x.shape[0]):
+            self.gas.TPY = T[i], self.p[i], self.Y[i, :]
+            M[i] = np.abs(self.u[i]) / self.gas.sound_speed
+        ax[4].plot(self.x*xscale, M)
+        ax[4].axhline(1.0, color='r', linestyle='--')
         ax[4].set_ymargin(0.1)
-        ax[4].set_ylabel(r'$Y_{\mathrm{H}_2}$')
+        ax[4].set_ylabel(r'$M$ [-]')
+        if self.h is not None:
+            self.add_h_plot(ax[4], scale=xscale)
 
-        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2O')])
+        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2')])
         ax[5].set_ymargin(0.1)
-        ax[5].set_ylabel(r'$Y_{\mathrm{H}_2\mathrm{O}}$')
+        ax[5].set_ylabel(r'$Y_{\mathrm{H}_2}$ [-]')
+        if self.h is not None:
+            self.add_h_plot(ax[5], scale=xscale)
 
-        ax[5].set_xlabel('x [mm]')
+        ax[6].plot(self.x*xscale, self.Y[:, self.gas.species_index('OH')])
+        ax[6].set_ymargin(0.1)
+        ax[6].set_ylabel(r'$Y_{\mathrm{OH}}$ [-]')
+        if self.h is not None:
+            self.add_h_plot(ax[6], scale=xscale)
+
+        ax[7].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2O')])
+        ax[7].set_ymargin(0.1)
+        ax[7].set_ylabel(r'$Y_{\mathrm{H}_2\mathrm{O}}$ [-]')
+        if self.h is not None:
+            self.add_h_plot(ax[7], scale=xscale)
+
+        ax[7].set_xlabel('x [mm]')
+
+        fig.suptitle('$t = {:.4f}$ ms'.format(self.t*1.0e3))
 
         plt.tight_layout()
         plt.savefig(filename, bbox_inches='tight', dpi=300)
@@ -1330,7 +1373,7 @@ class stanScram(object):
         '''
         C = self.Prog(self.Y)
         W = self.gas.molecular_weights
-        wDot = self.injector.get_chemical_sources(C,self.t)
+        wDot = self.r.reshape((-1,1)) * self.injector.get_chemical_sources(C,self.t,self.x) # kg/m^3 * 1/s = kg/m^3/s
         wHatDot = wDot/W
         eRT = self.gas.standard_int_energies_RT
         YDot = wDot/self.r.reshape((-1,1))
@@ -1346,6 +1389,73 @@ class stanScram(object):
             self.p[k] = self.gas.P
         T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
         self.gamma = self.thermoTable.getGamma(T,self.Y)
+
+        # #######################################################################
+        # def dydt(t,y,args):
+        #     '''
+        #     function: dydt
+        #     -------------------------------------------------------------------
+        #     this function gives the source terms of a constant volume reactor
+        #         inputs
+        #             dt=time step
+        #     '''
+        #     #unpack the input
+        #     x = args[0]
+        #     r = args[1]
+        #     F = args[2]
+        #     Y = y[:-1]
+        #     T = y[-1]
+        #     #set the state for the gas object
+        #     self.gas.TDY= T,r,Y
+        #     #gas properties
+        #     cv = self.gas.cv_mass
+        #     nSp=self.gas.n_species
+        #     C = self.Prog(Y)
+        #     W = self.gas.molecular_weights
+        #     # if (Y[0]>0.0):
+        #     #     breakpoint()
+        #     # if (self.t >= self.injector.time_delay) and (x >= self.injector.x_inj):
+        #     #     breakpoint()
+        #     wDot = r * self.injector.get_chemical_sources(C,t+self.t,x) # kg/m^3 * 1/s = kg/m^3/s
+        #     wHatDot = wDot/W #kmol/m^3.s
+        #     eRT= self.gas.standard_int_energies_RT
+        #     #compute the derivatives
+        #     YDot = wDot/r
+        #     TDot = -np.sum(eRT*wHatDot)*ct.gas_constant*T/(r*cv) 
+        #     f = np.zeros(nSp+1)
+        #     f[:-1]=YDot
+        #     f[-1]=TDot
+        #     return f/F
+        # #######################################################################
+        # from scipy import integrate
+        # #get indices
+        # indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k],self.t)]
+        # Ts= self.thermoTable.getTemperature(self.r[indices],self.p[indices],self.Y[indices,:])
+        # #initialize integrator
+        # y0=np.zeros(self.gas.n_species+1)
+        # integrator = integrate.ode(dydt).set_integrator('lsoda')
+        # for TIndex, k in enumerate(indices):
+        #     #initialize
+        #     y0[:-1]=self.Y[k,:]
+        #     y0[-1]=Ts[TIndex]
+        #     args = [self.x[k],self.r[k],self.F[k]];
+        #     integrator.set_initial_value(y0,0.0)
+        #     integrator.set_f_params(args)
+        #     #solve
+        #     integrator.integrate(dt)
+        #     #clip and normalize
+        #     Y=integrator.y[:-1]
+        #     Y[Y>1.0] = 1.0
+        #     Y[Y<0.0] = 0.0
+        #     Y /= np.sum(Y)
+        #     #update
+        #     self.Y[k,:]= Y
+        #     T=integrator.y[-1]
+        #     self.gas.TDY = T,self.r[k],Y
+        #     self.p[k]=self.gas.P
+        # #update gamma
+        # T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
+        # self.gamma=self.thermoTable.getGamma(T,self.Y)
 ##############################################################################
     def advanceChemistryFRC(self,dt):
         '''
@@ -1670,7 +1780,5 @@ class stanScram(object):
             if self.verbose and iters%self.outputEvery==0: 
                 print("Iteration: %i. Current time: %f. Time step: %e. Residual(p): %e." \
                 % (iters,self.t,dt,res_p))
-            # DEBUG
-            if self.t >= self.injector.time_delay:
-                self.plotState("figures/anim/test_{0:05d}.png".format(iters))
-                # breakpoint()
+            if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):
+                self.plotState("figures/anim/test_{0:05d}.png".format(iters//self.plotStateInterval))

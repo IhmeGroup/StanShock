@@ -671,10 +671,13 @@ class JICModel():
         if t < self.time_delay:
             return rhs
 
-        Y = rhoY / np.tile(rho, (self.gas.n_species, 1)).T
+        Y = rhoY / rho.reshape((-1, 1))
         Z = np.sum(self.Z_weights * Y, axis=1) + self.Z_offset
         Z_target = self.Z_avg_profile
         mdot = rho * self.alpha * (Z_target - Z)
+
+        # Treat small (pre-injector) values
+        mdot[Z_target < 1e-6] = 0.0
 
         # Compute the source term
         i_fuel = self.gas.species_index(self.fuel)
@@ -688,14 +691,21 @@ class JICModel():
 
         return rhs
     
-    def get_chemical_sources(self, C, t):
+    def get_chemical_sources(self, C, t, x):
         '''
         Method: get_chemical_sources
         --------------------------------------------------------------------------
-        This method computes the chemical source terms using the FPV table.
+        This method computes the chemical source terms [1/s] using the FPV table.
         C: float
-            The progress variable
+            The array of progress variable values at different grid points
+        t: float
+            The current time
+        x: float
+            The x-coordinates corresponding to the progress variable array
         '''
+        if np.isscalar(x):
+            x = np.array([x])
+            C = np.array([C])
         omega_Y = np.zeros((len(C), self.gas.n_species))
         if t < self.time_delay:
             return omega_Y
@@ -703,9 +713,9 @@ class JICModel():
         Z_probe = np.linspace(0.0, 1.0, 1000)
         # TODO ^ cluster these points around min and max Z
 
-        for i in range(len(C)):
-            Z_avg = self.Z_avg_profile[i]
-            Z_var = self.Z_var_profile[i]
+        for i in range(len(x)):
+            Z_avg = np.interp(x[i], self.x, self.Z_avg_profile)
+            Z_var = np.interp(x[i], self.x, self.Z_var_profile)
 
             if Z_avg == 0.0:
                 continue
@@ -722,7 +732,7 @@ class JICModel():
                 # Area integral
                 # def integrand(z, y):
                 #     src_name = "SRC_{0}".format(self.gas.species_name(k))
-                #     Z = self.Z_3D_adjusted(self.x[i], y, z)
+                #     Z = self.Z_3D_adjusted(x[i], y, z)
                 #     L = self.fpv_table.L_from_C(Z, C[i])
                 #     return self.fpv_table.lookup(src_name, Z, 0.0, L)
                 # omega_Y[i,k] = integrate.dblquad(integrand,
@@ -734,13 +744,13 @@ class JICModel():
                 # def integrand(Z):
                 #     src_name = "SRC_{0}".format(self.gas.species_name(k))
                 #     L = self.fpv_table.L_from_C(Z, C[i])
-                #     p_Z = self.estimate_p_Z(self.x[i], Z)
+                #     p_Z = self.estimate_p_Z(x[i], Z)
                 #     return self.fpv_table.lookup(src_name, Z, 0.0, L) * p_Z
                 # omega_Y[i,k] = integrate.quad(integrand, 0.0, 1.0, epsabs=1e2)[0]
 
                 # Manual approach with trapezoidal rule
                 src_name = "SRC_{0}".format(self.gas.species_name(k))
-                omega_Y_k_probe = self.fpv_table.lookup(src_name, Z_probe, 0.0, L)
+                omega_Y_k_probe = self.fpv_table.lookup(src_name, Z_probe, 0.0, L) # [1/s]
                 # PDF may have singularities at the boundaries, but the source term should be
                 # zero there anyway
                 p_Z[0] = 0.0
@@ -750,6 +760,6 @@ class JICModel():
                 omega_Y[i,k] = np.trapz(omega_Y_k_probe * p_Z, Z_probe)
 
         # Only apply source terms in regions that the fluid has reached
-        omega_Y[self.x > self.x_fluid_tip, :] = 0.0
+        omega_Y[x > self.x_fluid_tip, :] = 0.0
 
         return omega_Y

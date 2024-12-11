@@ -204,7 +204,7 @@ jic = JICModel(gas, "H2",
                rho_f, U_f, T_f,
                rho_in, U_in, T_in,
                alpha=1e6,
-               time_delay=1e-3,
+               time_delay=0.5*tau,
                fpv_table=fpv_table,
                load_adjustment_factor=True,
                load_Z_avg_var_profiles=True)
@@ -357,6 +357,7 @@ plt.savefig(os.path.join(figdir, "Z_avg_var.png"), bbox_inches='tight', dpi=300)
 
 # Initialize and run the simulation
 ss = stanScram(gas,
+               h = h,
                dlnAdx = dlnAdx,
                initializeConstant = (initState, x),
                boundaryConditions = BCs,
@@ -368,7 +369,8 @@ ss = stanScram(gas,
                cfl = 0.5,
                reacting = True,
                includeDiffusion = False,
-               outputEvery = 10)
+               outputEvery = 10,
+               plotStateInterval = 5)
 ss.advanceSimulation(t_end)
 
 # Plot the results
