@@ -25,6 +25,8 @@ from numba import double, njit, int64
 import cantera as ct
 import matplotlib.pyplot as plt
 
+from StanScram.jet_in_crossflow import JICModel
+
 #Global variables (paramters) used by the solver
 mt=3 #number of ghost nodes
 mn=3 #number of 1D Euler equations
@@ -427,7 +429,9 @@ def getCp(T,Y,TTable,a,b):
     #determine cp
     cp = np.zeros(nX)
     for iX in range(nX):
-        if (T[iX]<TMin) or (T[iX]>TMax): raise Exception("Temperature not within table")
+        if (T[iX]<TMin) or (T[iX]>TMax):
+            print("Temperature out of bounds:", T[iX], "not in range [", TMin, ",", TMax, "]")
+            raise ValueError("Temperature out of bounds")
         index = indices[iX]
         bbar=0.0
         for iSp in range(nSp):
@@ -711,7 +715,7 @@ class stanScram(object):
             self.gamma=smoothingFunction(self.x,xShock,Delta,gammaLeft,gammaRight)
             self.F = np.ones_like(self.r)
         #########################################################################
-        #initilize the class
+        #initialize the class
         self.cfl=1.0 #stability condition
         self.dx=1.0 #grid spacing
         self.n=10  #grid size
@@ -732,6 +736,10 @@ class stanScram(object):
         self.dlnAdt = None #area of the shock tube as a function of time (needed for quasi-1D)
         self.dlnAdx = None #area of the shock tube as a function of x (needed for quasi-1D)
         self.sourceTerms = None #source term function
+        self.injector = None #injector model
+        self.ox_def = None #oxidizer definition
+        self.fuel_def = None #fuel definition
+        self.prog_def = None #progress variable definition
         self.fluxFunction=HLLC
         self.probes=[] #list of probe objects
         self.XTDiagrams=dict() #dictionary of XT diagram objects
@@ -753,6 +761,8 @@ class stanScram(object):
                 initializeDiffuseInterface(self,kwargs[key][0],kwargs[key][1],kwargs[key][2],kwargs[key][3])
         if not self.n==len(self.x)==len(self.r)==len(self.u)==len(self.p)==len(self.gamma):
             raise Exception("Initialization Error")
+        self.initZBilger()
+        self.initProg()
 ##############################################################################
     class __probe(object):
         '''
@@ -886,6 +896,41 @@ class stanScram(object):
         plt.ylabel(r"$t [\mathrm{ms}]$")
         plt.axis([min(XTDiagram.x), max(XTDiagram.x), min(t), max(t)])
         plt.colorbar()
+##############################################################################
+    def plotState(self, filename):
+        xscale = 1.0e3
+        T = self.thermoTable.getTemperature(self.r, self.p, self.Y)
+
+        fig, ax = plt.subplots(6, 1, sharex=True, figsize=(6, 8))
+        ax[0].plot(self.x*xscale, self.r)
+        ax[0].set_ymargin(0.1)
+        ax[0].set_ylabel(r'$\rho$ [kg/m$^3$]')
+
+        ax[1].plot(self.x*xscale, self.u)
+        ax[1].set_ymargin(0.1)
+        ax[1].set_ylabel(r'$u$ [m/s]')
+
+        ax[2].plot(self.x*xscale, self.p)
+        ax[2].set_ymargin(0.1)
+        ax[2].set_ylabel(r'$p$ [Pa]')
+
+        ax[3].plot(self.x*xscale, T)
+        ax[3].set_ymargin(0.1)
+        ax[3].set_ylabel(r'$T$ [K]')
+
+        ax[4].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2')])
+        ax[4].set_ymargin(0.1)
+        ax[4].set_ylabel(r'$Y_{\mathrm{H}_2}$')
+
+        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2O')])
+        ax[5].set_ymargin(0.1)
+        ax[5].set_ylabel(r'$Y_{\mathrm{H}_2\mathrm{O}}$')
+
+        ax[5].set_xlabel('x [mm]')
+
+        plt.tight_layout()
+        plt.savefig(filename, bbox_inches='tight', dpi=300)
+        plt.close()
 ##############################################################################
     def soundSpeed(self,r,p,gamma):
         '''
@@ -1024,7 +1069,87 @@ class stanScram(object):
         Y[Y<0.0]=0.0
         #scale
         Y=Y/np.sum(Y,axis=1).reshape((-1,1))
-        return (r,u,p,Y)     
+        return (r,u,p,Y)
+##############################################################################
+    def initZBilger(self):
+        '''
+        Method: initZBilger
+        ----------------------------------------------------------------------
+        This method initializes the Bilger mixture fraction
+        '''
+        self.Z_weights = np.zeros(self.gas.n_species)
+        self.Z_offset  = 0.0
+
+        i_C = self.gas.element_index('C')
+        i_H = self.gas.element_index('H')
+        i_O = self.gas.element_index('O')
+
+        W_C = self.gas.atomic_weight(i_C)
+        W_H = self.gas.atomic_weight(i_H)
+        W_O = self.gas.atomic_weight(i_O)
+
+        self.gas.X = self.ox_def
+        Yo_C = self.gas.elemental_mass_fraction('C')
+        Yo_H = self.gas.elemental_mass_fraction('H')
+        Yo_O = self.gas.elemental_mass_fraction('O')
+
+        self.gas.X = self.fuel_def
+        Yf_C = self.gas.elemental_mass_fraction('C')
+        Yf_H = self.gas.elemental_mass_fraction('H')
+        Yf_O = self.gas.elemental_mass_fraction('O')
+
+        s = 1.0 / (  2.0 * (Yf_C - Yo_C) / W_C
+                   + 0.5 * (Yf_H - Yo_H) / W_H
+                   - 1.0 * (Yf_O - Yo_O) / W_O)
+        for k in range(self.gas.n_species):
+            self.Z_weights[k] = (  2.0 * self.gas.n_atoms(k,i_C)
+                                 + 0.5 * self.gas.n_atoms(k,i_H)
+                                 - 1.0 * self.gas.n_atoms(k,i_O)) / self.gas.molecular_weights[k]
+        self.Z_offset = -(  2.0 * Yo_C / W_C
+                          + 0.5 * Yo_H / W_H
+                          - 1.0 * Yo_O / W_O)
+        
+        self.Z_weights *= s
+        self.Z_offset  *= s
+##############################################################################
+    def ZBilger(self,Y):
+        '''
+        Method: ZBilger
+        ----------------------------------------------------------------------
+        This method calculates the Bilger mixture fraction
+            inputs:
+                Y=species mass fraction matrix [x,species]
+            outputs:
+                Z=mixture fraction
+        '''
+        return np.dot(Y, self.Z_weights) + self.Z_offset
+##############################################################################
+    def initProg(self):
+        '''
+        Method: initProg
+        ----------------------------------------------------------------------
+        This method initializes the progress variable
+        '''
+        if self.prog_def is None:
+            raise Exception("Progress Variable Not Defined")
+        self.prog_weights = np.zeros(self.gas.n_species)
+        for sp, val in self.prog_def.items():
+            self.prog_weights[self.gas.species_index(sp)] = val
+        if np.sum(self.prog_weights)==0.0:
+            raise Exception("Progress Variable Weights Sum to Zero")
+        self.prog_weights /= np.sum(self.prog_weights)
+##############################################################################
+    def Prog(self,Y):
+        '''
+        Method: Prog
+        ----------------------------------------------------------------------
+        This method computes the progress variable
+            inputs:
+                Y=species mass fraction matrix [x,species]
+            outputs:
+                progress variable
+        '''
+        return np.dot(Y, self.prog_weights)
 ############################################################################## 
     def flux(self,r,u,p,Y,gamma):
         '''
@@ -1185,6 +1310,47 @@ class stanScram(object):
         ----------------------------------------------------------------------
         This method advances the combustion chemistry of a reacting system. It
         is only called if the "reacting" flag is set to True. 
+            inputs
+                dt=time step
+        '''
+        if self.injector is not None:
+            self.advanceChemistryFPV(dt)
+        else:
+            self.advanceChemistryFRC(dt)
+##############################################################################
+    def advanceChemistryFPV(self,dt):
+        '''
+        Method: advanceChemistryFPV
+        ----------------------------------------------------------------------
+        This method advances the combustion chemistry of a reacting system using
+        the flamelet progress variable approach. It is only called if the "reacting"
+        flag is set to True. 
+            inputs
+                dt=time step
+        '''
+        C = self.Prog(self.Y)
+        wDot = self.injector.get_chemical_sources(C,self.t)
+        eRT = self.gas.standard_int_energies_RT
+        YDot = wDot/self.r.reshape((-1,1))
+        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
+        TDot = -np.sum(eRT*wDot, axis=1)*ct.gas_constant*T/(self.r*self.gas.cv_mass)
+        self.Y += YDot*dt
+        self.Y[self.Y>1.0] = 1.0
+        self.Y[self.Y<0.0] = 0.0
+        self.Y /= np.sum(self.Y,axis=1).reshape((-1,1))
+        T += TDot*dt
+        for k in range(self.n):
+            self.gas.TDY = T[k],self.r[k],self.Y[k,:]
+            self.p[k] = self.gas.P
+        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
+        self.gamma = self.thermoTable.getGamma(T,self.Y)
+##############################################################################
+    def advanceChemistryFRC(self,dt):
+        '''
+        Method: advanceChemistryFRC
+        ----------------------------------------------------------------------
+        This method advances the combustion chemistry of a reacting system using
+        finite rate chemistry. It is only called if the "reacting" flag is set to True. 
             inputs
                 dt=time step
         '''
@@ -1397,6 +1563,37 @@ class stanScram(object):
         self.gamma=self.thermoTable.getGamma(T0,Y)
         (self.r,self.u,self.p,self.Y)=(r,u,p,Y)
 ##############################################################################
+    def advanceInjector(self,dt):
+        '''
+        Method: advanceInjector
+        ----------------------------------------------------------------------
+        This method advances the source terms from the injector using the
+        jet-in-crossflow model.
+            inputs
+                dt=time step
+        '''
+        #initialize
+        (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
+        self.injector.update_fluid_tip_position(dt,self.t,self.u)
+        #1st stage of RK2
+        rhs = self.injector.get_injector_sources(r,ru,E,rY,self.gamma,self.t)
+        r1= r +dt*rhs[:,0]
+        ru1=ru+dt*rhs[:,1]
+        E1= E +dt*rhs[:,2]
+        rY1=rY+dt*rhs[:,mn:]
+        (r1,u1,p1,Y1)=self.conservativeToPrimitive(r1,ru1,E1,rY1,self.gamma)
+        #2nd stage of RK2
+        rhs = self.injector.get_injector_sources(r1,ru1,E1,rY1,self.gamma,self.t+dt)
+        r=  0.5*(r+ r1 +dt*rhs[:,0])
+        ru= 0.5*(ru+ru1+dt*rhs[:,1])
+        E=  0.5*(E +E1 +dt*rhs[:,2])
+        rY= 0.5*(rY+rY1+dt*rhs[:,mn:])
+        (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
+        #update
+        T0 = self.thermoTable.getTemperature(r,p,Y)
+        self.gamma=self.thermoTable.getGamma(T0,Y)
+        (self.r,self.u,self.p,self.Y)=(r,u,p,Y)
+##############################################################################
     def updateProbes(self,iters):
         '''
         Method: updateProbes
@@ -1440,7 +1637,7 @@ class stanScram(object):
             if iters%(XTDiagram.skipSteps+1)==0:
                 self.__updateXTDiagram(XTDiagram)
 ##############################################################################
-    def advanceSimulation(self,tFinal):
+    def advanceSimulation(self,tFinal,res_p_target=-1.0):
         '''
         Method: advanceSimulation
         ----------------------------------------------------------------------
@@ -1449,7 +1646,9 @@ class stanScram(object):
                     tFinal=final time
         '''
         iters = 0
-        while self.t<tFinal:
+        res_p = np.inf
+        while self.t<tFinal and res_p>res_p_target:
+            p_old = self.p
             dt=min(tFinal-self.t,self.timeStep())
             #advance advection and chemistry with Strang Splitting
             if self.reacting: self.advanceChemistry(dt/2.0)
@@ -1459,11 +1658,17 @@ class stanScram(object):
             if self.includeDiffusion: self.advanceDiffusion(dt)
             if self.dlnAdt!=None or self.dlnAdx!=None: self.advanceQuasi1D(dt)
             if self.sourceTerms!=None: self.advanceSourceTerms(dt)
+            if self.injector!=None: self.advanceInjector(dt)
             #perform other updates
             self.t+=dt
             self.updateProbes(iters)
             self.updateXTDiagrams(iters)
             iters+=1
+            res_p = np.linalg.norm(self.p-p_old)
             if self.verbose and iters%self.outputEvery==0: 
-                print("Iteration: %i. Current time: %f. Time step: %e." \
-                % (iters,self.t,dt))
+                print("Iteration: %i. Current time: %f. Time step: %e. Residual(p): %e." \
+                % (iters,self.t,dt,res_p))
+            # DEBUG
+            if self.t >= self.injector.time_delay:
+                self.plotState("figures/anim_inert/test_{0:05d}.png".format(iters))
+                # breakpoint()

@@ -19,12 +19,16 @@
     along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
 '''
 import os
+from tqdm import tqdm
 from typing import Optional
 import numpy as np
 from scipy import interpolate
 import cantera as ct
-from StanScram.stanScram import stanScram
 import matplotlib.pyplot as plt
+
+from StanScram.stanScram import stanScram
+from StanScram.jet_in_crossflow import JICModel
+
 import matplotlib.font_manager
 plt.rcParams.update({
     "text.usetex": True,
@@ -47,8 +51,18 @@ plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
 plt.rc('legend', fontsize=XSMALL_SIZE)   # legend fontsize
 plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
+# Plotting utilities
+scale = 1e3
+def add_h_plot(ax):
+    ax1 = ax.twinx()
+    ax1.plot(x*scale, h*scale, 'k', linestyle='--')
+    ax1.axhline(0, color='k', linestyle='--')
+    ax1.set_aspect('equal')
+    ax1.set_ylabel('h [mm]')
+    return ax1
+
 # Chemistry
-mech = "../../FRC Mechs/H2_15/HydrogenAirNOx_15sp-47st.yaml"
+mech = "./HydrogenAirNOx_15sp-47st.yaml"
 gas = ct.Solution(mech)
 
 # Specs from the HyShot II scramjet
@@ -103,13 +117,14 @@ print(f"t_end = {t_end:.2e} s")
 gas_init = ct.Solution(mech)
 gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
 initState = gas_init, U_in
+W_in = gas_init.mean_molecular_weight
 
 # Define the boundary conditions
 BC_inlet = gas_init.density, U_in, gas_init.P, gas_init.Y
 BC_outlet = 'outflow'
 BCs = (BC_inlet, BC_outlet)
 
-# Define the source terms
+# Define the fuel inflow
 gas.TPX = T_f, 101325.0, "H2:1"
 gamma_f = gas.cp / gas.cv
 R_f = ct.gas_constant / gas.mean_molecular_weight
@@ -120,7 +135,9 @@ gas.TDX = T_f, rho_f, "H2:1"
 P_f = gas.P
 rhoE_f = P_f / (gamma_f - 1) + 0.5 * rho_f * U_f**2
 rhoYH2_f = rho_f * gas.Y[gas.species_index('H2')]
+W_f = gas.mean_molecular_weight
 
+# Define the source terms
 L_src = 30.0e-3
 scale_factor = 3.960715337483353
 
@@ -148,15 +165,6 @@ ss = stanScram(gas,
 ss.advanceSimulation(t_end)
 
 # Plot the results
-scale = 1e3
-def add_h_plot(ax):
-    ax1 = ax.twinx()
-    ax1.plot(x*scale, h*scale, 'k', linestyle='--')
-    ax1.axhline(0, color='k', linestyle='--')
-    ax1.set_aspect('equal')
-    ax1.set_ylabel('h [mm]')
-    return ax1
-
 def plot_sim(ss):
     rho = ss.r
     u = ss.u
@@ -164,7 +172,13 @@ def plot_sim(ss):
     Y = ss.Y
     T = ss.thermoTable.getTemperature(rho, p, Y)
 
-    fig, ax = plt.subplots(6, 1, sharex=True, figsize=(6, 8))
+    M = np.zeros_like(x)
+    for i in range(len(x)):
+        gas.TPY = T[i], p[i], Y[i, :]
+        c = gas.sound_speed
+        M[i] = u[i] / c
+
+    fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 8))
     ax[0].plot(x*scale, rho)
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r'$\rho$ [kg/m$^3$]')
@@ -185,17 +199,22 @@ def plot_sim(ss):
     ax[3].set_ylabel(r'$T$ [K]')
     add_h_plot(ax[3])
 
-    ax[4].plot(x*scale, Y[:, gas.species_index('H2')])
+    ax[4].plot(x*scale, M)
     ax[4].set_ymargin(0.1)
-    ax[4].set_ylabel(r'$Y_{\mathrm{H}_2}$')
+    ax[4].set_ylabel(r'$M$ [-]')
     add_h_plot(ax[4])
 
-    ax[5].plot(x*scale, Y[:, gas.species_index('H2O')])
+    ax[5].plot(x*scale, Y[:, gas.species_index('H2')])
     ax[5].set_ymargin(0.1)
-    ax[5].set_ylabel(r'$Y_{\mathrm{H}_2\mathrm{O}}$')
+    ax[5].set_ylabel(r'$Y_{\mathrm{H}_2}$ [-]')
     add_h_plot(ax[5])
 
-    ax[5].set_xlabel('x [mm]')
+    ax[6].plot(x*scale, Y[:, gas.species_index('H2O')])
+    ax[6].set_ymargin(0.1)
+    ax[6].set_ylabel(r'$Y_{\mathrm{H}_2\mathrm{O}}$ [-]')
+    add_h_plot(ax[6])
+
+    ax[6].set_xlabel('x [mm]')
 
     plt.tight_layout()
     plt.savefig("hyshot_ii.png", bbox_inches='tight', dpi=300)
