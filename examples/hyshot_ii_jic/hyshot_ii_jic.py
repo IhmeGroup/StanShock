@@ -366,7 +366,7 @@ ss = stanScram(gas,
                fuel_def = X_f,
                prog_def = {"H2O" : 1.0},
                cfl = 0.5,
-               reacting = False,
+               reacting = True,
                includeDiffusion = False,
                outputEvery = 10)
 ss.advanceSimulation(t_end)

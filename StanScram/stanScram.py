@@ -1329,11 +1329,13 @@ class stanScram(object):
                 dt=time step
         '''
         C = self.Prog(self.Y)
+        W = self.gas.molecular_weights
         wDot = self.injector.get_chemical_sources(C,self.t)
+        wHatDot = wDot/W
         eRT = self.gas.standard_int_energies_RT
         YDot = wDot/self.r.reshape((-1,1))
         T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        TDot = -np.sum(eRT*wDot, axis=1)*ct.gas_constant*T/(self.r*self.gas.cv_mass)
+        TDot = -np.sum(eRT*wHatDot, axis=1)*ct.gas_constant*T/(self.r*self.gas.cv_mass)
         self.Y += YDot*dt
         self.Y[self.Y>1.0] = 1.0
         self.Y[self.Y<0.0] = 0.0
@@ -1670,5 +1672,5 @@ class stanScram(object):
                 % (iters,self.t,dt,res_p))
             # DEBUG
             if self.t >= self.injector.time_delay:
-                self.plotState("figures/anim_inert/test_{0:05d}.png".format(iters))
+                self.plotState("figures/anim/test_{0:05d}.png".format(iters))
                 # breakpoint()
