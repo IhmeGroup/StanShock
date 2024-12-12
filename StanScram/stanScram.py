@@ -1373,7 +1373,7 @@ class stanScram(object):
         '''
         C = self.Prog(self.Y)
         W = self.gas.molecular_weights
-        wDot = self.r.reshape((-1,1)) * self.injector.get_chemical_sources(C,self.t,self.x) # kg/m^3 * 1/s = kg/m^3/s
+        wDot = self.r.reshape((-1,1)) * self.injector.get_chemical_sources(C,self.t) # kg/m^3 * 1/s = kg/m^3/s
         wHatDot = wDot/W
         eRT = self.gas.standard_int_energies_RT
         YDot = wDot/self.r.reshape((-1,1))
@@ -1389,73 +1389,6 @@ class stanScram(object):
             self.p[k] = self.gas.P
         T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
         self.gamma = self.thermoTable.getGamma(T,self.Y)
-
-        # #######################################################################
-        # def dydt(t,y,args):
-        #     '''
-        #     function: dydt
-        #     -------------------------------------------------------------------
-        #     this function gives the source terms of a constant volume reactor
-        #         inputs
-        #             dt=time step
-        #     '''
-        #     #unpack the input
-        #     x = args[0]
-        #     r = args[1]
-        #     F = args[2]
-        #     Y = y[:-1]
-        #     T = y[-1]
-        #     #set the state for the gas object
-        #     self.gas.TDY= T,r,Y
-        #     #gas properties
-        #     cv = self.gas.cv_mass
-        #     nSp=self.gas.n_species
-        #     C = self.Prog(Y)
-        #     W = self.gas.molecular_weights
-        #     # if (Y[0]>0.0):
-        #     #     breakpoint()
-        #     # if (self.t >= self.injector.time_delay) and (x >= self.injector.x_inj):
-        #     #     breakpoint()
-        #     wDot = r * self.injector.get_chemical_sources(C,t+self.t,x) # kg/m^3 * 1/s = kg/m^3/s
-        #     wHatDot = wDot/W #kmol/m^3.s
-        #     eRT= self.gas.standard_int_energies_RT
-        #     #compute the derivatives
-        #     YDot = wDot/r
-        #     TDot = -np.sum(eRT*wHatDot)*ct.gas_constant*T/(r*cv) 
-        #     f = np.zeros(nSp+1)
-        #     f[:-1]=YDot
-        #     f[-1]=TDot
-        #     return f/F
-        # #######################################################################
-        # from scipy import integrate
-        # #get indices
-        # indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k],self.t)]
-        # Ts= self.thermoTable.getTemperature(self.r[indices],self.p[indices],self.Y[indices,:])
-        # #initialize integrator
-        # y0=np.zeros(self.gas.n_species+1)
-        # integrator = integrate.ode(dydt).set_integrator('lsoda')
-        # for TIndex, k in enumerate(indices):
-        #     #initialize
-        #     y0[:-1]=self.Y[k,:]
-        #     y0[-1]=Ts[TIndex]
-        #     args = [self.x[k],self.r[k],self.F[k]];
-        #     integrator.set_initial_value(y0,0.0)
-        #     integrator.set_f_params(args)
-        #     #solve
-        #     integrator.integrate(dt)
-        #     #clip and normalize
-        #     Y=integrator.y[:-1]
-        #     Y[Y>1.0] = 1.0
-        #     Y[Y<0.0] = 0.0
-        #     Y /= np.sum(Y)
-        #     #update
-        #     self.Y[k,:]= Y
-        #     T=integrator.y[-1]
-        #     self.gas.TDY = T,self.r[k],Y
-        #     self.p[k]=self.gas.P
-        # #update gamma
-        # T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        # self.gamma=self.thermoTable.getGamma(T,self.Y)
 ##############################################################################
     def advanceChemistryFRC(self,dt):
         '''

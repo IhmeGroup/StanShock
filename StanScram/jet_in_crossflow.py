@@ -152,6 +152,9 @@ class JICModel():
             self.Z_var_profile = data[:, 1]
         else:
             self.calc_Z_avg_var_profiles(write=True)
+        
+        # Precompute and tabulate chemical source terms
+        self.calc_chemical_sources()
     
     def __prep_zbilger(self):
         #             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H - (Y_O - Yo_O)/W_O
@@ -691,7 +694,50 @@ class JICModel():
 
         return rhs
     
-    def get_chemical_sources(self, C, t, x):
+    def calc_chemical_sources(self):
+        '''
+        Method: calc_chemical_sources
+        --------------------------------------------------------------------------
+        This method precomputes the chemical source terms as a function of x and L.
+        '''
+        print("Precomputing chemical sources...")
+        self.omega_Y_interpolators = []
+
+        Z_probe = np.linspace(0.0, 1.0, 1000)
+        # TODO ^ cluster these points around min and max Z
+        L_probe = np.linspace(0.0, 1.0, 200)
+        Z_mesh, L_mesh = np.meshgrid(Z_probe, L_probe, indexing='ij')
+
+        for i in tqdm(range(len(self.x))):
+            Z_avg = self.Z_avg_profile[i]
+            Z_var = self.Z_var_profile[i]
+            omega_Y_i = []
+
+            if Z_avg == 0.0:
+                omega_Y_i = lambda L : np.zeros(self.gas.n_species)
+            else:
+                a = ((Z_avg * (1 - Z_avg) / Z_var) - 1) * Z_avg
+                b = a * (1 - Z_avg) / Z_avg
+                p_Z = stats.beta.pdf(Z_probe, a, b)
+
+                omega_Y_probe = np.zeros((len(L_probe), self.gas.n_species))
+                for k in range(self.gas.n_species):
+                    src_name = "SRC_{0}".format(self.gas.species_name(k))
+                    omega_Y_k_probe = self.fpv_table.lookup(src_name, Z_mesh, 0.0, L_mesh) # [1/s]
+                    # PDF may have singularities at the boundaries, but the source term should be
+                    # zero there anyway
+                    p_Z[0] = 0.0
+                    p_Z[-1] = 0.0
+                    omega_Y_k_probe[ 0, :] = 0.0
+                    omega_Y_k_probe[-1, :] = 0.0
+                    omega_Y_probe[:, k] = np.trapz(omega_Y_k_probe * p_Z.reshape((-1, 1)), Z_probe, axis=0)
+
+                omega_Y_i = interpolate.CubicSpline(L_probe, omega_Y_probe, axis=0)
+
+            self.omega_Y_interpolators.append(omega_Y_i)
+            #TODO: Pickle these and write to file
+    
+    def get_chemical_sources(self, C, t):
         '''
         Method: get_chemical_sources
         --------------------------------------------------------------------------
@@ -700,66 +746,18 @@ class JICModel():
             The array of progress variable values at different grid points
         t: float
             The current time
-        x: float
-            The x-coordinates corresponding to the progress variable array
         '''
-        if np.isscalar(x):
-            x = np.array([x])
-            C = np.array([C])
-        omega_Y = np.zeros((len(C), self.gas.n_species))
+        omega_Y = np.zeros((len(self.x), self.gas.n_species))
         if t < self.time_delay:
             return omega_Y
-
-        Z_probe = np.linspace(0.0, 1.0, 1000)
-        # TODO ^ cluster these points around min and max Z
-
-        for i in range(len(x)):
-            Z_avg = np.interp(x[i], self.x, self.Z_avg_profile)
-            Z_var = np.interp(x[i], self.x, self.Z_var_profile)
-
-            if Z_avg == 0.0:
-                continue
-
-            a = ((Z_avg * (1 - Z_avg) / Z_var) - 1) * Z_avg
-            b = a * (1 - Z_avg) / Z_avg
-            Z_pdf = lambda Z: stats.beta.pdf(Z, a, b)
-            p_Z = Z_pdf(Z_probe)
+        
+        for i in range(len(self.x)):
+            Z_avg = self.Z_avg_profile[i]
             L = self.fpv_table.L_from_C(Z_avg, C[i])
-            
-            omega_Y_k_probe = np.zeros_like(Z_probe)
-
-            for k in range(self.gas.n_species):
-                # Area integral
-                # def integrand(z, y):
-                #     src_name = "SRC_{0}".format(self.gas.species_name(k))
-                #     Z = self.Z_3D_adjusted(x[i], y, z)
-                #     L = self.fpv_table.L_from_C(Z, C[i])
-                #     return self.fpv_table.lookup(src_name, Z, 0.0, L)
-                # omega_Y[i,k] = integrate.dblquad(integrand,
-                #                                  0, self.h,
-                #                                  lambda y: -self.w/2, lambda y: self.w/2,
-                #                                  epsabs=1e-2)[0] / (self.w * self.h)
-                
-                # Presume Beta PDF for Z
-                # def integrand(Z):
-                #     src_name = "SRC_{0}".format(self.gas.species_name(k))
-                #     L = self.fpv_table.L_from_C(Z, C[i])
-                #     p_Z = self.estimate_p_Z(x[i], Z)
-                #     return self.fpv_table.lookup(src_name, Z, 0.0, L) * p_Z
-                # omega_Y[i,k] = integrate.quad(integrand, 0.0, 1.0, epsabs=1e2)[0]
-
-                # Manual approach with trapezoidal rule
-                src_name = "SRC_{0}".format(self.gas.species_name(k))
-                omega_Y_k_probe = self.fpv_table.lookup(src_name, Z_probe, 0.0, L) # [1/s]
-                # PDF may have singularities at the boundaries, but the source term should be
-                # zero there anyway
-                p_Z[0] = 0.0
-                p_Z[-1] = 0.0
-                omega_Y_k_probe[0] = 0.0
-                omega_Y_k_probe[-1] = 0.0
-                omega_Y[i,k] = np.trapz(omega_Y_k_probe * p_Z, Z_probe)
-
+            omega_Y[i, :] = self.omega_Y_interpolators[i](L)
+        
         # Only apply source terms in regions that the fluid has reached
-        omega_Y[x > self.x_fluid_tip, :] = 0.0
+        omega_Y[self.x > self.x_fluid_tip, :] = 0.0
 
         return omega_Y
+    
