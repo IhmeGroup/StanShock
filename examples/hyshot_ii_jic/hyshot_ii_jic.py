@@ -83,27 +83,31 @@ h_const       =   9.8e-3       # m
 w             =  75.0e-3       # m
 L_const       = 300.0e-3       # m
 L_exhaust     = 100.0e-3       # m
-x_inj         =  57.5e-3       # m
+x_inj         =  58.0e-3       # m
 theta_exhaust = np.deg2rad(12) # rad
-r_f           =   0.2e-3       # m
+r_f           =   0.1e-3       # m
 N_f           =   4            # -
 
 L       = L_const + L_exhaust # m
 A_f     = np.pi * r_f**2      # m^2
 A_f_tot = N_f * A_f           # m^2
 
-# Define the boundary conditions
+# Define the boundary conditions (from Tim Dawson email)
 P_in   =  127.444e3  # Pa
 rho_in =    0.323551 # kg/m^3
 U_in   = 1791.05     # m/s
 T_in   = 1366.81     # K
 M_in   =    2.48942  # -
 mdot_a = rho_in * U_in * h_const * w
-
-T_f    = 250.0    # K
-mdot_f =   4.4e-3 # kg/s
-phi    =   0.35   # -
+T0_f   = 300.0    # K
 M_f    =   1.0    # -
+
+# Time parameters
+tau = L / U_in
+t_end = 5 * tau
+# t_end = 0.5 * tau
+print(f"tau = {tau:.2e} s")
+print(f"t_end = {t_end:.2e} s")
 
 # Compressible air properties
 gas.TPX = T_in, P_in, X_ox
@@ -119,13 +123,65 @@ P_2 = P_in * (2 * gamma_in * M_in_comp**2 - (gamma_in - 1)) / (gamma_in + 1)
 # Stoichiometry
 mdot_O2 = 0.23291 * mdot_a
 mdot_N2 = mdot_a - mdot_O2
-gas.TPY = 298.15, ct.one_atm, "H2:{0},O2:{1},N2:{2}".format(mdot_f, mdot_O2, mdot_N2)
-Yf_gl = gas.Y[gas.species_index('H2')]
-phi_gl = gas.equivalence_ratio(X_f, X_ox)
-Z_gl = gas.mixture_fraction(X_f, X_ox)
+gas.TP = 298.15, ct.one_atm
 gas.set_equivalence_ratio(1.0, X_f, X_ox)
 Yf_st = gas.Y[gas.species_index('H2')]
 Z_st = gas.mixture_fraction(X_f, X_ox)
+
+# Fuel inflow rate
+
+# Minimum P0_f for choked flow
+gas.TPX = T0_f, P_in, X_f
+gamma_f = gas.cp / gas.cv
+P0_f_min = P_in * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
+# P0_f_min = P_2 * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
+
+def fuel_props_from_phi(phi_gl):
+    if phi_gl == 0.0:
+        return np.nan, 0.0, 300.0
+
+    gas.set_equivalence_ratio(phi_gl, X_f, X_ox)
+    Yf_gl = gas.Y[gas.species_index('H2')]
+    mdot_f = (Yf_gl / gas.Y[gas.species_index('O2')]) * mdot_O2
+    Z_gl = gas.mixture_fraction(X_f, X_ox)
+
+    # Remaining fuel properties
+    P0_f = mdot_f * np.sqrt(T0_f) / A_f_tot
+    if P0_f < P0_f_min:
+        print(f"Warning: at phi_gl = {phi_gl:.2f}, P0_f = {P0_f:.2e} Pa < P0_f_min = {P0_f_min:.2e} Pa")
+
+    gas.TPX = T0_f, P0_f, X_f
+    gamma_f = gas.cp / gas.cv
+    R_f = ct.gas_constant / gas.mean_molecular_weight
+    T_f = T0_f * (1 + (gamma_f - 1) / 2 * M_f**2)**(-1)
+    a_f = np.sqrt(gamma_f * R_f * T_f)
+    U_f = M_f * a_f
+    rho_f = mdot_f / (U_f * A_f_tot)
+    gas.TDX = T_f, rho_f, X_f
+    P_f = gas.P
+    # P_f = P0_f * (1 + (gamma_f - 1) / 2 * M_f**2)**(-gamma_f / (gamma_f - 1))
+
+    return rho_f, U_f, T_f
+
+eps_t = 1.0e-6
+t_phi_gl_schedule = np.array(
+    [[ 0.0          , 0.0 ],
+     [ 0.5*tau-eps_t, 0.0 ],
+     [ 0.5*tau      , 0.35],
+     [ 3.0*tau      , 0.35],
+     [ 8.0*tau      , 0.6 ],
+     [10.0*tau      , 0.6 ]])
+
+t_f = np.zeros(t_phi_gl_schedule.shape[0])
+rho_f = np.zeros(t_phi_gl_schedule.shape[0])
+U_f = np.zeros(t_phi_gl_schedule.shape[0])
+T_f = np.zeros(t_phi_gl_schedule.shape[0])
+for i in range(t_phi_gl_schedule.shape[0]):
+    t_f[i] = t_phi_gl_schedule[i, 0]
+    rho_f[i], U_f[i], T_f[i] = fuel_props_from_phi(t_phi_gl_schedule[i, 1])
+# NOTE: Assuming perfect gas & isentropic choked flow, only rho_f changes with phi/mdot
+U_f = U_f[-1]
+T_f = T_f[-1]
 
 # Define the grid
 N_x = 200
@@ -144,13 +200,6 @@ dx_Z_pdf = 5.0e-3
 dZ_pdf = 1.0e-2
 n_bins_Z_pdf = int(np.ceil(1.0 / dZ_pdf))
 
-# Time parameters
-tau = L / U_in
-t_end = 5 * tau
-# t_end = 0.5 * tau
-print(f"tau = {tau:.2e} s")
-print(f"t_end = {t_end:.2e} s")
-
 # Initialize the state
 gas_init = ct.Solution(mech)
 gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
@@ -160,18 +209,6 @@ initState = gas_init, U_in
 BC_inlet = gas_init.density, U_in, gas_init.P, gas_init.Y
 BC_outlet = 'outflow'
 BCs = (BC_inlet, BC_outlet)
-
-# Define the fuel inflow
-gas.TPX = T_f, 101325.0, "H2:1"
-gamma_f = gas.cp / gas.cv
-R_f = ct.gas_constant / gas.mean_molecular_weight
-a_f = np.sqrt(gamma_f * R_f * T_f)
-U_f = M_f * a_f
-rho_f = mdot_f / (U_f * A_f_tot)
-gas.TDX = T_f, rho_f, "H2:1"
-P_f = gas.P
-rhoE_f = P_f / (gamma_f - 1) + 0.5 * rho_f * U_f**2
-rhoYH2_f = rho_f * gas.Y[gas.species_index('H2')]
 
 # Load the FPV table
 fpv_table = FPVTable(table_file)
@@ -201,41 +238,41 @@ fpv_table = FPVTable(table_file)
 # Build the injector model
 jic = JICModel(gas, "H2",
                x, x_inj, w, h[0], N_f, 2*r_f,
-               rho_f, U_f, T_f,
+               t_f, rho_f, U_f, T_f,
                rho_in, U_in, T_in,
                alpha=1e6,
-               time_delay=0.5*tau,
-               fpv_table=fpv_table,
-               load_adjustment_factor=True,
-               load_Z_avg_var_profiles=True)
+               fpv_table=fpv_table)
 
 ###################################################################
 
 # # ######
 # # # Test plot
 
-# x_plot = x_inj + np.linspace(-5.0e-3, 0.05, 100)
-# y_plot = np.linspace(0, h[0], 50)
-# # x_plot = x_inj + np.linspace(-1.0e-3, 5.0e-3, 100)
-# # y_plot = np.linspace(0, 3.0e-3, 50)
-# z_plot = jic.z_inj[0]
+x_plot = x_inj + np.linspace(-5.0e-3, 0.05, 100)
+y_plot = np.linspace(0, h[0], 50)
+# x_plot = x_inj + np.linspace(-1.0e-3, 5.0e-3, 100)
+# y_plot = np.linspace(0, 3.0e-3, 50)
+z_plot = jic.z_inj[0]
 
-# X_plot, Y_plot = np.meshgrid(x_plot, y_plot, indexing='ij')
-# Z_plot = np.zeros_like(X_plot)
-# for i_x in range(len(x_plot)):
-#     for i_y in range(len(y_plot)):
-#         Z_plot[i_x, i_y] = jic.Z_3D_adjusted(X_plot[i_x, i_y], Y_plot[i_x, i_y], z_plot)
+X_plot, Y_plot = np.meshgrid(x_plot, y_plot, indexing='ij')
+Z_plot = np.zeros_like(X_plot)
+Z_plot = np.tile(Z_plot, (len(t_f), 1, 1))
+for i_x in range(len(x_plot)):
+    for i_y in range(len(y_plot)):
+        Z_plot[:, i_x, i_y] = jic.Z_3D_adjusted(X_plot[i_x, i_y], Y_plot[i_x, i_y], z_plot)
 
-# fig, ax = plt.subplots()
-# c = ax.contourf(X_plot*scale, Y_plot*scale, Z_plot, np.linspace(0, 1.0, 101))
-# x_plot_ycl = np.linspace(x_inj, x_plot[-1], 1000)
-# ax.plot(x_plot_ycl*scale, jic.y_cl(x_plot_ycl - x_inj)*scale, 'r')
-# ax.set_xlabel(r'$x$ [mm]')
-# ax.set_ylabel(r'$y$ [mm]')
-# cbar = plt.colorbar(c)
-# cbar.set_label(r'$Z$')
-# ax.set_aspect('equal')
-# plt.savefig(os.path.join(figdir, "injector_xy.png"), bbox_inches='tight', dpi=300)
+fig, ax = plt.subplots()
+c = ax.contourf(X_plot*scale, Y_plot*scale, Z_plot[4], np.linspace(0, 1.0, 101))
+x_plot_ycl = np.linspace(x_inj, x_plot[-1], 1000)
+ax.plot(x_plot_ycl*scale, jic.y_cl(x_plot_ycl - x_inj)*scale, 'r')
+ax.set_xlabel(r'$x$ [mm]')
+ax.set_ylabel(r'$y$ [mm]')
+cbar = plt.colorbar(c)
+cbar.set_label(r'$Z$')
+ax.set_aspect('equal')
+plt.savefig(os.path.join(figdir, "injector_xy.png"), bbox_inches='tight', dpi=300)
+
+breakpoint()
 
 # # # breakpoint()
 

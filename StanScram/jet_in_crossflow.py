@@ -16,13 +16,10 @@ class JICModel():
     '''
     def __init__(self, gas, fuel,
                  x, x_inj, w, h, n_inj, d_inj,
-                 rho_inj, u_inj, T_inj,
+                 t_inj, rho_inj, u_inj, T_inj,
                  rho, u, T,
                  alpha,
-                 time_delay=0.0,
-                 fpv_table=None,
-                 load_adjustment_factor=False,
-                 load_Z_avg_var_profiles=False):
+                 fpv_table=None):
         '''
         Method: __init__
         --------------------------------------------------------------------------
@@ -44,11 +41,13 @@ class JICModel():
             The number of injected jets
         d_inj: float
             The diameter of the injected jet
-        rho_inj: float
-            The density of the injected jet
-        u_inj: float
+        t_inj: np.ndarray
+            Time array for the injection profile
+        rho_inj: np.ndarray
+            The density of the injected jet, as a function of time
+        u_inj: np.ndarray
             The velocity of the injected jet
-        T_inj: float
+        T_inj: np.ndarray
             The temperature of the injected jet
         rho: float
             The density of the crossflow
@@ -58,14 +57,8 @@ class JICModel():
             The temperature of the crossflow
         alpha: float
             The relaxation parameter (used here only for storage)
-        time_delay: float
-            The time delay for the start of the injection
         fpv_table: FPVTable
             The FPV table object, used for the chemical source terms
-        load_adjustment_factor: bool
-            Whether to load the adjustment factor from file
-        load_Z_avg_var_profiles: bool
-            Whether to load the Z average and variance profiles from file
         '''
         self.gas = gas
         self.fuel = fuel
@@ -85,22 +78,13 @@ class JICModel():
         self.T = T
 
         self.alpha = alpha
-        self.time_delay = time_delay
         self.fpv_table = fpv_table
 
         # Geometry parameters
         self.A = self.w * self.h
         self.x_max = self.x[-1]
 
-        # Other properties
-        self.gas.TDX = self.T_inj, self.rho_inj, "{0}:1".format(self.fuel)
-        self.p_inj = self.gas.P
-        self.W_inj = self.gas.mean_molecular_weight
-        self.gamma_inj = self.gas.cp / self.gas.cv
-        self.c_inj = gas.sound_speed
-        self.M_inj = self.u_inj / self.c_inj
-        self.E_inj = self.gas.int_energy_mass + 0.5 * self.u_inj**2
-
+        # Free stream properties
         self.gas.TDX = self.T, self.rho, "O2:0.21,N2:0.79"
         self.p = self.gas.P
         self.W = self.gas.mean_molecular_weight
@@ -113,48 +97,46 @@ class JICModel():
 
         self.__prep_zbilger()
 
+        # Properties of the injected fluid
+        self.t_inj = t_inj
+        self.p_inj = np.zeros_like(self.t_inj)
+        for i in range(len(self.t_inj)):
+            if np.isnan(self.rho_inj[i]):
+                continue
+            self.gas.TDX = self.T_inj, self.rho_inj[i], "{0}:1".format(self.fuel)
+            self.p_inj[i] = self.gas.P
+        self.E_inj = self.gas.int_energy_mass + 0.5 * self.u_inj**2
+        self.W_inj = self.gas.mean_molecular_weight
+        self.gamma_inj = self.gas.cp / self.gas.cv
+        self.c_inj = gas.sound_speed
+        self.M_inj = 1.0
+
         # Properties behind the bow shock (assuming normal shock)
-        self.rho_2 = self.rho * (self.gamma + 1) * self.M**2 / ((self.gamma - 1) * self.M**2 + 2)
-        self.u_2 = self.u * self.rho / self.rho_2
+        # self.rho_2 = self.rho * (self.gamma + 1) * self.M**2 / ((self.gamma - 1) * self.M**2 + 2)
+        # self.u_2 = self.u * self.rho / self.rho_2
 
         # Integral of Yf across centerline normal plane
         A_inj = np.pi * (self.d_inj / 2.0)**2
-        self.Yf_cl_int = self.rho_inj * self.u_inj * A_inj / (self.rho_2 * self.u_2)
+        self.Yf_cl_int = self.rho_inj * self.u_inj * A_inj / (self.rho * self.u)
         self.d_eff = np.sqrt(self.Yf_cl_int / (2 * np.pi))
 
         # Compute the non-dimensional parameters
-        # self.r_u = np.sqrt(self.rho_inj / self.rho *
-        #                    (self.u_inj / self.u)**2)
         self.r_u = self.u_inj / self.u
         self.r_W = self.W_inj / self.W
         self.J = (self.gamma_inj * self.p_inj * self.M_inj) / (self.gamma * self.p * self.M)
+        # ^!!!! ASSUMES CHOKED FLOW
         
         # Create the array of injectors
         self.z_inj = np.linspace(-self.w/2, self.w/2, n_inj+2)[1:-1]
 
         # Precompute the adjustment factor for the boundary clipping
-        if load_adjustment_factor:
-            data = np.loadtxt(os.path.join(datadir, "adjustment_factor.csv"), delimiter=',')
-            self.x_cl_arr = data[:, 0]
-            self.y_cl_arr = data[:, 1]
-            self.adjustment_factor_arr = data[:, 2]
-
-            print("Building interpolators...")
-            self.adjustment_factor_interp_x = interpolate.CubicSpline(self.x_cl_arr, self.adjustment_factor_arr)
-            self.adjustment_factor_interp_y = interpolate.CubicSpline(self.y_cl_arr, self.adjustment_factor_arr)
-        else:
-            self.calc_adjustment_factor(write=True)
+        self.calc_adjustment_factor()
         
         # Precompute the axial mean and variance profiles of Z
-        if load_Z_avg_var_profiles:
-            data = np.loadtxt(os.path.join(datadir, "Z_avg_var_profiles.csv"), delimiter=',')
-            self.Z_avg_profile = data[:, 0]
-            self.Z_var_profile = data[:, 1]
-        else:
-            self.calc_Z_avg_var_profiles(write=True)
+        # self.calc_Z_avg_var_profiles()
         
         # Precompute and tabulate chemical source terms
-        self.calc_chemical_sources()
+        # self.calc_chemical_sources()
     
     def __prep_zbilger(self):
         #             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H - (Y_O - Yo_O)/W_O
@@ -170,12 +152,12 @@ class JICModel():
         W_H = self.gas.atomic_weight(i_H)
         W_O = self.gas.atomic_weight(i_O)
 
-        self.gas.TDX = self.T, self.rho, "O2:0.21,N2:0.79"
+        self.gas.X = "O2:0.21,N2:0.79"
         Yo_C = self.gas.elemental_mass_fraction("C") if has_C else 0.0
         Yo_H = self.gas.elemental_mass_fraction("H")
         Yo_O = self.gas.elemental_mass_fraction("O")
 
-        self.gas.TDX = self.T_inj, self.rho_inj, "{0}:1".format(self.fuel)
+        self.gas.X = "{0}:1".format(self.fuel)
         Yf_C = self.gas.elemental_mass_fraction("C") if has_C else 0.0
         Yf_H = self.gas.elemental_mass_fraction("H")
         Yf_O = self.gas.elemental_mass_fraction("O")
@@ -213,10 +195,18 @@ class JICModel():
         # return self.d_inj * 2.173 / self.J**0.276 * (x_cl / self.d_inj)**0.281 # Rothstein and Wantuck 1992
     
     def x_cl_from_y_cl(self, y_cl):
+        # SUBSONIC VERSION
         return (y_cl / (self.r_u * self.d_inj * 1.6))**(3.0) * self.r_u * self.d_inj # Hasselbrink and Mungal 2001 Pt. 2
+
+        # SUPERSONIC VERSION
+        # return (y_cl / (self.d_inj * self.J * 1.20))**(1.0 / 0.344) * self.d_inj * self.J - self.d_inj/2 # Gruber 1997 Phys. Fluids
     
     def dy_cl_dx(self, x_cl):
+        # SUBSONIC VERSION
         return (self.r_u * self.d_inj)**(2.0/3.0) * 1.6 * (1.0/3.0) * x_cl**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 2
+
+        # SUPERSONIC VERSION
+        # return self.d_inj * self.J * 1.20 * 0.344 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J))**(0.344 - 1.0) # Gruber 1997 Phys. Fluids
     
     def __nearest_on_cl_single(self, x, y, dz=0.0):
         # Offset coordinate
@@ -274,14 +264,19 @@ class JICModel():
             return self.__nearest_on_cl_single(x, y, dz)
     
     def Yf_cl(self, x_cl):
+        if isinstance(x_cl, np.ndarray):
+            rho_inj = self.rho_inj[:, np.newaxis]
+        else:
+            rho_inj = self.rho_inj
+
         # Centerline mole fraction
         y_cl = self.y_cl(x_cl)
-        xi = 0.4 * (1 / self.r_u) * (self.rho_inj / self.rho)**(0.5) * (y_cl / (self.r_u * self.d_inj))**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 1
+        xi = 0.4 * (1 / self.r_u) * (rho_inj / self.rho)**(0.5) * (y_cl / (self.r_u * self.d_inj))**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 1
         X_f = np.minimum(xi, 1.0)
         Y_f = X_f * self.W_inj / (X_f * self.W_inj + (1 - X_f) * self.W)
         return Y_f
     
-    def calc_adjustment_factor(self, write=False):
+    def calc_adjustment_factor(self):
         # Create array of points, L-shaped surrounding trajectory
         y_cl_max = self.y_cl(self.x_max - self.x_inj)
         x_arr = np.concatenate([
@@ -290,26 +285,21 @@ class JICModel():
         y_arr = np.concatenate([
             np.linspace(0, y_cl_max, 20),
             np.full(50, y_cl_max)[1:]])
-        self.x_cl_arr = np.zeros_like(x_arr)
-        self.y_cl_arr = np.zeros_like(y_arr)
+        x_cl_arr = np.zeros_like(x_arr)
+        y_cl_arr = np.zeros_like(y_arr)
         print("Computing trajectory...")
-        self.x_cl_arr, self.y_cl_arr, _ = self.nearest_on_cl(x_arr, y_arr)
+        x_cl_arr, y_cl_arr, _ = self.nearest_on_cl(x_arr, y_arr)
 
         # Iterate over the centerline
         print("Computing adjustment factor...")
-        self.adjustment_factor_arr = np.zeros_like(self.x_cl_arr)
-        idx = (self.x_cl_arr > 0)
-        self.adjustment_factor_arr[idx] = self.calc_adjustment_factor_xy(self.x_cl_arr[idx], self.y_cl_arr[idx])
+        adjustment_factor_arr = np.zeros([len(self.t_inj), len(x_cl_arr)])
+        idx = (x_cl_arr > 0)
+        adjustment_factor_arr[:, idx] = self.calc_adjustment_factor_xy(x_cl_arr[idx], y_cl_arr[idx])
+        adjustment_factor_arr[np.isnan(adjustment_factor_arr)] = 1.0
         
         print("Building interpolators...")
-        self.adjustment_factor_interp_x = interpolate.CubicSpline(self.x_cl_arr, self.adjustment_factor_arr)
-        self.adjustment_factor_interp_y = interpolate.CubicSpline(self.y_cl_arr, self.adjustment_factor_arr)
-        
-        if write:
-            print("Writing adjustment factor to file...")
-            np.savetxt(os.path.join(datadir, "adjustment_factor.csv"),
-                       np.stack((self.x_cl_arr, self.y_cl_arr, self.adjustment_factor_arr), axis=1),
-                       delimiter=',')
+        self.adjustment_factor_interp_x = interpolate.CubicSpline(x_cl_arr, adjustment_factor_arr, axis=1)
+        self.adjustment_factor_interp_y = interpolate.CubicSpline(y_cl_arr, adjustment_factor_arr, axis=1)
     
     def calc_adjustment_factor_xy(self, x_cl, y_cl):
         # Compute the normal to the centerline
@@ -324,11 +314,10 @@ class JICModel():
         xi_lo = -np.sqrt((x_bot - x_cl)**2 + (     0 - y_cl)**2)
         xi_hi =  np.sqrt((x_top - x_cl)**2 + (self.h - y_cl)**2)
         
-        
-        Yf_int_nobound = self.n_inj * self.Yf_cl_int
+        Yf_int_nobound = self.n_inj * self.Yf_cl_int[:, np.newaxis]
 
         Yf_cl = self.Yf_cl(x_cl)
-        sigma2 = self.Yf_cl_int / (2 * np.pi * Yf_cl)
+        sigma2 = self.Yf_cl_int[:, np.newaxis] / (2 * np.pi * Yf_cl)
         s2s = np.sqrt(2 * sigma2)
 
         Yf_int_bound = 0.0
@@ -355,16 +344,21 @@ class JICModel():
         return fac
     
     def get_adjustment_factor(self, x, y):
-        # if x <  self.x_inj - (self.d_eff / 2):
-        #     return 1.0
+        if np.isscalar(x):
+            x_arr = np.array([x])
+            y_arr = np.array([y])
 
-        x_cl, y_cl, _ = self.nearest_on_cl(x, y)
+        x_cl, y_cl, _ = self.nearest_on_cl(x_arr, y_arr)
         dy_cl_dx = self.dy_cl_dx(x_cl)
         idx_g1 = dy_cl_dx > 1
-        fac = np.zeros_like(x_cl)
-        fac[ idx_g1] = self.adjustment_factor_interp_x(x_cl[ idx_g1])
-        fac[~idx_g1] = self.adjustment_factor_interp_y(y_cl[~idx_g1])
-        return fac
+        fac = np.zeros([len(self.t_inj), len(x_cl)])
+        fac[:,  idx_g1] = self.adjustment_factor_interp_x(x_cl[ idx_g1])
+        fac[:, ~idx_g1] = self.adjustment_factor_interp_y(y_cl[~idx_g1])
+
+        if np.isscalar(x):
+            return fac.T[0]
+        else:
+            return fac
     
     def Yf_3D(self, x, y, z):
         '''
@@ -591,40 +585,43 @@ class JICModel():
 
         return grad_Yf
 
-    def Z_avg(self, x):
-        func = lambda z, y: self.Z_3D(x, y, z)
-        return integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
-    
-    def Z_avg_adjusted(self, x):
-        func = lambda z, y: self.Z_3D_adjusted(x, y, z)
-        return integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
-    
     def Z_avg_var(self, x):
-        func = lambda z, y: self.Z_3D(x, y, z)
-        Z_avg = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
-        func = lambda z, y: (self.Z_3D(x, y, z) - Z_avg)**2
-        Z_var = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+        Z_avg = np.zeros_like(self.t_inj)
+        Z_var = np.zeros_like(self.t_inj)
+        for i_t in range(len(self.t_inj)):
+            if np.isnan(self.rho_inj[i_t]):
+                Z_avg[i_t] = 0.0
+                Z_var[i_t] = 0.0
+                continue
+
+            func = lambda z, y: self.Z_3D(x, y, z)[i_t]
+            Z_avg[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            func = lambda z, y: (self.Z_3D(x, y, z)[i_t] - Z_avg[i_t])**2
+            Z_var[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
         return Z_avg, Z_var
     
     def Z_avg_var_adjusted(self, x):
-        func = lambda z, y: self.Z_3D_adjusted(x, y, z)
-        Z_avg = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
-        func = lambda z, y: (self.Z_3D_adjusted(x, y, z) - Z_avg)**2
-        Z_var = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+        Z_avg = np.zeros_like(self.t_inj)
+        Z_var = np.zeros_like(self.t_inj)
+        for i_t in range(len(self.t_inj)):
+            if np.isnan(self.rho_inj[i_t]):
+                Z_avg[i_t] = 0.0
+                Z_var[i_t] = 0.0
+                continue
+
+            func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_t]
+            Z_avg[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_t] - Z_avg[i_t])**2
+            Z_var[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
         return Z_avg, Z_var
     
-    def calc_Z_avg_var_profiles(self, write=False):
-        self.Z_avg_profile = np.zeros_like(self.x)
-        self.Z_var_profile = np.zeros_like(self.x)
+    def calc_Z_avg_var_profiles(self):
+        self.Z_avg_profile = np.zeros([len(self.t_inj), len(self.x)])
+        self.Z_var_profile = np.zeros([len(self.t_inj), len(self.x)])
         print("Computing Z average and variance profiles...")
         for i in tqdm(range(len(self.x))):
-            self.Z_avg_profile[i], self.Z_var_profile[i] = self.Z_avg_var_adjusted(self.x[i])
-        
-        if write:
-            print("Writing Z average and variance profiles to file...")
-            np.savetxt(os.path.join(datadir, "Z_avg_var_profiles.csv"),
-                       np.stack((self.Z_avg_profile, self.Z_var_profile), axis=1),
-                       delimiter=',')
+            self.Z_avg_profile[:, i], self.Z_var_profile[:, i] = self.Z_avg_var_adjusted(self.x[i])
+        breakpoint()
     
     def estimate_p_Z(self, x, Z):
         '''
@@ -735,7 +732,6 @@ class JICModel():
                 omega_Y_i = interpolate.CubicSpline(L_probe, omega_Y_probe, axis=0)
 
             self.omega_Y_interpolators.append(omega_Y_i)
-            #TODO: Pickle these and write to file
     
     def get_chemical_sources(self, C, t):
         '''
