@@ -1,5 +1,6 @@
 import os
 from tqdm import tqdm
+import pickle
 import numpy as np
 from scipy import optimize, integrate, interpolate, special, stats
 import cantera as ct
@@ -19,7 +20,9 @@ class JICModel():
                  t_inj, rho_inj, u_inj, T_inj,
                  rho, u, T,
                  alpha,
-                 fpv_table=None):
+                 fpv_table=None,
+                 load_Z_avg_var_profiles=False,
+                 load_chemical_sources=False):
         '''
         Method: __init__
         --------------------------------------------------------------------------
@@ -59,6 +62,10 @@ class JICModel():
             The relaxation parameter (used here only for storage)
         fpv_table: FPVTable
             The FPV table object, used for the chemical source terms
+        load_Z_avg_var_profiles: bool
+            Whether to load the Z average and variance profiles
+        load_chemical_sources: bool
+            Whether to load the chemical source terms
         '''
         self.gas = gas
         self.fuel = fuel
@@ -83,6 +90,7 @@ class JICModel():
         # Geometry parameters
         self.A = self.w * self.h
         self.x_max = self.x[-1]
+        self.A_inj = np.pi * (self.d_inj / 2.0)**2
 
         # Free stream properties
         self.gas.TDX = self.T, self.rho, "O2:0.21,N2:0.79"
@@ -91,9 +99,6 @@ class JICModel():
         self.gamma = self.gas.cp / self.gas.cv
         self.c = gas.sound_speed
         self.M = self.u / self.c
-
-        # Position of the first injected fluid particle
-        self.x_fluid_tip = self.x_inj
 
         self.__prep_zbilger()
 
@@ -110,6 +115,17 @@ class JICModel():
         self.gamma_inj = self.gas.cp / self.gas.cv
         self.c_inj = gas.sound_speed
         self.M_inj = 1.0
+        self.mdot_inj = self.rho_inj * self.u_inj * self.A_inj
+
+        self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
+        self.mdot_inj_unique, self.mdot_inj_unique_idx = np.unique(self.mdot_inj, return_index=True)
+        self.mdot_inj_unique_idx = self.mdot_inj_unique_idx[np.argsort(self.mdot_inj_unique)]
+        self.mdot_inj_unique = self.mdot_inj[self.mdot_inj_unique_idx]
+        self.rho_inj_unique = self.rho_inj[self.mdot_inj_unique_idx]
+        self.p_inj_unique = self.p_inj[self.mdot_inj_unique_idx]
+
+        # Position of the first injected fluid particle
+        self.fluid_tips = np.array([[self.x_inj, self.mdot_inj[0]]])
 
         # Properties behind the bow shock (assuming normal shock)
         # self.rho_2 = self.rho * (self.gamma + 1) * self.M**2 / ((self.gamma - 1) * self.M**2 + 2)
@@ -117,7 +133,7 @@ class JICModel():
 
         # Integral of Yf across centerline normal plane
         A_inj = np.pi * (self.d_inj / 2.0)**2
-        self.Yf_cl_int = self.rho_inj * self.u_inj * A_inj / (self.rho * self.u)
+        self.Yf_cl_int = self.rho_inj_unique * self.u_inj * A_inj / (self.rho * self.u)
         self.d_eff = np.sqrt(self.Yf_cl_int / (2 * np.pi))
 
         # Compute the non-dimensional parameters
@@ -133,11 +149,30 @@ class JICModel():
         self.calc_adjustment_factor()
         
         # Precompute the axial mean and variance profiles of Z
-        # self.calc_Z_avg_var_profiles()
+        if load_Z_avg_var_profiles:
+            self.Z_avg_profile = np.load(os.path.join(datadir, "Z_avg_profile.npy"))
+            self.Z_var_profile = np.load(os.path.join(datadir, "Z_var_profile.npy"))
+        else:
+            self.calc_Z_avg_var_profiles(write=True)
+        
+        # Precompute the mapping from mdot to Z mean and variance profiles
+        self.Z_avg_profile_interp = interpolate.RegularGridInterpolator((self.mdot_inj_unique, self.x),
+                                                                        self.Z_avg_profile)
+        self.Z_var_profile_interp = interpolate.RegularGridInterpolator((self.mdot_inj_unique, self.x),
+                                                                        self.Z_var_profile)
         
         # Precompute and tabulate chemical source terms
-        # self.calc_chemical_sources()
-    
+        if load_chemical_sources:
+            L_probe = np.load(os.path.join(datadir, "L_probe.npy"))
+            omega_Y = np.load(os.path.join(datadir, "omega_Y.npy"))
+            self.omega_Y_interpolators = []
+            for i in range(len(self.x)):
+                omega_Y_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
+                                                                omega_Y[i])
+                self.omega_Y_interpolators.append(omega_Y_i)
+        else:
+            self.calc_chemical_sources(write=True)
+   
     def __prep_zbilger(self):
         #             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H - (Y_O - Yo_O)/W_O
         # ZBilger =  -----------------------------------------------------------
@@ -265,13 +300,13 @@ class JICModel():
     
     def Yf_cl(self, x_cl):
         if isinstance(x_cl, np.ndarray):
-            rho_inj = self.rho_inj[:, np.newaxis]
+            rho_inj_unique = self.rho_inj_unique[:, np.newaxis]
         else:
-            rho_inj = self.rho_inj
+            rho_inj_unique = self.rho_inj_unique
 
         # Centerline mole fraction
         y_cl = self.y_cl(x_cl)
-        xi = 0.4 * (1 / self.r_u) * (rho_inj / self.rho)**(0.5) * (y_cl / (self.r_u * self.d_inj))**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 1
+        xi = 0.4 * (1 / self.r_u) * (rho_inj_unique / self.rho)**(0.5) * (y_cl / (self.r_u * self.d_inj))**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 1
         X_f = np.minimum(xi, 1.0)
         Y_f = X_f * self.W_inj / (X_f * self.W_inj + (1 - X_f) * self.W)
         return Y_f
@@ -292,7 +327,7 @@ class JICModel():
 
         # Iterate over the centerline
         print("Computing adjustment factor...")
-        adjustment_factor_arr = np.zeros([len(self.t_inj), len(x_cl_arr)])
+        adjustment_factor_arr = np.zeros([len(self.mdot_inj_unique), len(x_cl_arr)])
         idx = (x_cl_arr > 0)
         adjustment_factor_arr[:, idx] = self.calc_adjustment_factor_xy(x_cl_arr[idx], y_cl_arr[idx])
         adjustment_factor_arr[np.isnan(adjustment_factor_arr)] = 1.0
@@ -351,7 +386,7 @@ class JICModel():
         x_cl, y_cl, _ = self.nearest_on_cl(x_arr, y_arr)
         dy_cl_dx = self.dy_cl_dx(x_cl)
         idx_g1 = dy_cl_dx > 1
-        fac = np.zeros([len(self.t_inj), len(x_cl)])
+        fac = np.zeros([len(self.mdot_inj_unique), len(x_cl)])
         fac[:,  idx_g1] = self.adjustment_factor_interp_x(x_cl[ idx_g1])
         fac[:, ~idx_g1] = self.adjustment_factor_interp_y(y_cl[~idx_g1])
 
@@ -586,42 +621,45 @@ class JICModel():
         return grad_Yf
 
     def Z_avg_var(self, x):
-        Z_avg = np.zeros_like(self.t_inj)
-        Z_var = np.zeros_like(self.t_inj)
-        for i_t in range(len(self.t_inj)):
-            if np.isnan(self.rho_inj[i_t]):
-                Z_avg[i_t] = 0.0
-                Z_var[i_t] = 0.0
+        Z_avg = np.zeros_like(self.mdot_inj_unique)
+        Z_var = np.zeros_like(self.mdot_inj_unique)
+        for i_m in range(len(self.mdot_inj_unique)):
+            if np.isnan(self.rho_inj_unique[i_m]):
+                Z_avg[i_m] = 0.0
+                Z_var[i_m] = 0.0
                 continue
 
-            func = lambda z, y: self.Z_3D(x, y, z)[i_t]
-            Z_avg[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
-            func = lambda z, y: (self.Z_3D(x, y, z)[i_t] - Z_avg[i_t])**2
-            Z_var[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            func = lambda z, y: self.Z_3D(x, y, z)[i_m]
+            Z_avg[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            func = lambda z, y: (self.Z_3D(x, y, z)[i_m] - Z_avg[i_m])**2
+            Z_var[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
         return Z_avg, Z_var
     
     def Z_avg_var_adjusted(self, x):
-        Z_avg = np.zeros_like(self.t_inj)
-        Z_var = np.zeros_like(self.t_inj)
-        for i_t in range(len(self.t_inj)):
-            if np.isnan(self.rho_inj[i_t]):
-                Z_avg[i_t] = 0.0
-                Z_var[i_t] = 0.0
+        Z_avg = np.zeros_like(self.mdot_inj_unique)
+        Z_var = np.zeros_like(self.mdot_inj_unique)
+        for i_m in range(len(self.mdot_inj_unique)):
+            if np.isnan(self.rho_inj_unique[i_m]):
+                Z_avg[i_m] = 0.0
+                Z_var[i_m] = 0.0
                 continue
 
-            func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_t]
-            Z_avg[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
-            func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_t] - Z_avg[i_t])**2
-            Z_var[i_t] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_m]
+            Z_avg[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_m] - Z_avg[i_m])**2
+            Z_var[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
         return Z_avg, Z_var
     
-    def calc_Z_avg_var_profiles(self):
-        self.Z_avg_profile = np.zeros([len(self.t_inj), len(self.x)])
-        self.Z_var_profile = np.zeros([len(self.t_inj), len(self.x)])
+    def calc_Z_avg_var_profiles(self, write=False):
+        self.Z_avg_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
+        self.Z_var_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
         print("Computing Z average and variance profiles...")
         for i in tqdm(range(len(self.x))):
             self.Z_avg_profile[:, i], self.Z_var_profile[:, i] = self.Z_avg_var_adjusted(self.x[i])
-        breakpoint()
+        
+        if write:
+            np.save(os.path.join(datadir, "Z_avg_profile.npy"), self.Z_avg_profile)
+            np.save(os.path.join(datadir, "Z_var_profile.npy"), self.Z_var_profile)
     
     def estimate_p_Z(self, x, Z):
         '''
@@ -641,25 +679,32 @@ class JICModel():
         b = a * (1 - Z_avg) / Z_avg
         return stats.beta.pdf(Z, a, b)
     
-    def update_fluid_tip_position(self, dt, t, u):
+    def update_fluid_tip_positions(self, dt, t, u):
         '''
-        Method: update_fluid_tip_position
+        Method: update_fluid_tip_positions
         --------------------------------------------------------------------------
-        This method updates the position of the fluid tip based on the velocity
+        This method updates the position of the fluid tips based on the velocity
         of the fluid.
         t: float
             The current time
         dt: float
             The time step
         x: float
-            The current x-coordinate of the fluid tip
+            The current x-coordinate of the fluid tips
         u: float
             The current velocity of the fluid
         '''
-        if t < self.time_delay:
-            return
-        self.x_fluid_tip += dt * np.interp(self.x_fluid_tip, self.x, u)
-    
+        # Update the fluid tip positions
+        self.fluid_tips[:, 0] += dt * np.interp(self.fluid_tips[:, 0], self.x, u)
+        
+        # Emit a new fluid tip
+        mdot = np.interp(t, self.t_inj, self.mdot_inj)
+        next_tip = np.array([[self.x_inj, mdot]])
+        self.fluid_tips = np.concatenate([self.fluid_tips, next_tip], axis=0)
+
+        # Drop fluid tips that have passed the end of the domain
+        self.fluid_tips = self.fluid_tips[self.fluid_tips[:, 0] < self.x_max]
+
     def get_injector_sources(self, rho, rhoU, E, rhoY, gamma, t):
         '''
         Method: get_injector_sources
@@ -668,12 +713,13 @@ class JICModel():
         mixture fraction profile.
         '''
         rhs = np.zeros((rho.shape[0], 3+self.gas.n_species))
-        if t < self.time_delay:
-            return rhs
 
         Y = rhoY / rho.reshape((-1, 1))
         Z = np.sum(self.Z_weights * Y, axis=1) + self.Z_offset
-        Z_target = self.Z_avg_profile
+        last_fluid_tip = len(self.fluid_tips) - np.searchsorted(self.fluid_tips[::-1, 0], self.x, side='right') - 1
+        mdot_profile = np.zeros_like(self.x)
+        mdot_profile[last_fluid_tip > 0] = self.fluid_tips[last_fluid_tip[last_fluid_tip > 0], 1]
+        Z_target = self.Z_avg_profile_interp((mdot_profile, self.x))
         mdot = rho * self.alpha * (Z_target - Z)
 
         # Treat small (pre-injector) values
@@ -686,12 +732,9 @@ class JICModel():
         rhs[:, 2         ] = mdot * self.E_inj
         rhs[:, 3 + i_fuel] = mdot
 
-        # Only apply source terms in regions that the fluid has reached
-        rhs[self.x > self.x_fluid_tip, :] = 0.0
-
         return rhs
     
-    def calc_chemical_sources(self):
+    def calc_chemical_sources(self, write=False):
         '''
         Method: calc_chemical_sources
         --------------------------------------------------------------------------
@@ -703,57 +746,77 @@ class JICModel():
         Z_probe = np.linspace(0.0, 1.0, 1000)
         # TODO ^ cluster these points around min and max Z
         L_probe = np.linspace(0.0, 1.0, 200)
-        Z_mesh, L_mesh = np.meshgrid(Z_probe, L_probe, indexing='ij')
+        Z_mesh_ZL, L_mesh_ZL = np.meshgrid(Z_probe, L_probe, indexing='ij')
+
+        if write:
+            np.save(os.path.join(datadir, "L_probe.npy"), L_probe)
+            omega_Y = np.zeros((len(self.x),
+                                len(self.mdot_inj_unique),
+                                len(L_probe),
+                                self.gas.n_species))
 
         for i in tqdm(range(len(self.x))):
-            Z_avg = self.Z_avg_profile[i]
-            Z_var = self.Z_var_profile[i]
+            # Z_avg = self.Z_avg_profile[self.mdot_inj_unique_idx, i]
+            # Z_var = self.Z_var_profile[self.mdot_inj_unique_idx, i]
+            Z_avg = self.Z_avg_profile[:, i]
+            Z_var = self.Z_var_profile[:, i]
             omega_Y_i = []
 
-            if Z_avg == 0.0:
-                omega_Y_i = lambda L : np.zeros(self.gas.n_species)
+            if np.all(Z_avg == 0.0):
+                omega_Y_i = lambda mdot, L : np.zeros(self.gas.n_species)
+                if write:
+                    omega_Y[i, :, :, :] = 0.0
             else:
                 a = ((Z_avg * (1 - Z_avg) / Z_var) - 1) * Z_avg
                 b = a * (1 - Z_avg) / Z_avg
-                p_Z = stats.beta.pdf(Z_probe, a, b)
+                p_Z = stats.beta.pdf(np.tile(Z_probe, (len(self.mdot_inj_unique), 1)),
+                                     np.tile(a, (len(Z_probe), 1)).T,
+                                     np.tile(b, (len(Z_probe), 1)).T)
 
-                omega_Y_probe = np.zeros((len(L_probe), self.gas.n_species))
+                omega_Y_probe = np.zeros((len(self.mdot_inj_unique), len(L_probe), self.gas.n_species))
                 for k in range(self.gas.n_species):
                     src_name = "SRC_{0}".format(self.gas.species_name(k))
-                    omega_Y_k_probe = self.fpv_table.lookup(src_name, Z_mesh, 0.0, L_mesh) # [1/s]
+                    omega_Y_k_probe = self.fpv_table.lookup(src_name, Z_mesh_ZL, 0.0, L_mesh_ZL) # [1/s]
                     # PDF may have singularities at the boundaries, but the source term should be
                     # zero there anyway
-                    p_Z[0] = 0.0
-                    p_Z[-1] = 0.0
+                    p_Z[:,  0] = 0.0
+                    p_Z[:, -1] = 0.0
                     omega_Y_k_probe[ 0, :] = 0.0
                     omega_Y_k_probe[-1, :] = 0.0
-                    omega_Y_probe[:, k] = np.trapz(omega_Y_k_probe * p_Z.reshape((-1, 1)), Z_probe, axis=0)
+                    for i_m in range(len(self.mdot_inj_unique)):
+                        omega_Y_probe[i_m, :, k] = np.trapz(omega_Y_k_probe * p_Z[i_m, :].reshape((-1, 1)),
+                                                            Z_probe, axis=0)
 
-                omega_Y_i = interpolate.CubicSpline(L_probe, omega_Y_probe, axis=0)
+                omega_Y_probe[np.isnan(omega_Y_probe)] = 0.0
+                omega_Y_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
+                                                                omega_Y_probe)
+                if write:
+                    omega_Y[i, :, :, :] = omega_Y_probe
 
             self.omega_Y_interpolators.append(omega_Y_i)
-    
-    def get_chemical_sources(self, C, t):
+        
+        if write:
+            np.save(os.path.join(datadir, "omega_Y.npy"), omega_Y)
+   
+    def get_chemical_sources(self, Y, C):
         '''
         Method: get_chemical_sources
         --------------------------------------------------------------------------
         This method computes the chemical source terms [1/s] using the FPV table.
+        Y: float
+            The array of species mass fractions at different grid points
         C: float
             The array of progress variable values at different grid points
         t: float
             The current time
         '''
         omega_Y = np.zeros((len(self.x), self.gas.n_species))
-        if t < self.time_delay:
-            return omega_Y
+        Z = np.sum(self.Z_weights * Y, axis=1) + self.Z_offset
         
-        for i in range(len(self.x)):
-            Z_avg = self.Z_avg_profile[i]
-            L = self.fpv_table.L_from_C(Z_avg, C[i])
-            omega_Y[i, :] = self.omega_Y_interpolators[i](L)
+        for i_x in range(len(self.x)):
+            i_last_tip = np.argmax(self.fluid_tips[:, 0] >= self.x[i_x]) # Note that fluid_tips is descending
+            L = self.fpv_table.L_from_C(Z[i_x], C[i_x])
+            omega_Y[i_x, :] = self.omega_Y_interpolators[i_x]((self.fluid_tips[i_last_tip, 1], L))
         
-        # Only apply source terms in regions that the fluid has reached
-        omega_Y[self.x > self.x_fluid_tip, :] = 0.0
-
         return omega_Y
     

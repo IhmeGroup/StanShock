@@ -112,6 +112,7 @@ print(f"t_end = {t_end:.2e} s")
 # Compressible air properties
 gas.TPX = T_in, P_in, X_ox
 gamma_in = gas.cp / gas.cv
+H_in = gas.enthalpy_mass
 a_in = gas.sound_speed
 M_in_comp = U_in / a_in
 
@@ -141,6 +142,7 @@ def fuel_props_from_phi(phi_gl):
         return np.nan, 0.0, 300.0
 
     gas.set_equivalence_ratio(phi_gl, X_f, X_ox)
+    X_mix = gas.X
     Yf_gl = gas.Y[gas.species_index('H2')]
     mdot_f = (Yf_gl / gas.Y[gas.species_index('O2')]) * mdot_O2
     Z_gl = gas.mixture_fraction(X_f, X_ox)
@@ -159,18 +161,24 @@ def fuel_props_from_phi(phi_gl):
     rho_f = mdot_f / (U_f * A_f_tot)
     gas.TDX = T_f, rho_f, X_f
     P_f = gas.P
+    H_f = gas.enthalpy_mass
     # P_f = P0_f * (1 + (gamma_f - 1) / 2 * M_f**2)**(-gamma_f / (gamma_f - 1))
+
+    # Compute the estimated temperature of the mixture
+    # (Pressure will change but this doesn't affect the temperature)
+    # gas.HPX = (mdot_a * H_in + mdot_f * H_f) / (mdot_a + mdot_f), P_in, X_mix
+    # T_mix = gas.T
 
     return rho_f, U_f, T_f
 
 eps_t = 1.0e-6
 t_phi_gl_schedule = np.array(
-    [[ 0.0          , 0.0 ],
-     [ 0.5*tau-eps_t, 0.0 ],
-     [ 0.5*tau      , 0.35],
-     [ 3.0*tau      , 0.35],
-     [ 8.0*tau      , 0.6 ],
-     [10.0*tau      , 0.6 ]])
+    [[ 0.0    , 0.0 ],
+     [ 0.5*tau, 0.0 ],
+     [ 5.0*tau, 0.35],
+     [ 8.0*tau, 0.35],
+     [13.0*tau, 0.6 ],
+     [18.0*tau, 0.6 ]])
 
 t_f = np.zeros(t_phi_gl_schedule.shape[0])
 rho_f = np.zeros(t_phi_gl_schedule.shape[0])
@@ -241,38 +249,38 @@ jic = JICModel(gas, "H2",
                t_f, rho_f, U_f, T_f,
                rho_in, U_in, T_in,
                alpha=1e6,
-               fpv_table=fpv_table)
+               fpv_table=fpv_table,
+               load_Z_avg_var_profiles=True,
+               load_chemical_sources=True)
 
 ###################################################################
 
 # # ######
 # # # Test plot
 
-x_plot = x_inj + np.linspace(-5.0e-3, 0.05, 100)
-y_plot = np.linspace(0, h[0], 50)
-# x_plot = x_inj + np.linspace(-1.0e-3, 5.0e-3, 100)
-# y_plot = np.linspace(0, 3.0e-3, 50)
-z_plot = jic.z_inj[0]
+# x_plot = x_inj + np.linspace(-5.0e-3, 0.05, 100)
+# y_plot = np.linspace(0, h[0], 50)
+# # x_plot = x_inj + np.linspace(-1.0e-3, 5.0e-3, 100)
+# # y_plot = np.linspace(0, 3.0e-3, 50)
+# z_plot = jic.z_inj[0]
 
-X_plot, Y_plot = np.meshgrid(x_plot, y_plot, indexing='ij')
-Z_plot = np.zeros_like(X_plot)
-Z_plot = np.tile(Z_plot, (len(t_f), 1, 1))
-for i_x in range(len(x_plot)):
-    for i_y in range(len(y_plot)):
-        Z_plot[:, i_x, i_y] = jic.Z_3D_adjusted(X_plot[i_x, i_y], Y_plot[i_x, i_y], z_plot)
+# X_plot, Y_plot = np.meshgrid(x_plot, y_plot, indexing='ij')
+# Z_plot = np.zeros_like(X_plot)
+# Z_plot = np.tile(Z_plot, (len(t_f), 1, 1))
+# for i_x in range(len(x_plot)):
+#     for i_y in range(len(y_plot)):
+#         Z_plot[:, i_x, i_y] = jic.Z_3D_adjusted(X_plot[i_x, i_y], Y_plot[i_x, i_y], z_plot)
 
-fig, ax = plt.subplots()
-c = ax.contourf(X_plot*scale, Y_plot*scale, Z_plot[4], np.linspace(0, 1.0, 101))
-x_plot_ycl = np.linspace(x_inj, x_plot[-1], 1000)
-ax.plot(x_plot_ycl*scale, jic.y_cl(x_plot_ycl - x_inj)*scale, 'r')
-ax.set_xlabel(r'$x$ [mm]')
-ax.set_ylabel(r'$y$ [mm]')
-cbar = plt.colorbar(c)
-cbar.set_label(r'$Z$')
-ax.set_aspect('equal')
-plt.savefig(os.path.join(figdir, "injector_xy.png"), bbox_inches='tight', dpi=300)
-
-breakpoint()
+# fig, ax = plt.subplots()
+# c = ax.contourf(X_plot*scale, Y_plot*scale, Z_plot[4], np.linspace(0, 1.0, 101))
+# x_plot_ycl = np.linspace(x_inj, x_plot[-1], 1000)
+# ax.plot(x_plot_ycl*scale, jic.y_cl(x_plot_ycl - x_inj)*scale, 'r')
+# ax.set_xlabel(r'$x$ [mm]')
+# ax.set_ylabel(r'$y$ [mm]')
+# cbar = plt.colorbar(c)
+# cbar.set_label(r'$Z$')
+# ax.set_aspect('equal')
+# plt.savefig(os.path.join(figdir, "injector_xy.png"), bbox_inches='tight', dpi=300)
 
 # # # breakpoint()
 
@@ -376,19 +384,19 @@ breakpoint()
 
 ###################################################################
 
-fig, ax = plt.subplots(figsize=(4, 3.2))
-ax.plot(x*scale, jic.Z_avg_profile, 'b')
-ax.axhline(Z_gl, color='b', linestyle='--')
-ax.set_ymargin(0.1)
-ax.set_xlabel(r'$x$ [mm]')
-ax.set_ylabel(r'$\langle Z \rangle$', color='b')
-ax.tick_params(axis='y', labelcolor='b')
-ax1 = ax.twinx()
-ax1.semilogy(x*scale, jic.Z_var_profile, 'r')
-ax1.set_ymargin(0.1)
-ax1.set_ylabel(r"$\langle Z''^2 \rangle$", color='r')
-ax1.tick_params(axis='y', labelcolor='r')
-plt.savefig(os.path.join(figdir, "Z_avg_var.png"), bbox_inches='tight', dpi=300)
+# fig, ax = plt.subplots(figsize=(4, 3.2))
+# ax.plot(x*scale, jic.Z_avg_profile, 'b')
+# ax.axhline(Z_gl, color='b', linestyle='--')
+# ax.set_ymargin(0.1)
+# ax.set_xlabel(r'$x$ [mm]')
+# ax.set_ylabel(r'$\langle Z \rangle$', color='b')
+# ax.tick_params(axis='y', labelcolor='b')
+# ax1 = ax.twinx()
+# ax1.semilogy(x*scale, jic.Z_var_profile, 'r')
+# ax1.set_ymargin(0.1)
+# ax1.set_ylabel(r"$\langle Z''^2 \rangle$", color='r')
+# ax1.tick_params(axis='y', labelcolor='r')
+# plt.savefig(os.path.join(figdir, "Z_avg_var.png"), bbox_inches='tight', dpi=300)
 
 ###################################################################
 

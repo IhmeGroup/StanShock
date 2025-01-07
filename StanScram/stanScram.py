@@ -913,7 +913,7 @@ class stanScram(object):
         xscale = 1.0e3
         T = self.thermoTable.getTemperature(self.r, self.p, self.Y)
 
-        fig, ax = plt.subplots(8, 1, sharex=True, figsize=(6, 9))
+        fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
         ax[0].plot(self.x*xscale, self.r)
         ax[0].set_ymargin(0.1)
         ax[0].set_ylabel(r'$\rho$ [kg/m$^3$]')
@@ -949,25 +949,22 @@ class stanScram(object):
         if self.h is not None:
             self.add_h_plot(ax[4], scale=xscale)
 
-        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2')])
+        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2' )], label=r"$\mathrm{H}_2$")
+        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('OH' )], label=r"$\mathrm{OH}$")
+        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2O')], label=r"$\mathrm{H}_2\mathrm{O}$")
         ax[5].set_ymargin(0.1)
-        ax[5].set_ylabel(r'$Y_{\mathrm{H}_2}$ [-]')
+        ax[5].set_ylabel(r'$Y_k$ [-]')
+        ax[5].legend(loc='upper left')
         if self.h is not None:
             self.add_h_plot(ax[5], scale=xscale)
 
-        ax[6].plot(self.x*xscale, self.Y[:, self.gas.species_index('OH')])
+        ax[6].scatter(self.injector.fluid_tips[:, 0]*xscale, self.injector.fluid_tips[:, 1], s=1)
         ax[6].set_ymargin(0.1)
-        ax[6].set_ylabel(r'$Y_{\mathrm{OH}}$ [-]')
+        ax[6].set_ylabel(r"$\dot{m}$ [kg/s]")
         if self.h is not None:
             self.add_h_plot(ax[6], scale=xscale)
 
-        ax[7].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2O')])
-        ax[7].set_ymargin(0.1)
-        ax[7].set_ylabel(r'$Y_{\mathrm{H}_2\mathrm{O}}$ [-]')
-        if self.h is not None:
-            self.add_h_plot(ax[7], scale=xscale)
-
-        ax[7].set_xlabel('x [mm]')
+        ax[6].set_xlabel('x [mm]')
 
         fig.suptitle('$t = {:.4f}$ ms'.format(self.t*1.0e3))
 
@@ -1373,7 +1370,7 @@ class stanScram(object):
         '''
         C = self.Prog(self.Y)
         W = self.gas.molecular_weights
-        wDot = self.r.reshape((-1,1)) * self.injector.get_chemical_sources(C,self.t) # kg/m^3 * 1/s = kg/m^3/s
+        wDot = self.r.reshape((-1,1)) * self.injector.get_chemical_sources(self.Y,C) # kg/m^3 * 1/s = kg/m^3/s
         wHatDot = wDot/W
         eRT = self.gas.standard_int_energies_RT
         YDot = wDot/self.r.reshape((-1,1))
@@ -1619,7 +1616,7 @@ class stanScram(object):
         '''
         #initialize
         (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
-        self.injector.update_fluid_tip_position(dt,self.t,self.u)
+        self.injector.update_fluid_tip_positions(dt,self.t,self.u)
         #1st stage of RK2
         rhs = self.injector.get_injector_sources(r,ru,E,rY,self.gamma,self.t)
         r1= r +dt*rhs[:,0]
@@ -1711,7 +1708,7 @@ class stanScram(object):
             iters+=1
             res_p = np.linalg.norm(self.p-p_old)
             if self.verbose and iters%self.outputEvery==0: 
-                print("Iteration: %i. Current time: %f. Time step: %e. Residual(p): %e." \
-                % (iters,self.t,dt,res_p))
+                print("Iteration: %i. Current time: %f. Time step: %e. Max T[K]: %f. Residual(p): %e." \
+                % (iters,self.t,dt,self.thermoTable.getTemperature(self.r,self.p,self.Y).max(),res_p))
             if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):
                 self.plotState("figures/anim/test_{0:05d}.png".format(iters//self.plotStateInterval))

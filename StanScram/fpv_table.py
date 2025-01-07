@@ -49,7 +49,9 @@ class FPVTable:
         '''
         C_min = np.zeros_like(Z)
         C_max = self.lookup('PROG', Z, 0, 1)
-        return (C - C_min) / (C_max - C_min)
+        L = (C - C_min) / (C_max - C_min)
+        L = np.clip(L, 0, 1)
+        return L
     
     def lookup(self, var, Z, Q, L):
         '''
