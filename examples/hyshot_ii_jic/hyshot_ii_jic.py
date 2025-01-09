@@ -104,10 +104,7 @@ M_f    =   1.0    # -
 
 # Time parameters
 tau = L / U_in
-t_end = 5 * tau
-# t_end = 0.5 * tau
 print(f"tau = {tau:.2e} s")
-print(f"t_end = {t_end:.2e} s")
 
 # Compressible air properties
 gas.TPX = T_in, P_in, X_ox
@@ -174,11 +171,11 @@ def fuel_props_from_phi(phi_gl):
 eps_t = 1.0e-6
 t_phi_gl_schedule = np.array(
     [[ 0.0    , 0.0 ],
-     [ 0.5*tau, 0.0 ],
-     [ 5.0*tau, 0.35],
-     [ 8.0*tau, 0.35],
-     [13.0*tau, 0.6 ],
-     [18.0*tau, 0.6 ]])
+     [ 1.5*tau, 0.0 ],
+     [10.0*tau, 0.35],
+     [13.0*tau, 0.35],
+     [18.0*tau, 0.6 ],
+     [20.0*tau, 0.6 ]])
 
 t_f = np.zeros(t_phi_gl_schedule.shape[0])
 rho_f = np.zeros(t_phi_gl_schedule.shape[0])
@@ -403,7 +400,10 @@ jic = JICModel(gas, "H2",
 # Initialize and run the simulation
 ss = stanScram(gas,
                h = h,
+               w = w,
                dlnAdx = dlnAdx,
+               Tw = 300.0,
+               includeBoundaryLayerTerms = True,
                initializeConstant = (initState, x),
                boundaryConditions = BCs,
                sourceTerms = None,
@@ -416,7 +416,7 @@ ss = stanScram(gas,
                includeDiffusion = False,
                outputEvery = 10,
                plotStateInterval = 5)
-ss.advanceSimulation(t_end)
+ss.advanceSimulation(t_f[-1])
 
 # Plot the results
 def plot_sim(ss):

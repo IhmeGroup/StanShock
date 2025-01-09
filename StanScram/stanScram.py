@@ -24,6 +24,7 @@ import numpy as np
 from numba import double, njit, int64
 import cantera as ct
 import matplotlib.pyplot as plt
+from scipy.optimize import root
 
 from StanScram.jet_in_crossflow import JICModel
 
@@ -598,6 +599,43 @@ def dSFdx(x,xShock,Delta,phiLeft,phiRight):
             dphidx[x>(xShock+Delta/2.0)]=0.0
             return dphidx
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+class skinFriction(object):
+    '''
+    Functor: skinFriction
+    ---------------------------------------------------------------------------
+    This functor computes the skin friction function. Since the skin friction
+    function is partially implicit, it interpolates from a table of values at 
+    outset.
+        inputs:
+            ReCrit = the critical Reynolds number for transition
+            ReMax = the maximum value for the table
+        outputs:
+            cf = numpy array of the skin friction coefficient 
+    '''
+    #######################################################################
+    def __init__(self,ReCrit=2300,ReMax=1e9):
+        #store the values and compute the Reynolds number table 
+        self.ReMax = ReMax
+        self.ReCrit = ReCrit
+        self.ReTable = np.logspace(np.log10(self.ReCrit),np.log10(ReMax))
+        #define the residual of the Karman-Nikuradse function and its derivative
+        def f(x): return 2.46*x*np.log(self.ReTable*x)+0.3*x-1.0
+        def jac(x):
+            dx = 2.46*(np.log(self.ReTable*x)+1.0)+0.3
+            return np.diagflat(dx)
+        #use the scipy root finding method
+        x0 = 1.0/(2.236*np.log(self.ReTable)-4.639) #use fit for initial value
+        self.cfTable = (root(f,x0,jac=jac).x)**2.0*2.0 #grid of values for interpolation
+    #######################################################################
+    def __call__(self,Re):
+        cf = np.zeros_like(Re)
+        laminarIndices = np.logical_and(Re>0.0, Re <= self.ReCrit)
+        cf[laminarIndices]=16.0/Re[laminarIndices]
+        turbulentIndices = Re> self.ReCrit
+        cf[turbulentIndices] = np.interp(Re[turbulentIndices],self.ReTable,self.cfTable)
+        if np.any(Re>self.ReMax): raise Exception("Error: Reynolds number exceeds the maximum value of %f: skinFriction Table bounds must be adjusted" % (self.ReMax))
+        return cf
+#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 class stanScram(object):
     '''
     Class: stanScram
@@ -733,9 +771,12 @@ class stanScram(object):
         self.Y[:,0]=np.ones(self.n)
         self.verbose=True #console output switch
         self.outputEvery=1 #number of iterations of simulation advancement between logging updates
-        self.h=None #height of the channel (used for plotting only)
+        self.h=None #height of the channel
+        self.w=None #width of the channel
         self.dlnAdt = None #area of the shock tube as a function of time (needed for quasi-1D)
         self.dlnAdx = None #area of the shock tube as a function of x (needed for quasi-1D)
+        self.includeBoundaryLayerTerms = False #flag to include boundary layer terms
+        self.Tw = None #wall temperature (needed for BL)
         self.sourceTerms = None #source term function
         self.injector = None #injector model
         self.ox_def = None #oxidizer definition
@@ -1538,6 +1579,82 @@ class stanScram(object):
         T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
         self.gamma=self.thermoTable.getGamma(T,self.Y)
 ##############################################################################
+    def advanceBoundaryLayer(self,dt):
+        '''
+        Method: advanceBoundaryLayer
+        ----------------------------------------------------------------------
+        This method advances the boundary layer terms
+            inputs
+                dt=time step
+        '''
+        #######################################################################
+        def nusseltNumber(Re,Pr,cf):
+            '''
+            Function: nusseltNumber
+            ----------------------------------------------------------------------
+            This function defines the nusselt Number as a function of the 
+            Reynolds number. These functions are empirical correlations taken
+            from Kayes. The selection of the correlations assumes that this solver
+            will be used for gasses.
+                inputs:
+                    Re=Reynolds number
+                    Pr=Prandtl number
+                    cf=skin friction
+                outputs:
+                    Nu=Nusselt number
+            '''
+            #define the transitional Reynolds number
+            ReCrit = 2300
+            ReLowTurbulent = 2e5 #taken frkom figure 14-5 of Kayes for Pr=0.7
+            Nu = np.zeros_like(Re)
+            #laminar portion of the flow
+            laminarIndices = np.logical_and(Re>0.0, Re <= ReCrit)
+            Nu[laminarIndices]=3.657 #from the analytical solution
+            #low turbulent portion of the flow (accounts for isothermal wall)
+            lowTurublentIndices = np.logical_and(Re > ReCrit,Re <= ReLowTurbulent)
+            ReLT, PrLT = Re[lowTurublentIndices], Pr[lowTurublentIndices]
+            Nu[lowTurublentIndices]=0.021*PrLT**0.5*ReLT**0.8 #empircal correlation for isothermal case
+            #highly turbulent portion of the flow (data shows that boundary condition is less important)
+            #highTurublentIndices = Re > ReLowTurbulent
+            highTurublentIndices = Re > 2300.0
+            ReHT, PrHT, cfHT = Re[highTurublentIndices], Pr[highTurublentIndices], cf[highTurublentIndices]
+            Nu[highTurublentIndices] = ReHT*PrHT*cfHT/2.0/(0.88+13.39*(PrHT**(2.0/3.0)-0.78)*np.sqrt(cfHT/2.0))
+            return Nu
+        #######################################################################
+        if self.h is None or self.w is None or self.Tw is None: 
+            raise Exception("stanShock improperly initialized for boundary layer terms")
+        nX=len(self.x)
+        D = 2*self.h*self.w/(self.h+self.w)
+        #compute gas properties
+        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
+        cp = self.thermoTable.getCp(T,self.Y)
+        viscosity=np.zeros(nX)
+        conductivity=np.zeros(nX)
+        for i,Ti in enumerate(T):
+            #compute gas properties
+            self.gas.TP = Ti,self.p[i]
+            if self.gas.n_species>1: self.gas.Y= self.Y[i,:]
+            viscosity[i]=self.gas.viscosity
+            conductivity[i]=self.gas.thermal_conductivity
+        #compute non-dimensional numbers
+        Re=abs(self.r*self.u*D/viscosity)
+        Pr=cp*viscosity/conductivity
+        #skin friction coefficent
+        if self.cf is None: self.cf = skinFriction() #initialize the functor
+        cf = self.cf(Re)
+        #shear stress on wall
+        shear=cf*(0.5*self.r*self.u**2.0)*(np.sign(self.u)) 
+        #Stanton number and heat transfer to wall
+        Nu = nusseltNumber(Re,Pr,cf)
+        qloss = Nu*conductivity/D*(T-self.Tw)
+        #update
+        (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
+        ru -= shear*4.0/D*dt
+        E -= qloss*4.0/D*dt
+        (self.r,self.u,self.p,_)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma) 
+        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
+        self.gamma=self.thermoTable.getGamma(T,self.Y)
+##############################################################################
     def advanceDiffusion(self,dt):
         '''
         Method: advanceDiffusion
@@ -1699,6 +1816,7 @@ class stanScram(object):
             #advance other terms
             if self.includeDiffusion: self.advanceDiffusion(dt)
             if self.dlnAdt!=None or self.dlnAdx!=None: self.advanceQuasi1D(dt)
+            if self.includeBoundaryLayerTerms: self.advanceBoundaryLayer(dt)
             if self.sourceTerms!=None: self.advanceSourceTerms(dt)
             if self.injector!=None: self.advanceInjector(dt)
             #perform other updates
