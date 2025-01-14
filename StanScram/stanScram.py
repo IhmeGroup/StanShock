@@ -1630,7 +1630,7 @@ class stanScram(object):
         (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
         Q = np.zeros(self.n)
         L = self.fpv_table.L_from_C(self.Y[:,0], self.Y[:,1])
-        e_chem0 = self.fpv_table.lookup('E0_CHEM', self.Y[:,0], Q, L)
+        e_chem0 = r * self.fpv_table.lookup('E0_CHEM', self.Y[:,0], Q, L)
         #1st stage of RK2
         rhsY = np.zeros((self.n,self.n_scalars))
         omegaC = self.injector.get_chemical_sources(self.Y[:,0], self.Y[:,1])

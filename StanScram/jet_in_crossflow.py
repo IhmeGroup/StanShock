@@ -822,11 +822,14 @@ class JICModel():
             The current time
         '''
         omega_C = np.zeros(len(self.x))
-        
+
         for i_x in range(len(self.x)):
-            i_last_tip = np.argmax(self.fluid_tips[:, 0] >= self.x[i_x]) # Note that fluid_tips is descending
+            if self.x[i_x] < self.x_inj:
+                continue
+            # Interpolate into fluid tip positions to get the mass flow rate
+            mdot_inj = np.interp(self.x[i_x], self.fluid_tips[:, 0], self.fluid_tips[:, 1])
             L = self.fpv_table.L_from_C(Z[i_x], C[i_x])
-            omega_C[i_x] = self.omega_C_interpolators[i_x]((self.fluid_tips[i_last_tip, 1], L))
-        
+            omega_C[i_x] = self.omega_C_interpolators[i_x]((mdot_inj, L))
+
         return omega_C
     
