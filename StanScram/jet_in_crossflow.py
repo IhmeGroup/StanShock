@@ -16,7 +16,7 @@ class JICModel():
     This is a class defined to encapsulate the Jet-in-Crossflow model
     '''
     def __init__(self, gas, fuel,
-                 x, x_inj, w, h, n_inj, d_inj,
+                 x, x_inj, x_noz, w, h, n_inj, d_inj,
                  t_inj, rho_inj, u_inj, T_inj,
                  rho, u, T,
                  alpha,
@@ -36,6 +36,8 @@ class JICModel():
             The 1D mesh
         x_inj: float
             The x-coordinate of the injection point
+        x_noz: float
+            The x-coordinate of the nozzle start
         w: float
             The width of the domain
         h: float
@@ -72,6 +74,7 @@ class JICModel():
 
         self.x = x
         self.x_inj = x_inj
+        self.x_noz = x_noz
         self.w = w
         self.h = h
         self.n_inj = n_inj
@@ -164,12 +167,12 @@ class JICModel():
         # Precompute and tabulate chemical source terms
         if load_chemical_sources:
             L_probe = np.load(os.path.join(datadir, "L_probe.npy"))
-            omega_Y = np.load(os.path.join(datadir, "omega_Y.npy"))
-            self.omega_Y_interpolators = []
+            omega_C = np.load(os.path.join(datadir, "omega_C.npy"))
+            self.omega_C_interpolators = []
             for i in range(len(self.x)):
-                omega_Y_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
-                                                                omega_Y[i])
-                self.omega_Y_interpolators.append(omega_Y_i)
+                omega_C_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
+                                                                omega_C[i])
+                self.omega_C_interpolators.append(omega_C_i)
         else:
             self.calc_chemical_sources(write=True)
    
@@ -655,7 +658,12 @@ class JICModel():
         self.Z_var_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
         print("Computing Z average and variance profiles...")
         for i in tqdm(range(len(self.x))):
-            self.Z_avg_profile[:, i], self.Z_var_profile[:, i] = self.Z_avg_var_adjusted(self.x[i])
+            if self.x[i] > self.x_noz:
+                # Freeze the profiles in the nozzle
+                self.Z_avg_profile[:, i] = self.Z_avg_profile[:, i-1]
+                self.Z_var_profile[:, i] = self.Z_var_profile[:, i-1]
+            else:
+                self.Z_avg_profile[:, i], self.Z_var_profile[:, i] = self.Z_avg_var_adjusted(self.x[i])
         
         if write:
             np.save(os.path.join(datadir, "Z_avg_profile.npy"), self.Z_avg_profile)
@@ -705,17 +713,16 @@ class JICModel():
         # Drop fluid tips that have passed the end of the domain
         self.fluid_tips = self.fluid_tips[self.fluid_tips[:, 0] < self.x_max]
 
-    def get_injector_sources(self, rho, rhoU, E, rhoY, gamma, t):
+    def get_injector_sources(self, rho, rhoU, E, rhoZ, rhoC, gamma, t):
         '''
         Method: get_injector_sources
         --------------------------------------------------------------------------
         This method computes a fuel injector source term to target the desired
         mixture fraction profile.
         '''
-        rhs = np.zeros((rho.shape[0], 3+self.gas.n_species))
+        rhs = np.zeros((rho.shape[0], 5))
 
-        Y = rhoY / rho.reshape((-1, 1))
-        Z = np.sum(self.Z_weights * Y, axis=1) + self.Z_offset
+        Z = rhoZ / rho
         last_fluid_tip = len(self.fluid_tips) - np.searchsorted(self.fluid_tips[::-1, 0], self.x, side='right') - 1
         mdot_profile = np.zeros_like(self.x)
         mdot_profile[last_fluid_tip > 0] = self.fluid_tips[last_fluid_tip[last_fluid_tip > 0], 1]
@@ -726,11 +733,16 @@ class JICModel():
         mdot[Z_target < 1e-6] = 0.0
 
         # Compute the source term
-        i_fuel = self.gas.species_index(self.fuel)
-        rhs[:, 0         ] = mdot
-        rhs[:, 1         ] = 0.0
-        rhs[:, 2         ] = mdot * self.E_inj
-        rhs[:, 3 + i_fuel] = mdot
+        rhs[:, 0] = mdot
+        rhs[:, 1] = 0.0
+        rhs[:, 2] = mdot * self.E_inj
+        rhs[:, 3] = mdot
+        rhs[:, 4] = 0.0
+
+        # DEBUG: Add some progress variable to trigger ignition
+        # i_ig = np.logical_and(self.x > self.x_inj, self.x < self.x_inj + 0.01)
+        # if (t < 1e-4):
+        #     rhs[i_ig, 4] = 1e1
 
         return rhs
     
@@ -741,7 +753,7 @@ class JICModel():
         This method precomputes the chemical source terms as a function of x and L.
         '''
         print("Precomputing chemical sources...")
-        self.omega_Y_interpolators = []
+        self.omega_C_interpolators = []
 
         Z_probe = np.linspace(0.0, 1.0, 1000)
         # TODO ^ cluster these points around min and max Z
@@ -750,73 +762,71 @@ class JICModel():
 
         if write:
             np.save(os.path.join(datadir, "L_probe.npy"), L_probe)
-            omega_Y = np.zeros((len(self.x),
+            omega_C = np.zeros((len(self.x),
                                 len(self.mdot_inj_unique),
-                                len(L_probe),
-                                self.gas.n_species))
+                                len(L_probe)))
 
         for i in tqdm(range(len(self.x))):
-            # Z_avg = self.Z_avg_profile[self.mdot_inj_unique_idx, i]
-            # Z_var = self.Z_var_profile[self.mdot_inj_unique_idx, i]
             Z_avg = self.Z_avg_profile[:, i]
             Z_var = self.Z_var_profile[:, i]
-            omega_Y_i = []
+            omega_C_i = []
 
-            if np.all(Z_avg == 0.0):
-                omega_Y_i = lambda mdot, L : np.zeros(self.gas.n_species)
+            if self.x[i] > self.x_noz:
+                # Freeze the chemistry in the nozzle
+                omega_C_i = lambda mdot, L : 0.0
                 if write:
-                    omega_Y[i, :, :, :] = 0.0
+                    omega_C[i, :, :] = 0.0
+            elif np.all(Z_avg == 0.0):
+                # No fuel, don't bother calculating
+                omega_C_i = lambda mdot, L : 0.0
+                if write:
+                    omega_C[i, :, :] = 0.0
             else:
                 a = ((Z_avg * (1 - Z_avg) / Z_var) - 1) * Z_avg
                 b = a * (1 - Z_avg) / Z_avg
                 p_Z = stats.beta.pdf(np.tile(Z_probe, (len(self.mdot_inj_unique), 1)),
                                      np.tile(a, (len(Z_probe), 1)).T,
                                      np.tile(b, (len(Z_probe), 1)).T)
-
-                omega_Y_probe = np.zeros((len(self.mdot_inj_unique), len(L_probe), self.gas.n_species))
-                for k in range(self.gas.n_species):
-                    src_name = "SRC_{0}".format(self.gas.species_name(k))
-                    omega_Y_k_probe = self.fpv_table.lookup(src_name, Z_mesh_ZL, 0.0, L_mesh_ZL) # [1/s]
-                    # PDF may have singularities at the boundaries, but the source term should be
-                    # zero there anyway
-                    p_Z[:,  0] = 0.0
-                    p_Z[:, -1] = 0.0
-                    omega_Y_k_probe[ 0, :] = 0.0
-                    omega_Y_k_probe[-1, :] = 0.0
-                    for i_m in range(len(self.mdot_inj_unique)):
-                        omega_Y_probe[i_m, :, k] = np.trapz(omega_Y_k_probe * p_Z[i_m, :].reshape((-1, 1)),
-                                                            Z_probe, axis=0)
-
-                omega_Y_probe[np.isnan(omega_Y_probe)] = 0.0
-                omega_Y_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
-                                                                omega_Y_probe)
+                omega_C_probe = self.fpv_table.lookup("SRC_PROG", Z_mesh_ZL, 0.0, L_mesh_ZL) # [1/s]
+                # PDF may have singularities at the boundaries, but the source term should be
+                # zero there anyway
+                p_Z[:,  0] = 0.0
+                p_Z[:, -1] = 0.0
+                omega_C_probe[ 0, :] = 0.0
+                omega_C_probe[-1, :] = 0.0
+                omega_C_probe_mdots = np.zeros((len(self.mdot_inj_unique), len(L_probe)))
+                for i_m in range(len(self.mdot_inj_unique)):
+                    omega_C_probe_mdots[i_m, :] = np.trapz(omega_C_probe * p_Z[i_m, :].reshape((-1, 1)),
+                                                           Z_probe, axis=0)
+                omega_C_probe_mdots[np.isnan(omega_C_probe_mdots)] = 0.0
+                omega_C_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
+                                                                omega_C_probe_mdots)
                 if write:
-                    omega_Y[i, :, :, :] = omega_Y_probe
+                    omega_C[i, :, :] = omega_C_probe_mdots
 
-            self.omega_Y_interpolators.append(omega_Y_i)
+            self.omega_C_interpolators.append(omega_C_i)
         
         if write:
-            np.save(os.path.join(datadir, "omega_Y.npy"), omega_Y)
+            np.save(os.path.join(datadir, "omega_C.npy"), omega_C)
    
-    def get_chemical_sources(self, Y, C):
+    def get_chemical_sources(self, Z, C):
         '''
         Method: get_chemical_sources
         --------------------------------------------------------------------------
         This method computes the chemical source terms [1/s] using the FPV table.
-        Y: float
-            The array of species mass fractions at different grid points
+        Z: float
+            The array of mixture fraction values at different grid points
         C: float
             The array of progress variable values at different grid points
         t: float
             The current time
         '''
-        omega_Y = np.zeros((len(self.x), self.gas.n_species))
-        Z = np.sum(self.Z_weights * Y, axis=1) + self.Z_offset
+        omega_C = np.zeros(len(self.x))
         
         for i_x in range(len(self.x)):
             i_last_tip = np.argmax(self.fluid_tips[:, 0] >= self.x[i_x]) # Note that fluid_tips is descending
             L = self.fpv_table.L_from_C(Z[i_x], C[i_x])
-            omega_Y[i_x, :] = self.omega_Y_interpolators[i_x]((self.fluid_tips[i_last_tip, 1], L))
+            omega_C[i_x] = self.omega_C_interpolators[i_x]((self.fluid_tips[i_last_tip, 1], L))
         
-        return omega_Y
+        return omega_C
     

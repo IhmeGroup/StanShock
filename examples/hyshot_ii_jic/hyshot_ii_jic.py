@@ -171,11 +171,19 @@ def fuel_props_from_phi(phi_gl):
 eps_t = 1.0e-6
 t_phi_gl_schedule = np.array(
     [[ 0.0    , 0.0 ],
-     [ 1.5*tau, 0.0 ],
-     [10.0*tau, 0.35],
-     [13.0*tau, 0.35],
-     [18.0*tau, 0.6 ],
-     [20.0*tau, 0.6 ]])
+     [ 0.1*tau, 0.0 ],
+     [ 3.0*tau, 0.35],
+     [ 5.0*tau, 0.35],
+     [10.0*tau, 0.6 ],
+     [12.0*tau, 0.6 ]])
+# t_phi_gl_schedule = np.array(
+#     [[ 0.0,           0.0 ],
+#      [ 0.1*tau-eps_t, 0.0 ],
+#      [ 0.1*tau,       0.35],
+#      [ 3.0*tau,       0.35],
+#      [ 8.0*tau,       0.35],
+#      [13.0*tau,       0.6 ],
+#      [15.0*tau,       0.6 ]])
 
 t_f = np.zeros(t_phi_gl_schedule.shape[0])
 rho_f = np.zeros(t_phi_gl_schedule.shape[0])
@@ -211,7 +219,7 @@ gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
 initState = gas_init, U_in
 
 # Define the boundary conditions
-BC_inlet = gas_init.density, U_in, gas_init.P, gas_init.Y
+BC_inlet = gas_init.density, U_in, gas_init.P, (0.0, 0.0)
 BC_outlet = 'outflow'
 BCs = (BC_inlet, BC_outlet)
 
@@ -242,7 +250,7 @@ fpv_table = FPVTable(table_file)
 
 # Build the injector model
 jic = JICModel(gas, "H2",
-               x, x_inj, w, h[0], N_f, 2*r_f,
+               x, x_inj, L_const, w, h[0], N_f, 2*r_f,
                t_f, rho_f, U_f, T_f,
                rho_in, U_in, T_in,
                alpha=1e6,
@@ -404,7 +412,7 @@ ss = stanScram(gas,
                dlnAdx = dlnAdx,
                Tw = 300.0,
                includeBoundaryLayerTerms = True,
-               initializeConstant = (initState, x),
+               initialization = ("constant", initState, x),
                boundaryConditions = BCs,
                sourceTerms = None,
                injector = jic,
@@ -412,56 +420,12 @@ ss = stanScram(gas,
                fuel_def = X_f,
                prog_def = {"H2O" : 1.0},
                cfl = 0.5,
+               physics = "FPV",
+               fpv_table = fpv_table,
                reacting = True,
                includeDiffusion = False,
                outputEvery = 10,
-               plotStateInterval = 5)
+               plotStateInterval = 10)
 ss.advanceSimulation(t_f[-1])
-
-# Plot the results
-def plot_sim(ss):
-    rho = ss.r
-    u = ss.u
-    p = ss.p
-    Y = ss.Y
-    T = ss.thermoTable.getTemperature(rho, p, Y)
-
-    fig, ax = plt.subplots(6, 1, sharex=True, figsize=(6, 8))
-    ax[0].plot(x*scale, rho)
-    ax[0].set_ymargin(0.1)
-    ax[0].set_ylabel(r'$\rho$ [kg/m$^3$]')
-    add_h_plot(ax[0])
-
-    ax[1].plot(x*scale, u)
-    ax[1].set_ymargin(0.1)
-    ax[1].set_ylabel(r'$u$ [m/s]')
-    add_h_plot(ax[1])
-
-    ax[2].plot(x*scale, p)
-    ax[2].set_ymargin(0.1)
-    ax[2].set_ylabel(r'$p$ [Pa]')
-    add_h_plot(ax[2])
-
-    ax[3].plot(x*scale, T)
-    ax[3].set_ymargin(0.1)
-    ax[3].set_ylabel(r'$T$ [K]')
-    add_h_plot(ax[3])
-
-    ax[4].plot(x*scale, Y[:, gas.species_index('H2')])
-    ax[4].set_ymargin(0.1)
-    ax[4].set_ylabel(r'$Y_{\mathrm{H}_2}$')
-    add_h_plot(ax[4])
-
-    ax[5].plot(x*scale, Y[:, gas.species_index('H2O')])
-    ax[5].set_ymargin(0.1)
-    ax[5].set_ylabel(r'$Y_{\mathrm{H}_2\mathrm{O}}$')
-    add_h_plot(ax[5])
-
-    ax[5].set_xlabel('x [mm]')
-
-    plt.tight_layout()
-    plt.savefig("hyshot_ii.png", bbox_inches='tight', dpi=300)
-
-plot_sim(ss)
 
 import code; code.interact(local=locals())

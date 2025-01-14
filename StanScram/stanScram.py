@@ -49,18 +49,19 @@ def WENO5(r,u,p,Y,gamma):
             r=density
             u=velocity
             p=pressure
-            Y=species mass fraction matrix [x,species]
+            Y=scalar variables matrix [x,scalars]
             gamma=specific heat ratio
         outputs:
-            ULR=a matrix of the primitive variables [LR,]
+            PLR=a matrix of the primitive variables [LR,]
     '''
     nLR=2
     nCells = len(r)-2*mt
     nFaces = nCells+1 
-    nSp= len(Y[0])
-    nVar = mn+nSp-1 #excluding density
+    nSc = len(Y[0])  # number of scalars
+    nVar = mn+nSc  # [rho, rhou, rhoE, rhoY1, rhoY2, ...]
     nStencil=2*mt
     epWENO=1.0E-06
+
     #Cell weight (WL(i,j,k); i=left(1) or right(2) j=stencil#,k=weight#)
     W=np.empty((2,3,3))
     W[0,0,0]=0.333333333333333
@@ -86,6 +87,7 @@ def WENO5(r,u,p,Y,gamma):
     W[1,2,0]=W[0,0,2]
     W[1,2,1]=W[0,0,1]
     W[1,2,2]=W[0,0,0]
+
 	#Stencil Weight (i=left(1) or right(2) j=stencil#)
     D=np.empty((2,3))
     D[0,0]=0.3
@@ -95,127 +97,163 @@ def WENO5(r,u,p,Y,gamma):
     D[1,0]=D[0,2]
     D[1,1]=D[0,1]
     D[1,2]=D[0,0]
-    #Weights for smoothness parameter
+    
     B1 = 1.083333333333333
     B2 = 0.25 
                     
     B=np.empty(mt)
-    PLR=np.empty((nLR,nFaces,nVar+1)) #return array of primitives
-    YAverage = np.empty(nSp)
-    U = np.empty(nVar) #vector of the conservative at a face
+    PLR=np.empty((nLR,nFaces,nVar)) 
+    YAverage = np.empty(nSc)
+    U = np.empty(nVar) 
     R=np.zeros((nVar,nVar))
     L=np.zeros((nVar,nVar))
     CStencil = np.empty((nStencil,nVar)) #all the characteristic values in the stencil
-    for iFace in range(nFaces): #iterate through each cell right edge              
+    
+    for iFace in range(nFaces): #iterate through each cell right edge
         iCell=iFace+2 #face is on the right side of the cell
-        #find the average at the face (use ordering of Houim and Kuo, JCP2011)
+        
+        # Face averages
         rAverage=0.5*(r[iCell]+r[iCell+1])
         uAverage=0.5*(u[iCell]+u[iCell+1])
         pAverage=0.5*(p[iCell]+p[iCell+1])
         gammaAverage=0.5*(gamma[iCell]+gamma[iCell+1])
-        for kSp in range(nSp): YAverage[kSp]=0.5*(Y[iCell,kSp]+Y[iCell+1,kSp])
+        for kSc in range(nSc): 
+            YAverage[kSc]=0.5*(Y[iCell,kSc]+Y[iCell+1,kSc])
         eAverage=pAverage/(rAverage*(gammaAverage-1.0))+0.5*uAverage**2.0
         hAverage=eAverage+pAverage/rAverage
         cAverage=np.sqrt(gammaAverage*pAverage/rAverage)
-        #compute the eigenvector matrices using the face average
-        #right matrix
-        for i in range(nSp):
-            R[i,0]=YAverage[i]
-            R[i,-1]=YAverage[i]
-            R[i,i+1]=1.0
-            R[-2,i+1]=uAverage
-            R[-1,i+1]=0.5*uAverage**2.0
-        R[-2,0]=uAverage-cAverage
-        R[-1,0]=hAverage-uAverage*cAverage
-        R[-2,-1]=uAverage+cAverage
-        R[-1,-1]=hAverage+uAverage*cAverage
-        #left matrix
+        
+        # Right eigenvector matrix [rho, rhou, rhoE, rhoY1, rhoY2, ...]
+        # Density wave
+        R[0,0] = 1.0
+        R[1,0] = uAverage - cAverage
+        R[2,0] = hAverage - uAverage*cAverage
+        
+        # Velocity wave
+        R[0,1] = 1.0
+        R[1,1] = uAverage
+        R[2,1] = 0.5*uAverage**2.0
+        
+        # Energy wave
+        R[0,2] = 1.0
+        R[1,2] = uAverage + cAverage
+        R[2,2] = hAverage + uAverage*cAverage
+        
+        # Scalar waves
+        for i in range(nSc):
+            R[0,3+i] = 0.0
+            R[1,3+i] = 0.0
+            R[2,3+i] = 0.0
+            for j in range(nSc):
+                R[3+j,3+i] = 1.0 if i == j else 0.0
+        
+        # Left eigenvector matrix
         gammaHat=gammaAverage-1.0
         phi=0.5*gammaHat*uAverage**2.0
-        firstRowConstant=0.5*(phi+uAverage*cAverage)
-        lastRowConstant=0.5*(phi-uAverage*cAverage)
-        for i in range(nSp):
-            for j in range(nSp): 
-                L[i+1,j]=-YAverage[i]*phi
-            L[i+1,i]=L[i+1,i]+cAverage**2.0
-            L[0,i]=firstRowConstant
-            L[-1,i]=lastRowConstant
-            L[i+1,-2]=YAverage[i]*gammaHat*uAverage
-            L[i+1,-1]=-YAverage[i]*gammaHat
-        L[0,-2]=-0.5*(gammaHat*uAverage+cAverage)
-        L[-1,-2]=-0.5*(gammaHat*uAverage-cAverage)
-        L[0,-1]=gammaHat/2.0
-        L[-1,-1]=gammaHat/2.0 
-        L/=cAverage**2.0
+        
+        # Acoustic waves
+        L[0,0] = 0.5*(phi + cAverage*uAverage)/cAverage**2
+        L[0,1] = -0.5*(gammaHat*uAverage + cAverage)/cAverage**2
+        L[0,2] = 0.5*gammaHat/cAverage**2
+        
+        L[2,0] = 0.5*(phi - cAverage*uAverage)/cAverage**2
+        L[2,1] = -0.5*(gammaHat*uAverage - cAverage)/cAverage**2
+        L[2,2] = 0.5*gammaHat/cAverage**2
+        
+        # Velocity wave
+        L[1,0] = 1.0 - phi/cAverage**2
+        L[1,1] = gammaHat*uAverage/cAverage**2
+        L[1,2] = -gammaHat/cAverage**2
+        
+        # Scalar waves
+        for i in range(nSc):
+            L[3+i,3+i] = 1.0
+        
         for iVar in range(nVar):
             for iStencil in range(nStencil):
-                 iCellStencil=iStencil-2+iCell
-                 #compute the conservative variables
-                 for kSp in range(nSp): U[kSp]=r[iCellStencil]*Y[iCellStencil,kSp]
-                 U[-2]=r[iCellStencil]*u[iCellStencil]
-                 U[-1]=p[iCellStencil]/(gammaAverage-1.0)+0.5*r[iCellStencil]*u[iCellStencil]**2.0
-                 #compute the characteristic variables in the stencil
-                 CStencil[iStencil,iVar]=0.0
-                 for jVar in range(nVar): 
-                     CStencil[iStencil,iVar]+=L[iVar,jVar]*U[jVar]
-        #perform the WENO interpolation in the characteristic variables
-        for N in range(nLR): #!left edge and right edge
-            for iVar in range(nVar): U[iVar]=0.0
+                iCellStencil=iStencil-2+iCell
+                
+                # Conservative variables [rho, rhou, rhoE, rhoY1, rhoY2, ...]
+                U[0] = r[iCellStencil]  # density
+                U[1] = r[iCellStencil]*u[iCellStencil]  # momentum
+                U[2] = p[iCellStencil]/(gammaAverage-1.0) + 0.5*r[iCellStencil]*u[iCellStencil]**2.0  # energy
+                for kSc in range(nSc):
+                    U[3+kSc] = r[iCellStencil]*Y[iCellStencil,kSc]  # scalar densities
+                
+                CStencil[iStencil,iVar]=0.0
+                for jVar in range(nVar): 
+                    CStencil[iStencil,iVar]+=L[iVar,jVar]*U[jVar]
+                    
+        # WENO interpolation in characteristic variables
+        for N in range(nLR):
+            for iVar in range(nVar): 
+                U[iVar]=0.0
             for iVar in range(nVar):
-                NO =N+2 #!offset index
-                #Find smoothness parameters 	
+                NO =N+2
+                
+                # Smoothness parameters
                 B[0]=B1*(CStencil[0+NO,iVar]-2.0*CStencil[1+NO,iVar]+CStencil[2+NO,iVar])**2.0+B2*(3.0*CStencil[0+NO,iVar]-4.0*CStencil[1+NO,iVar]+CStencil[2+NO,iVar])**2
                 B[1]=B1*(CStencil[-1+NO,iVar]-2.0*CStencil[0+NO,iVar]+CStencil[1+NO,iVar])**2.0+B2*(CStencil[-1+NO,iVar]-CStencil[1+NO,iVar])**2
                 B[2]=B1*(CStencil[-2+NO,iVar]-2.0*CStencil[-1+NO,iVar]+CStencil[0+NO,iVar])**2.0+B2*(CStencil[-2+NO,iVar]-4.0*CStencil[-1+NO,iVar]+3.0*CStencil[0+NO,iVar])**2
-                #Find the interpolated values at the cell edges
+                
+                # Edge interpolation
                 ATOT = 0.0
                 CW=0.0
-                for iStencil in range(mt): #iterate through each stencil
-                    iStencilO=NO-iStencil #offset iStencil index		
+                for iStencil in range(mt):
+                    iStencilO=NO-iStencil
                     CINT=W[N,iStencil,0]*CStencil[0+iStencilO,iVar]+W[N,iStencil,1]*CStencil[1+iStencilO,iVar]+W[N,iStencil,2]*CStencil[2+iStencilO,iVar]
                     A=D[N,iStencil]/((epWENO+B[iStencil])**2)
                     ATOT+=A
                     CW+=CINT*A
                 CiVar=CW/ATOT
-                #compute the conservative vector using the eigenvector matrix
-                for jVar in range(nVar): U[jVar]+=R[jVar,iVar]*CiVar
-            rLR=0.0
-            for kSp in range(nSp): rLR+=U[kSp]
-            uLR=U[-2]/rLR
-            eLR=U[-1]/rLR
+                
+                for jVar in range(nVar): 
+                    U[jVar]+=R[jVar,iVar]*CiVar
+                    
+            # Reconstruct primitives from conservatives
+            rLR=U[0]
+            uLR=U[1]/rLR
+            eLR=U[2]/rLR
             pLR=rLR*(gammaAverage-1.0)*(eLR-0.5*uLR**2.0)
-            #fill primitive matrix in the following order (r,u,p,Y)
+            
+            # Fill primitive matrix [rho, u, p, Y1, Y2, ...]
             PLR[N,iFace,0]=rLR
             PLR[N,iFace,1]=uLR
             PLR[N,iFace,2]=pLR
-            for kSp in range(nSp): PLR[N,iFace,kSp+mn]=U[kSp]/rLR
-    #apply first order interpolation at boundaries
+            for kSc in range(nSc):
+                PLR[N,iFace,3+kSc]=U[3+kSc]/rLR
+                
+    # First order at boundaries
     for N in range(nLR):
         for iFace in range(mt):
             iCell=iFace+2
             PLR[N,iFace,0]=r[iCell+N]
             PLR[N,iFace,1]=u[iCell+N]
             PLR[N,iFace,2]=p[iCell+N]
-            for kSp in range(nSp): PLR[N,iFace,kSp+mn]=Y[iCell+N,kSp]
+            for kSc in range(nSc):
+                PLR[N,iFace,3+kSc]=Y[iCell+N,kSc]
         for iFace in range(nFaces-mt,nFaces):
             iCell=iFace+2
             PLR[N,iFace,0]=r[iCell+N]
             PLR[N,iFace,1]=u[iCell+N]
             PLR[N,iFace,2]=p[iCell+N]
-            for kSp in range(nSp): PLR[N,iFace,kSp+mn]=Y[iCell+N,kSp]
-    #create primitive matrix
-    P = np.zeros((nCells+2*mt,nVar+1))
+            for kSc in range(nSc):
+                PLR[N,iFace,3+kSc]=Y[iCell+N,kSc]
+                
+    # Create primitive matrix for limiter
+    P = np.zeros((nCells+2*mt,nVar))
     P[:,0] = r[:]
     P[:,1] = u[:]
     P[:,2] = p[:]
-    P[:,mn:] = Y[:,:]
-    #apply limiter
+    P[:,3:] = Y[:,:]
+    
+    # Apply limiter
     alpha=2.0
     threshold=1e-6
     epsilon=1.0e-15
     for N in range(nLR):
         for iFace in range(nFaces):
-            for iVar in range(nVar+1):
+            for iVar in range(nVar):
                 iCell=iFace+2+N
                 iCellm1 = iCell-1+2*N
                 iCellp1 = iCell+1-2*N
@@ -223,15 +261,18 @@ def WENO5(r,u,p,Y,gamma):
                 iCellp2 = iCell+2-4*N
                 #check the error threshold for smooth regions
                 error=abs((-P[iCellm2,iVar]+4.0*P[iCellm1,iVar]+4.0*P[iCellp1,iVar]-P[iCellp2,iVar]+epsilon)/(6.0*P[iCell,iVar]+epsilon)-1.0)
-                if error < threshold: continue
+                if error < threshold: 
+                    continue
                 #compute limiter
                 if P[iCell,iVar] != P[iCellm1,iVar]:
                     phi=min(alpha,alpha*(P[iCellp1,iVar]-P[iCell,iVar])/(P[iCell,iVar]-P[iCellm1,iVar]))
                     phi=min(phi,2.0*(PLR[N,iFace,iVar]-P[iCell,iVar])/(P[iCell,iVar]-P[iCellm1,iVar]))
                     phi=max(0.0,phi)
-                else: phi=alpha
+                else: 
+                    phi=alpha
                 #apply limiter
                 PLR[N,iFace,iVar]=P[iCell,iVar]+0.5*phi*(P[iCell,iVar]-P[iCellm1,iVar])
+    
     return PLR
 
 
@@ -245,16 +286,16 @@ def LF(rLR,uLR,pLR,YLR,gamma):
             rLR=array containing left and right density states [nLR,nFaces]
             uLR=array containing left and right velocity states [nLR,nFaces]
             pLR=array containing left and right pressure states [nLR,nFaces]
-            YLR=array containing left and right species mass fraction states
-                [nLR,nFaces,nSp]
+            YLR=array containing left and right scalar states
+                [nLR,nFaces,nSc]
             gamma= array containing the specific heat [nFaces]
         return:
-            F=modeled Euler fluxes [nFaces,mn+nSp]
+            F=modeled Euler fluxes [nFaces,mn+nSc]
     '''
     nLR=len(rLR)
     nFaces = len(rLR[0])
-    nSp=YLR[0].shape[1]
-    nDim=mn+nSp
+    nSc=YLR[0].shape[1]
+    nDim=mn+nSc
     
     #find the maximum wave speed
     lambdaMax=0.0
@@ -270,17 +311,17 @@ def LF(rLR,uLR,pLR,YLR,gamma):
             FLR[K,iFace,0]=rLR[K,iFace]*uLR[K,iFace]
             FLR[K,iFace,1]=rLR[K,iFace]*uLR[K,iFace]**2.0+pLR[K,iFace]
             FLR[K,iFace,2]=uLR[K,iFace]*(gamma[iFace]/(gamma[iFace]-1)*pLR[K,iFace]+0.5*rLR[K,iFace]*uLR[K,iFace]**2.0)
-            for kSp in range(nSp): FLR[K,iFace,mn+kSp]=rLR[K,iFace]*uLR[K,iFace]*YLR[K,iFace,kSp]
+            for kSc in range(nSc): FLR[K,iFace,mn+kSc]=rLR[K,iFace]*uLR[K,iFace]*YLR[K,iFace,kSc]
         
     #compute the modeled flux
-    F=np.empty((nFaces,mn+nSp))
-    U=np.empty((nLR,mn+nSp))
+    F=np.empty((nFaces,mn+nSc))
+    U=np.empty((nLR,mn+nSc))
     for iFace in range(nFaces):
         for K in range(nLR):
             U[K,0]=rLR[K,iFace]
             U[K,1]=rLR[K,iFace]*uLR[K,iFace]
             U[K,2]=pLR[K,iFace]/(gamma[iFace]-1.0)+0.5*rLR[K,iFace]*uLR[K,iFace]**2.0
-            for kSp in range(nSp): U[K,mn+kSp]=rLR[K,iFace]*YLR[K,iFace,kSp]
+            for kSc in range(nSc): U[K,mn+kSc]=rLR[K,iFace]*YLR[K,iFace,kSc]
         for iDim in range(nDim): 
             FBar=0.5*(FLR[0,iFace,iDim]+FLR[1,iFace,iDim])
             F[iFace,iDim]=FBar-0.5*lambdaMax*(U[1,iDim]-U[0,iDim])
@@ -297,16 +338,16 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
             rLR=array containing left and right density states [nLR,nFaces]
             uLR=array containing left and right velocity states [nLR,nFaces]
             pLR=array containing left and right pressure states [nLR,nFaces]
-            YLR=array containing left and right species mass fraction states
-                [nLR,nFaces,nSp]
+            YLR=array containing left and right scalar states
+                [nLR,nFaces,nSc]
             gamma= array containing the specific heat [nFaces]
         return:
-            F=modeled Euler fluxes [nFaces,mn+nSp]
+            F=modeled Euler fluxes [nFaces,mn+nSc]
     '''
     nLR=len(rLR)
     nFaces = len(rLR[0])
-    nSp=YLR[0].shape[1]
-    nDim=mn+nSp
+    nSc=YLR[0].shape[1]
+    nDim=mn+nSc
     
     #compute the wave speeds
     aLR=np.empty((2,nFaces))
@@ -337,13 +378,13 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
             FLR[K,iFace,0]=rLR[K,iFace]*uLR[K,iFace]
             FLR[K,iFace,1]=rLR[K,iFace]*uLR[K,iFace]**2.0+pLR[K,iFace]
             FLR[K,iFace,2]=uLR[K,iFace]*(gamma[iFace]/(gamma[iFace]-1)*pLR[K,iFace]+0.5*rLR[K,iFace]*uLR[K,iFace]**2.0)
-            for kSp in range(nSp): FLR[K,iFace,3+kSp]=rLR[K,iFace]*uLR[K,iFace]*YLR[K,iFace,kSp]
+            for kSc in range(nSc): FLR[K,iFace,3+kSc]=rLR[K,iFace]*uLR[K,iFace]*YLR[K,iFace,kSc]
         
     #compute the modeled flux
-    F=np.empty((nFaces,mn+nSp))
-    U=np.empty(mn+nSp)
-    UStar=np.empty(mn+nSp)
-    YFace=np.empty(nSp)
+    F=np.empty((nFaces,mn+nSc))
+    U=np.empty(mn+nSc)
+    UStar=np.empty(mn+nSc)
+    YFace=np.empty(nSc)
     for iFace in range(nFaces):
         if 0.0<=SLR[0,iFace]:
             for iDim in range(nDim): F[iFace,iDim]=FLR[0,iFace,iDim]
@@ -355,20 +396,20 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
             rFace=rLR[K,iFace]
             uFace=uLR[K,iFace]
             pFace=pLR[K,iFace]
-            for kSp in range(nSp): YFace[kSp]=YLR[K,iFace,kSp]
+            for kSc in range(nSc): YFace[kSc]=YLR[K,iFace,kSc]
             gammaFace=gamma[iFace]
             SFace=SLR[K,iFace]
             #conservative variable vector
             U[0]=rFace
             U[1]=rFace*uFace
             U[2]=pFace/(gammaFace-1.0)+0.5*rFace*uFace**2.0
-            for kSp in range(nSp): U[mn+kSp]=rFace*YFace[kSp]
+            for kSc in range(nSc): U[mn+kSc]=rFace*YFace[kSc]
             #star conservative variable vector
             prefactor=rFace*(SFace-uFace)/(SFace-SStarFace)
             UStar[0]=prefactor
             UStar[1]=prefactor*SStarFace
             UStar[2]=prefactor*(U[2]/rFace+(SStarFace-uFace)*(SStarFace+pFace/(rFace*(SFace-uFace))))
-            for iSp in range(nSp): UStar[mn+iSp]=prefactor*YFace[iSp]
+            for iSp in range(nSc): UStar[mn+iSp]=prefactor*YFace[iSp]
             #flux update
             for iDim in range(nDim): F[iFace,iDim]=FLR[K,iFace,iDim]+SFace*(UStar[iDim]-U[iDim])
     
@@ -383,7 +424,7 @@ def getR(Y,molecularWeights):
     Function used by the thermoTable class to find the gas constant. This 
     function is compiled for speed-up.
         inputs: 
-            Y: species mass fraction [nX,nSp]
+            Y: scalar [nX,nSp]
             molecularWeights: species molecular weights [nSp]
         output:
             R: gas constants [nX]
@@ -410,7 +451,7 @@ def getCp(T,Y,TTable,a,b):
     specific heats. This function is compiled for speed-up.
         inputs:
             T: Temperatures [nX]
-            Y: species mass fraction [nX,nSp]
+            Y: scalar [nX,nSp]
             TTable: table of temperatures [nT]
             a: first order coefficient for cp [nT]
             b: zeroth order coefficient for cp [nT]
@@ -671,9 +712,13 @@ class stanScram(object):
             self.r = np.ones(self.n) * state[0].density
             self.u = np.ones(self.n) * state[1]
             self.p = np.ones(self.n) * state[0].P
-            self.Y = np.zeros((self.n, gas.n_species))
-            for k in range(self.__nsp):
-                self.Y[:, k] = state[0].Y[k]
+            self.Y = np.zeros((self.n, self.n_scalars))
+            if self.physics == "FPV":
+                self.Y[:, 0] = self.ZBilger(state[0].Y)
+                self.Y[:, 1] = self.Prog(state[0].Y)
+            elif self.physics == "FRC":
+                for k in range(self.n_scalars):
+                    self.Y[:, k] = state[0].Y[k]
             self.gamma = np.ones(self.n) * (state[0].cp / state[0].cv)
             # No flame thickening
             self.F = np.ones_like(self.r)
@@ -703,15 +748,23 @@ class stanScram(object):
             self.r=np.ones(self.n)*leftState[0].density
             self.u=np.ones(self.n)*leftState[1]
             self.p=np.ones(self.n)*leftState[0].P
-            self.Y=np.zeros((self.n,gas.n_species)) 
-            for kSp in range(self.__nsp): self.Y[:,kSp]=leftState[0].Y[kSp]
+            self.Y=np.zeros((self.n,self.n_scalars)) 
+            if self.physics=="FPV":
+                self.Y[:,0]=self.ZBilger(leftState[0].Y)
+                self.Y[:,1]=self.Prog(leftState[0].Y)
+            elif self.physics=="FRC":
+                for kSp in range(self.n_scalars): self.Y[:,kSp]=leftState[0].Y[kSp]
             self.gamma=np.ones(self.n)*(leftState[0].cp/leftState[0].cv)
             #right state
             index=self.x>=geometry[3]
             self.r[index]=rightState[0].density
             self.u[index]=rightState[1]
             self.p[index]=rightState[0].P
-            for kSp in range(self.__nsp): self.Y[index,kSp]=rightState[0].Y[kSp]
+            if self.physics=="FPV":
+                self.Y[index,0]=self.ZBilger(rightState[0].Y)
+                self.Y[index,1]=self.Prog(rightState[0].Y)
+            elif self.physics=="FRC":
+                for kSp in range(self.n_scalars): self.Y[index,kSp]=rightState[0].Y[kSp]
             self.gamma[index]=rightState[0].cp/rightState[0].cv  
             self.F = np.ones_like(self.r)
         #######################################################################
@@ -748,8 +801,12 @@ class stanScram(object):
             self.r = smoothingFunction(self.x,xShock,Delta,leftGas.density,rightGas.density)
             self.u = smoothingFunction(self.x,xShock,Delta,uLeft,uRight)
             self.p = smoothingFunction(self.x,xShock,Delta,leftGas.P,rightGas.P)
-            self.Y=np.zeros((self.n,self.gas.n_species)) 
-            for kSp in range(self.__nsp): self.Y[:,kSp]=smoothingFunction(self.x,xShock,Delta,leftGas.Y[kSp],rightGas.Y[kSp])
+            self.Y=np.zeros((self.n,self.n_scalars)) 
+            if self.physics=="FPV":
+                self.Y[:,0]=smoothingFunction(self.x,xShock,Delta,self.ZBilger(leftGas.Y),self.ZBilger(rightGas.Y))
+                self.Y[:,1]=smoothingFunction(self.x,xShock,Delta,self.Prog(leftGas.Y),self.Prog(rightGas.Y))
+            elif self.physics=="FRC":
+                for kSp in range(self.n_scalars): self.Y[:,kSp]=smoothingFunction(self.x,xShock,Delta,leftGas.Y[kSp],rightGas.Y[kSp])
             self.gamma=smoothingFunction(self.x,xShock,Delta,gammaLeft,gammaRight)
             self.F = np.ones_like(self.r)
         #########################################################################
@@ -766,9 +823,6 @@ class stanScram(object):
         self.gamma=np.ones(self.n)*gas.cp/gas.cv #specific heat ratio
         self.F=np.ones(self.n) #thickening
         self.t = 0.0 #time
-        self.__nsp=gas.n_species #number os chemical species
-        self.Y=np.zeros((self.n,gas.n_species)) #species mass fractions
-        self.Y[:,0]=np.ones(self.n)
         self.verbose=True #console output switch
         self.outputEvery=1 #number of iterations of simulation advancement between logging updates
         self.h=None #height of the channel
@@ -783,11 +837,14 @@ class stanScram(object):
         self.fuel_def = None #fuel definition
         self.prog_def = None #progress variable definition
         self.fluxFunction=HLLC
+        self.initialization=None #initialization options
         self.probes=[] #list of probe objects
         self.XTDiagrams=dict() #dictionary of XT diagram objects
         self.cf = None #skin friction functor
         self.thermoTable = thermoTable(gas) #thermodynamic table object
         self.optimizationIteration = 0 #counter to keep track of optimization
+        self.physics = "FPV" #flag to determine the physics model
+        self.fpv_table = None #table for FPV model
         self.reacting = False #flag to solver about whether to solve source terms
         self.inReactingRegion = lambda x,t: True #the reacting region of the shock tube. 
         self.includeDiffusion= False #exclude diffusion
@@ -796,16 +853,36 @@ class stanScram(object):
         #overwrite the default data
         for key in kwargs:
             if key in self.__dict__.keys(): self.__dict__[key]=kwargs[key]
-            if key=='initializeConstant':
-                initializeConstant(self,kwargs[key][0],kwargs[key][1])
-            if key=='initializeRiemannProblem':
-                initializeRiemannProblem(self,kwargs[key][0],kwargs[key][1],kwargs[key][2])
-            if key=='initializeDiffuseInterface':
-                initializeDiffuseInterface(self,kwargs[key][0],kwargs[key][1],kwargs[key][2],kwargs[key][3])
-        if not self.n==len(self.x)==len(self.r)==len(self.u)==len(self.p)==len(self.gamma):
-            raise Exception("Initialization Error")
+        
+        #set the number of scalars
+        if self.physics == "FPV":
+            if self.fpv_table is None:
+                raise Exception("FPV table must be defined")
+            self.n_scalars = 2
+        elif self.physics == "FRC":
+            if self.injector is not None:
+                raise Exception("JIC injector model not supported for FRC")
+            self.n_scalars = self.gas.n_species
+        else:
+            raise Exception("Invalid Physics Model")
+        self.Y=np.zeros((self.n,self.n_scalars)) #scalars
+
+        #other initialization
         self.initZBilger()
         self.initProg()
+
+        #initialize the state
+        if self.initialization == None:
+            raise Exception("No initialization method selected")
+        if self.initialization[0] == 'constant':
+            initializeConstant(self, *self.initialization[1:])
+        elif self.initialization[0] == 'riemann':
+            initializeRiemannProblem(self, *self.initialization[1:])
+        elif self.initialization[0] == 'diffuse_interface':
+            initializeDiffuseInterface(self, *self.initialization[1:])
+        if not self.n==len(self.x)==len(self.r)==len(self.u)==len(self.p)==len(self.gamma):
+            raise Exception("Initialization Error")
+        
 ##############################################################################
     class __probe(object):
         '''
@@ -822,7 +899,7 @@ class stanScram(object):
             self.u=[] #velocity
             self.p=[] #pressure
             self.gamma=[] #specific heat ratio
-            self.Y=[] #species mass fractions
+            self.Y=[] #scalars
 ##############################################################################
     def addProbe(self,probeLocation,skipSteps=0,probeName=None):
         '''
@@ -861,7 +938,10 @@ class stanScram(object):
                 XTDiagram: the XTDiagram object 
         '''
         variable=XTDiagram.name
-        gasSpecies = [species.lower() for species in self.gas.species_names]
+        if self.physics == "FPV":
+            scalarNames = ["mixture fraction","progress variable"]
+        elif self.physics == "FRC":
+            scalarNames = [species.lower() for species in self.gas.species_names]
         if variable in ["density","r","rho"]:
             XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.r))
         elif variable in ["velocity","u"]:
@@ -869,13 +949,13 @@ class stanScram(object):
         elif variable in ["pressure","p"]:
             XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.p))
         elif variable in ["temperature","t"]:
-            T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
+            T = self.getTemperature(self.r,self.p,self.Y)
             XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, T))
         elif variable in ["gamma","g","specific heat ratio", "heat capacity ratio"]:
             XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.gamma))
-        elif variable in gasSpecies:
-            speciesIndex= gasSpecies.index(variable)
-            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.Y[:,speciesIndex]))
+        elif variable in scalarNames:
+            scalarIndex= scalarNames.index(variable)
+            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.Y[:,scalarIndex]))
         else: 
             raise Exception("Invalid Variable Name")
         XTDiagram.t.append(self.t)
@@ -952,7 +1032,7 @@ class stanScram(object):
 ##############################################################################
     def plotState(self, filename):
         xscale = 1.0e3
-        T = self.thermoTable.getTemperature(self.r, self.p, self.Y)
+        T = self.getTemperature(self.r, self.p, self.Y)
 
         fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
         ax[0].plot(self.x*xscale, self.r)
@@ -979,10 +1059,7 @@ class stanScram(object):
         if self.h is not None:
             self.add_h_plot(ax[3], scale=xscale)
 
-        M = np.zeros_like(self.x)
-        for i in range(self.x.shape[0]):
-            self.gas.TPY = T[i], self.p[i], self.Y[i, :]
-            M[i] = np.abs(self.u[i]) / self.gas.sound_speed
+        M = np.abs(self.u) / self.soundSpeed(self.r, self.p, self.gamma)
         ax[4].plot(self.x*xscale, M)
         ax[4].axhline(1.0, color='r', linestyle='--')
         ax[4].set_ymargin(0.1)
@@ -990,10 +1067,25 @@ class stanScram(object):
         if self.h is not None:
             self.add_h_plot(ax[4], scale=xscale)
 
-        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2' )], label=r"$\mathrm{H}_2$")
-        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('OH' )], label=r"$\mathrm{OH}$")
-        ax[5].plot(self.x*xscale, self.Y[:, self.gas.species_index('H2O')], label=r"$\mathrm{H}_2\mathrm{O}$")
-        ax[5].set_ymargin(0.1)
+        if self.physics == "FPV":
+            Z = self.Y[:, 0]
+            C = self.Y[:, 1]
+            Q = np.zeros_like(self.x)
+            L = self.fpv_table.L_from_C(Z, C)
+            Y_H2 = self.fpv_table.lookup('H2', Z, Q, L)
+            Y_OH = self.fpv_table.lookup('OH', Z, Q, L)
+            Y_H2O = self.fpv_table.lookup('H2O', Z, Q, L)
+        elif self.physics == "FRC":
+            Y_H2 = self.Y[:, self.gas.species_index('H2' )]
+            Y_OH = self.Y[:, self.gas.species_index('OH' )]
+            Y_H2O = self.Y[:, self.gas.species_index('H2O')]
+        ax[5].plot(self.x*xscale, Y_H2, label=r"$\mathrm{H}_2$")
+        ax[5].plot(self.x*xscale, Y_OH, label=r"$\mathrm{OH}$")
+        ax[5].plot(self.x*xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
+        if Y_H2.max() < 1e-6:
+            ax[5].set_ylim(-1e-3, 1e-3)
+        else:
+            ax[5].set_ymargin(0.1)
         ax[5].set_ylabel(r'$Y_k$ [-]')
         ax[5].legend(loc='upper left')
         if self.h is not None:
@@ -1012,6 +1104,120 @@ class stanScram(object):
         plt.tight_layout()
         plt.savefig(filename, bbox_inches='tight', dpi=300)
         plt.close()
+##############################################################################
+    def getCp(self,T,Y):
+        '''
+        Method: getCp
+        ----------------------------------------------------------------------
+        This method computes the constant pressure specific heat as determined
+        by Billet and Abgrall (2003) for the double flux method.
+            inputs:
+                T: vector of temperatures [n]
+                Y: matrix of mass fractions [n,nSc]
+            outputs:
+                cp: vector of constant pressure specific heats
+        '''
+        if self.physics == "FPV":
+            Z = Y[:, 0]
+            C = Y[:, 1]
+            Q = np.zeros_like(self.x)
+            L = self.fpv_table.L_from_C(Z, C)
+            return self.fpv_table.get_cp(Z, Q, L, T)
+        elif self.physics == "FRC":
+            return self.thermoTable.getCp(T,Y)
+##############################################################################
+    def getGamma(self,T,Y):
+        '''
+        Method: getGamma
+        ----------------------------------------------------------------------
+        This method computes the specific heat ratio, gamma.
+            inputs:
+                T: vector of temperatures [n]
+                Y: matrix of mass fractions [n,nSc]
+            outputs:
+                gamma: vector of specific heat ratios
+        '''
+        if self.physics == "FPV":
+            Z = Y[:, 0]
+            C = Y[:, 1]
+            Q = np.zeros_like(self.x)
+            L = self.fpv_table.L_from_C(Z, C)
+            return self.fpv_table.get_gamma(Z, Q, L, T)
+        elif self.physics == "FRC":
+            return self.thermoTable.getGamma(T,Y)
+##############################################################################
+    def getMu(self,T,Y):
+        '''
+        Method: getMu
+        ----------------------------------------------------------------------
+        This method computes the dynamic viscosity of the gas at the current state
+            inputs:
+                T: vector of temperatures [n]
+                P: vector of pressures [n]
+                Y: scalar matrix [n,nSc]
+            outputs:
+                mu: vector of dynamic viscosities
+        '''
+        if self.physics == "FPV":
+            Z = Y[:, 0]
+            C = Y[:, 1]
+            Q = np.zeros_like(self.x)
+            L = self.fpv_table.L_from_C(Z, C)
+            return self.fpv_table.get_mu(Z, Q, L, T)
+        elif self.physics == "FRC":
+            mu = np.zeros_like(T)
+            for i, Ti in enumerate(T):
+                self.gas.TP = Ti, self.p[i]
+                if self.gas.n_species > 1: self.gas.Y = Y[i, :]
+                mu[i] = self.gas.viscosity
+            return mu
+##############################################################################
+    def getLoc(self,T,Y):
+        '''
+        Method: getLoc
+        ----------------------------------------------------------------------
+        This method computes lambda / cv, where lambda is the thermal conductivity
+        and cv is the specific heat at constant volume.
+            inputs:
+                T: vector of temperatures [n]
+                Y: scalar matrix [n,nSc]
+            outputs:
+                loc: vector of lambda / cv
+        '''
+        if self.physics == "FPV":
+            Z = Y[:, 0]
+            C = Y[:, 1]
+            Q = np.zeros_like(self.x)
+            L = self.fpv_table.L_from_C(Z, C)
+            return self.fpv_table.get_loc(Z, Q, L, T)
+        elif self.physics == "FRC":
+            loc = np.zeros_like(T)
+            for i, Ti in enumerate(T):
+                self.gas.TP = Ti, self.p[i]
+                if self.gas.n_species > 1: self.gas.Y = Y[i, :]
+                loc[i] = self.gas.thermal_conductivity / self.gas.cv
+##############################################################################
+    def getTemperature(self,r,p,Y):
+        '''
+        Method: getTemperature
+        ----------------------------------------------------------------------
+        This method computes the temperature of the gas at the current state
+            inputs:
+                r=density
+                p=pressure
+                Y=scalar matrix [x,scalar]
+            outputs:
+                T=temperature
+        '''
+        if self.physics == "FPV":
+            Z = Y[:, 0]
+            C = Y[:, 1]
+            Q = np.zeros_like(self.x)
+            L = self.fpv_table.L_from_C(Z, C)
+            R = self.fpv_table.get_R(Z, Q, L)
+            return p / (r * R)
+        elif self.physics == "FRC":
+            return self.thermoTable.getTemperature(r,p,Y)
 ##############################################################################
     def soundSpeed(self,r,p,gamma):
         '''
@@ -1044,16 +1250,22 @@ class stanScram(object):
         '''
         localDts = self.dx/self.waveSpeed()
         if self.includeDiffusion:
-            T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-            cv = self.thermoTable.getCp(T,self.Y)/self.gamma
-            alpha, nu, diff  = np.zeros_like(T), np.zeros_like(T),np.zeros_like(T)
-            for i,Ti in enumerate(T):
-                #compute gas properties
-                self.gas.TP = Ti,self.p[i]
-                if self.gas.n_species>1: self.gas.Y= self.Y[i,:]
-                nu[i]=self.gas.viscosity/self.gas.density
-                alpha[i]=self.gas.thermal_conductivity/self.gas.density/cv[i]*self.F[i]
-                diff[i]=np.max(self.gas.mix_diff_coeffs)*self.F[i]     
+            T = self.getTemperature(self.r,self.p,self.Y)
+            cp = self.getCp(T,self.Y)
+            cv = cp/self.gamma
+            mu = self.getMu(T,self.Y)
+            nu = mu/self.r
+            k = self.getLoc(T,self.Y) * cp * self.F
+            alpha = k/(self.r*cp)
+            if self.physics == "FPV":
+                #unity Lewis number
+                diff = alpha
+            elif self.physics == "FRC":
+                diff = np.zeros_like(self.x)
+                for i,Ti in enumerate(T):
+                    self.gas.TP = Ti,self.p[i]
+                    if self.gas.n_species>1: self.gas.Y= self.Y[i,:]
+                    diff[i]=np.max(self.gas.mix_diff_coeffs)*self.F[i]
             viscousDts=0.5*self.dx**2.0/np.maximum(4.0/3.0*nu,np.maximum(alpha,diff))
             localDts = np.minimum(localDts,viscousDts)
         return self.cfl*min(localDts)
@@ -1070,16 +1282,16 @@ class stanScram(object):
                 rLR=density on left and right face [2,n+1]
                 uLR=velocity on left and right face [2,n+1]
                 pLR=pressure on left and right face [2,n+1]
-                YLR=species ressure on left and right face [2,n+1,nsp]
+                YLR=scalar on left and right face [2,n+1,nsp]
             outputs:
                 rLR=density on left and right face [2,n+1]
                 uLR=velocity on left and right face [2,n+1]
                 pLR=pressure on left and right face [2,n+1]
-                YLR=species ressure on left and right face [2,n+1,nsp]
+                YLR=scalar on left and right face [2,n+1,nsp]
         '''
         for ibc in [0,1]:
-            NAssign = ibc;
-            NUse = 1-ibc;
+            NAssign = ibc
+            NUse = 1-ibc
             iX = -ibc
             rLR[NAssign,iX]=rLR[NUse,iX]
             uLR[NAssign,iX]=uLR[NUse,iX]
@@ -1099,7 +1311,7 @@ class stanScram(object):
                     uLR[NAssign,iX]=self.boundaryConditions[ibc][1]
                 if self.boundaryConditions[ibc][2] is not None: 
                     pLR[NAssign,iX]=self.boundaryConditions[ibc][2]
-                if self.boundaryConditions[ibc][3] is not None: 
+                if self.boundaryConditions[ibc][3] is not None:
                     YLR[NAssign,iX,:]=self.boundaryConditions[ibc][3]
         return (rLR,uLR,pLR,YLR)
 ##############################################################################
@@ -1112,13 +1324,13 @@ class stanScram(object):
                 r=density
                 u=velocity
                 p=pressure
-                Y=species mass fraction matrix [x,species]
+                Y=scalar matrix [x,scalar]
                 gamma=specific heat ratio
             outputs:
                 r=density
                 ru=momentum
-                E=total energy
-                rY=species density matrix
+                E=total non-chemical energy
+                rY=scalar density matrix
         '''
         ru=r*u
         E=p/(gamma-1.0)+0.5*r*u**2.0
@@ -1133,14 +1345,14 @@ class stanScram(object):
             inputs:
                 r=density
                 ru=momentum
-                E=total energy
-                rY=species density matrix
+                E=total non-chemical energy
+                rY=scalar density matrix
                 gamma=specific heat ratio
             outputs:
                 r=density
                 u=velocity
                 p=pressure
-                Y=species mass fraction matrix [x,species]
+                Y=scalar matrix [x,scalar]
         '''
         u=ru/r
         p=(gamma-1.0)*(E-0.5*r*u**2.0)
@@ -1149,7 +1361,8 @@ class stanScram(object):
         Y[Y>1.0]=1.0
         Y[Y<0.0]=0.0
         #scale
-        Y=Y/np.sum(Y,axis=1).reshape((-1,1))
+        if self.physics == "FRC":
+            Y=Y/np.sum(Y,axis=1).reshape((-1,1))
         return (r,u,p,Y)
 ##############################################################################
     def initZBilger(self):
@@ -1199,11 +1412,11 @@ class stanScram(object):
         ----------------------------------------------------------------------
         This method calculates the Bilger mixture fraction
             inputs:
-                Y=species mass fraction matrix [x,species]
+                Y=species mass fraction
             outputs:
                 Z=mixture fraction
         '''
-        return np.dot(Y, self.Z_weights) + self.Z_offset
+        return np.clip(np.dot(Y, self.Z_weights) + self.Z_offset, 0.0, 1.0)
 ##############################################################################
     def initProg(self):
         '''
@@ -1226,11 +1439,11 @@ class stanScram(object):
         ----------------------------------------------------------------------
         This method computes the progress variable
             inputs:
-                Y=species mass fraction matrix [x,species]
+                Y=species mass fraction
             outputs:
                 progress variable
         '''
-        return np.dot(Y, self.prog_weights)
+        return np.clip(np.dot(Y, self.prog_weights), 0.0, 1.0)
 ############################################################################## 
     def flux(self,r,u,p,Y,gamma):
         '''
@@ -1241,7 +1454,7 @@ class stanScram(object):
                 r=density
                 u=velocity
                 p=pressure
-                Y=species mass fraction matrix [x,species]
+                Y=scalar matrix [x,scalar]
                 gamma=specific heat ratio
             outputs:
                 rhs=the update due to the flux 
@@ -1250,15 +1463,15 @@ class stanScram(object):
         nx=len(r)
         PLR=WENO5(r,u,p,Y,gamma)
         #extract and apply boundary conditions
-        rLR=PLR[:,:,0];
-        uLR=PLR[:,:,1];
-        pLR=PLR[:,:,2];
-        YLR=PLR[:,:,mt:];
+        rLR=PLR[:,:,0]
+        uLR=PLR[:,:,1]
+        pLR=PLR[:,:,2]
+        YLR=PLR[:,:,mt:]
         rLR,uLR,pLR,YLR = self.applyBoundaryConditions(rLR,uLR,pLR,YLR)
         #calculate the flux
         fL = self.fluxFunction(rLR,uLR,pLR,YLR,gamma[mt:-mt+1])
         fR = self.fluxFunction(rLR,uLR,pLR,YLR,gamma[mt-1:-mt])
-        rhs = np.zeros((nx,mn+self.__nsp))
+        rhs = np.zeros((nx,mn+self.n_scalars))
         rhs[mt:-mt,:]=-(fR[1:]-fL[:-1])/self.dx
         return rhs
 ############################################################################## 
@@ -1271,7 +1484,7 @@ class stanScram(object):
                 r=density
                 u=velocity
                 p=pressure
-                Y=species mass fraction matrix [x,species]
+                Y=scalar matrix [x,scalar]
                 gamma=specific heat ratio
             outputs:
                 rhs=the update due to the viscous flux 
@@ -1285,7 +1498,7 @@ class stanScram(object):
                     rLR=array containing left and right density states [nLR,nFaces]
                     uLR=array containing left and right velocity states [nLR,nFaces]
                     pLR=array containing left and right pressure states [nLR,nFaces]
-                    YLR=array containing left and right species mass fraction states
+                    YLR=array containing left and right scalar states
                         [nLR,nFaces,nSp]
                 return:
                     f=modeled viscous fluxes [nFaces,mn+nSp]
@@ -1293,36 +1506,38 @@ class stanScram(object):
             #get the temperature, pressure, and composition for each cell (including the two ghosts)
             nT = self.n+2
             T=np.zeros(nT)
-            T[:-1] = self.thermoTable.getTemperature(rLR[0,:],pLR[0,:],YLR[0,:,:])
-            T[-1] = self.thermoTable.getTemperature(np.array([rLR[1,-1]]),
-                                                    np.array([pLR[1,-1]]),
-                                                    np.array([YLR[1,-1,:]]).reshape((1,-1)))
-            p, F, Y = np.zeros(nT), np.ones(nT), np.zeros((nT,self.__nsp))
+            T[:-1] = self.getTemperature(rLR[0,:],pLR[0,:],YLR[0,:,:])
+            T[-1] = self.getTemperature(np.array([rLR[1,-1]]),
+                                        np.array([pLR[1,-1]]),
+                                        np.array([YLR[1,-1,:]]).reshape((1,-1)))
+            p, F, Y = np.zeros(nT), np.ones(nT), np.zeros((nT,self.n_scalars))
             p[:-1], p[-1] = pLR[0,:], pLR[1,-1] 
             F[1:-1] = self.F 
             F[0], F[-1] = self.F[0], self.F[-1] #no gradient in F at boundary
             Y[:-1,:], Y[-1,:] = YLR[0,:,:], YLR[1,-1,:] 
-            viscosity=np.zeros(nT)
-            conductivity=np.zeros(nT)
-            diffusivities=np.zeros((nT,self.__nsp))
-            for i,Ti in enumerate(T):
-                #compute gas properties
-                self.gas.TP = Ti,p[i]
-                if self.gas.n_species>1: self.gas.Y= Y[i,:]
-                viscosity[i]=self.gas.viscosity
-                conductivity[i]=self.gas.thermal_conductivity*F[i]
-                diffusivities[i,:]=self.gas.mix_diff_coeffs*F[i]     
+            mu = self.getMu(T,Y)
+            cp = self.getCp(T,Y)
+            k = self.getLoc(T,Y) * cp * F
+            diff = np.zeros((nT,self.n_scalars))
+            if self.physics == "FPV":
+                diff_ = k / (self.r * cp)
+                diff = diff_.reshape(-1,1)
+            elif self.physics == "FRC":
+                for i,Ti in enumerate(T):
+                    self.gas.TP = Ti,p[i]
+                    if self.gas.n_species>1: self.gas.Y= Y[i,:]
+                    diff[i,:]=self.gas.mix_diff_coeffs*F[i]
             #compute the gas properties at the face
-            viscosity=(viscosity[1:]+viscosity[:-1])/2.0
-            conductivity=(conductivity[1:]+conductivity[:-1])/2.0
-            diffusivities=(diffusivities[1:,:]+diffusivities[:-1,:])/2.0
+            viscosity=(mu[1:]+mu[:-1])/2.0
+            conductivity=(k[1:]+k[:-1])/2.0
+            diffusivities=(diff[1:,:]+diff[:-1,:])/2.0
             r = ((rLR[0,:]+rLR[1,:])/2.0).reshape(-1,1) 
             #get the central differences
             dudx=(uLR[1,:]-uLR[0,:])/self.dx
             dTdx=(T[1:]-T[:-1])/self.dx
             dYdx=(YLR[1,:,:]-YLR[0,:,:])/self.dx
             #compute the fluxes
-            f=np.zeros((nT-1,mn+self.__nsp))
+            f=np.zeros((nT-1,mn+self.n_scalars))
             f[:,1]=4.0/3.0*viscosity*dudx
             f[:,2]=conductivity*dTdx
             f[:,mn:]=r*diffusivities*dYdx
@@ -1332,11 +1547,11 @@ class stanScram(object):
         rLR = np.concatenate((r[mt-1:-mt].reshape(1,-1),r[mt:-mt+1].reshape(1,-1)),axis=0)
         uLR = np.concatenate((u[mt-1:-mt].reshape(1,-1),u[mt:-mt+1].reshape(1,-1)),axis=0)
         pLR = np.concatenate((p[mt-1:-mt].reshape(1,-1),p[mt:-mt+1].reshape(1,-1)),axis=0)
-        YLR = np.concatenate((Y[mt-1:-mt,:].reshape(1,-1,self.__nsp),Y[mt:-mt+1,:].reshape(1,-1,self.__nsp)),axis=0)
+        YLR = np.concatenate((Y[mt-1:-mt,:].reshape(1,-1,self.n_scalars),Y[mt:-mt+1,:].reshape(1,-1,self.n_scalars)),axis=0)
         rLR,uLR,pLR,YLR = self.applyBoundaryConditions(rLR,uLR,pLR,YLR)
         #calculate the flux
         f = viscousFluxFunction(self,rLR,uLR,pLR,YLR)
-        rhs = np.zeros((self.n+2*mt,mn+self.__nsp))
+        rhs = np.zeros((self.n+2*mt,mn+self.n_scalars))
         rhs[mt:-mt,:] = (f[1:,:]-f[:-1,:])/self.dx #central difference
         return rhs
 ##############################################################################
@@ -1355,7 +1570,7 @@ class stanScram(object):
         p=np.ones(self.n+2*mt)
         gamma=np.ones(self.n+2*mt)
         gamma[:mt], gamma[-mt:] = self.gamma[0], self.gamma[-1]
-        Y=np.ones((self.n+2*mt,self.__nsp))
+        Y=np.ones((self.n+2*mt,self.n_scalars))
         (r[mt:-mt],u[mt:-mt],p[mt:-mt], Y[mt:-mt,:],gamma[mt:-mt])= \
             (self.r,self.u,self.p,self.Y,self.gamma)
         (r,ru,E,rY)=self.primitiveToConservative(r,u,p,Y,gamma)
@@ -1381,8 +1596,8 @@ class stanScram(object):
         rY=(1.0/3.0)*rY+(2.0/3.0)*rY2+(2.0/3.0)*dt*rhs[:,mn:]
         (r,u,p,Y)= self.conservativeToPrimitive(r,ru,E,rY,gamma)
         #update
-        T0 = self.thermoTable.getTemperature(r[mt:-mt],p[mt:-mt],Y[mt:-mt])
-        gamma[mt:-mt]=self.thermoTable.getGamma(T0,Y[mt:-mt])
+        T0 = self.getTemperature(r[mt:-mt],p[mt:-mt],Y[mt:-mt])
+        gamma[mt:-mt]=self.getGamma(T0,Y[mt:-mt])
         (self.r,self.u,self.p,self.Y,self.gamma)=(r[mt:-mt],u[mt:-mt],p[mt:-mt],Y[mt:-mt],gamma[mt:-mt])
 ##############################################################################
     def advanceChemistry(self,dt):
@@ -1394,9 +1609,11 @@ class stanScram(object):
             inputs
                 dt=time step
         '''
-        if self.injector is not None:
+        if not self.reacting:
+            return
+        if self.physics == "FPV":
             self.advanceChemistryFPV(dt)
-        else:
+        elif self.physics == "FRC":
             self.advanceChemistryFRC(dt)
 ##############################################################################
     def advanceChemistryFPV(self,dt):
@@ -1409,24 +1626,32 @@ class stanScram(object):
             inputs
                 dt=time step
         '''
-        C = self.Prog(self.Y)
-        W = self.gas.molecular_weights
-        wDot = self.r.reshape((-1,1)) * self.injector.get_chemical_sources(self.Y,C) # kg/m^3 * 1/s = kg/m^3/s
-        wHatDot = wDot/W
-        eRT = self.gas.standard_int_energies_RT
-        YDot = wDot/self.r.reshape((-1,1))
-        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        TDot = -np.sum(eRT*wHatDot, axis=1)*ct.gas_constant*T/(self.r*self.gas.cv_mass)
-        self.Y += YDot*dt
-        self.Y[self.Y>1.0] = 1.0
-        self.Y[self.Y<0.0] = 0.0
-        self.Y /= np.sum(self.Y,axis=1).reshape((-1,1))
-        T += TDot*dt
-        for k in range(self.n):
-            self.gas.TDY = T[k],self.r[k],self.Y[k,:]
-            self.p[k] = self.gas.P
-        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        self.gamma = self.thermoTable.getGamma(T,self.Y)
+        #initialize
+        (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
+        Q = np.zeros(self.n)
+        L = self.fpv_table.L_from_C(self.Y[:,0], self.Y[:,1])
+        e_chem0 = self.fpv_table.lookup('E0_CHEM', self.Y[:,0], Q, L)
+        #1st stage of RK2
+        rhsY = np.zeros((self.n,self.n_scalars))
+        omegaC = self.injector.get_chemical_sources(self.Y[:,0], self.Y[:,1])
+        rhsY[:,1] = omegaC * r
+        rY1 = rY+dt*rhsY
+        L1 = self.fpv_table.L_from_C(rY1[:,0]/r, rY1[:,1]/r)
+        e_chem1 = r * self.fpv_table.lookup('E0_CHEM', rY1[:,0]/r, Q, L1)
+        E1 = E + e_chem0 - e_chem1
+        (r1,u1,p1,Y1)=self.conservativeToPrimitive(r,ru,E1,rY1,self.gamma)
+        #2nd stage of RK2
+        omegaC1 = self.injector.get_chemical_sources(Y1[:,0], Y1[:,1])
+        rhsY[:,1] = omegaC1 * r1
+        rY = 0.5*(rY+rY1+dt*rhsY)
+        L = self.fpv_table.L_from_C(rY[:,0]/r, rY[:,1]/r)
+        e_chem2 = r * self.fpv_table.lookup('E0_CHEM', rY[:,0]/r, Q, L)
+        E = E + e_chem0 - e_chem2
+        (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
+        #update
+        T0 = self.getTemperature(r,p,Y)
+        self.gamma=self.getGamma(T0,Y)
+        (self.r,self.u,self.p,self.Y)=(r,u,p,Y)
 ##############################################################################
     def advanceChemistryFRC(self,dt):
         '''
@@ -1455,7 +1680,6 @@ class stanScram(object):
             self.gas.TDY= T,r,Y
             #gas properties
             cv = self.gas.cv_mass
-            nSp=self.gas.n_species
             W = self.gas.molecular_weights
             wHatDot = self.gas.net_production_rates #kmol/m^3.s
             wDot = wHatDot*W #kg/m^3.s
@@ -1463,7 +1687,7 @@ class stanScram(object):
             #compute the derivatives
             YDot = wDot/r
             TDot = -np.sum(eRT*wHatDot)*ct.gas_constant*T/(r*cv) 
-            f = np.zeros(nSp+1)
+            f = np.zeros(self.n_scalars+1)
             f[:-1]=YDot
             f[-1]=TDot
             return f/F
@@ -1471,7 +1695,7 @@ class stanScram(object):
         from scipy import integrate
         #get indices
         indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k],self.t)]
-        Ts= self.thermoTable.getTemperature(self.r[indices],self.p[indices],self.Y[indices,:])
+        Ts= self.getTemperature(self.r[indices],self.p[indices],self.Y[indices,:])
         #initialize integrator
         y0=np.zeros(self.gas.n_species+1)
         integrator = integrate.ode(dydt).set_integrator('lsoda')
@@ -1495,8 +1719,8 @@ class stanScram(object):
             self.gas.TDY = T,self.r[k],Y
             self.p[k]=self.gas.P
         #update gamma
-        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        self.gamma=self.thermoTable.getGamma(T,self.Y)
+        T = self.getTemperature(self.r,self.p,self.Y)
+        self.gamma=self.getGamma(T,self.Y)
 ##############################################################################
     def advanceQuasi1D(self,dt):
         '''
@@ -1576,8 +1800,8 @@ class stanScram(object):
         E[eIn] +=dt*rhs[2]
         rY = r.reshape((r.shape[0],1))*self.Y
         (self.r,self.u,self.p,_)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
-        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        self.gamma=self.thermoTable.getGamma(T,self.Y)
+        T = self.getTemperature(self.r,self.p,self.Y)
+        self.gamma=self.getGamma(T,self.Y)
 ##############################################################################
     def advanceBoundaryLayer(self,dt):
         '''
@@ -1626,19 +1850,13 @@ class stanScram(object):
         nX=len(self.x)
         D = 2*self.h*self.w/(self.h+self.w)
         #compute gas properties
-        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        cp = self.thermoTable.getCp(T,self.Y)
-        viscosity=np.zeros(nX)
-        conductivity=np.zeros(nX)
-        for i,Ti in enumerate(T):
-            #compute gas properties
-            self.gas.TP = Ti,self.p[i]
-            if self.gas.n_species>1: self.gas.Y= self.Y[i,:]
-            viscosity[i]=self.gas.viscosity
-            conductivity[i]=self.gas.thermal_conductivity
+        T = self.getTemperature(self.r,self.p,self.Y)
+        cp = self.getCp(T,self.Y)
+        mu = self.getMu(T,self.Y)
+        k = self.getLoc(T,self.Y) * cp
         #compute non-dimensional numbers
-        Re=abs(self.r*self.u*D/viscosity)
-        Pr=cp*viscosity/conductivity
+        Re=abs(self.r*self.u*D/mu)
+        Pr=cp*mu/k
         #skin friction coefficent
         if self.cf is None: self.cf = skinFriction() #initialize the functor
         cf = self.cf(Re)
@@ -1646,14 +1864,14 @@ class stanScram(object):
         shear=cf*(0.5*self.r*self.u**2.0)*(np.sign(self.u)) 
         #Stanton number and heat transfer to wall
         Nu = nusseltNumber(Re,Pr,cf)
-        qloss = Nu*conductivity/D*(T-self.Tw)
+        qloss = Nu*k/D*(T-self.Tw)
         #update
         (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
         ru -= shear*4.0/D*dt
         E -= qloss*4.0/D*dt
         (self.r,self.u,self.p,_)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma) 
-        T = self.thermoTable.getTemperature(self.r,self.p,self.Y)
-        self.gamma=self.thermoTable.getGamma(T,self.Y)
+        T = self.getTemperature(self.r,self.p,self.Y)
+        self.gamma=self.getGamma(T,self.Y)
 ##############################################################################
     def advanceDiffusion(self,dt):
         '''
@@ -1669,7 +1887,7 @@ class stanScram(object):
         p=np.ones(self.n+2*mt)
         gamma=np.ones(self.n+2*mt)
         gamma[:mt], gamma[-mt:] = self.gamma[0], self.gamma[-1]
-        Y=np.ones((self.n+2*mt,self.__nsp))
+        Y=np.ones((self.n+2*mt,self.n_scalars))
         (r[mt:-mt],u[mt:-mt],p[mt:-mt], Y[mt:-mt,:],gamma[mt:-mt])= \
             (self.r,self.u,self.p,self.Y,self.gamma)
         (r,ru,E,rY)=self.primitiveToConservative(r,u,p,Y,gamma)
@@ -1689,8 +1907,8 @@ class stanScram(object):
         rY= 0.5*(rY+rY1+dt*rhs[:,mn:])
         (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,gamma)
         #update
-        T0 = self.thermoTable.getTemperature(r[mt:-mt],p[mt:-mt],Y[mt:-mt])
-        gamma[mt:-mt]=self.thermoTable.getGamma(T0,Y[mt:-mt])
+        T0 = self.getTemperature(r[mt:-mt],p[mt:-mt],Y[mt:-mt])
+        gamma[mt:-mt]=self.getGamma(T0,Y[mt:-mt])
         (self.r,self.u,self.p,self.Y,self.gamma)=(r[mt:-mt],u[mt:-mt],p[mt:-mt],Y[mt:-mt],gamma[mt:-mt])
 ##############################################################################
     def advanceSourceTerms(self,dt):
@@ -1718,8 +1936,8 @@ class stanScram(object):
         rY= 0.5*(rY+rY1+dt*rhs[:,mn:])
         (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
         #update
-        T0 = self.thermoTable.getTemperature(r,p,Y)
-        self.gamma=self.thermoTable.getGamma(T0,Y)
+        T0 = self.getTemperature(r,p,Y)
+        self.gamma=self.getGamma(T0,Y)
         (self.r,self.u,self.p,self.Y)=(r,u,p,Y)
 ##############################################################################
     def advanceInjector(self,dt):
@@ -1735,22 +1953,22 @@ class stanScram(object):
         (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
         self.injector.update_fluid_tip_positions(dt,self.t,self.u)
         #1st stage of RK2
-        rhs = self.injector.get_injector_sources(r,ru,E,rY,self.gamma,self.t)
+        rhs = self.injector.get_injector_sources(r,ru,E,rY[:,0],rY[:,1],self.gamma,self.t)
         r1= r +dt*rhs[:,0]
         ru1=ru+dt*rhs[:,1]
         E1= E +dt*rhs[:,2]
         rY1=rY+dt*rhs[:,mn:]
         (r1,u1,p1,Y1)=self.conservativeToPrimitive(r1,ru1,E1,rY1,self.gamma)
         #2nd stage of RK2
-        rhs = self.injector.get_injector_sources(r1,ru1,E1,rY1,self.gamma,self.t+dt)
+        rhs = self.injector.get_injector_sources(r1,ru1,E1,rY1[:,0],rY1[:,1],self.gamma,self.t+dt)
         r=  0.5*(r+ r1 +dt*rhs[:,0])
         ru= 0.5*(ru+ru1+dt*rhs[:,1])
         E=  0.5*(E +E1 +dt*rhs[:,2])
         rY= 0.5*(rY+rY1+dt*rhs[:,mn:])
         (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
         #update
-        T0 = self.thermoTable.getTemperature(r,p,Y)
-        self.gamma=self.thermoTable.getGamma(T0,Y)
+        T0 = self.getTemperature(r,p,Y)
+        self.gamma=self.getGamma(T0,Y)
         (self.r,self.u,self.p,self.Y)=(r,u,p,Y)
 ##############################################################################
     def updateProbes(self,iters):
@@ -1772,8 +1990,7 @@ class stanScram(object):
             q = qLower+(qUpper-qLower)/(xUpper-xLower)*(x-xLower)
             return q
         #update probes
-        nSp = len(self.Y[0])
-        YProbe= np.zeros(nSp)
+        YProbe= np.zeros(self.n_scalars)
         for probe in self.probes:
             if iters%(probe.skipSteps+1)==0:
                 probe.t.append(self.t)
@@ -1782,7 +1999,7 @@ class stanScram(object):
                 probe.p.append((interpolate(self.x,self.p,probe.probeLocation)))
                 probe.gamma.append((interpolate(self.x,self.gamma,probe.probeLocation)))
                 YProbe=np.array([(interpolate(self.x,self.Y[:,kSp],probe.probeLocation))\
-                                  for kSp in range(nSp)])
+                                  for kSp in range(self.n_scalars)])
                 probe.Y.append(YProbe)
 ##############################################################################
     def updateXTDiagrams(self,iters):
@@ -1809,10 +2026,15 @@ class stanScram(object):
         while self.t<tFinal and res_p>res_p_target:
             p_old = self.p
             dt=min(tFinal-self.t,self.timeStep())
-            #advance advection and chemistry with Strang Splitting
-            if self.reacting: self.advanceChemistry(dt/2.0)
-            self.advanceAdvection(dt)
-            if self.reacting: self.advanceChemistry(dt/2.0)
+            #advance advection and chemistry
+            if self.physics == "FPV":
+                self.advanceAdvection(dt)
+                self.advanceChemistry(dt)
+            elif self.physics == "FRC":
+                #use Strang splitting
+                self.advanceChemistry(dt/2.0)
+                self.advanceAdvection(dt)
+                self.advanceChemistry(dt/2.0)
             #advance other terms
             if self.includeDiffusion: self.advanceDiffusion(dt)
             if self.dlnAdt!=None or self.dlnAdx!=None: self.advanceQuasi1D(dt)
@@ -1827,6 +2049,6 @@ class stanScram(object):
             res_p = np.linalg.norm(self.p-p_old)
             if self.verbose and iters%self.outputEvery==0: 
                 print("Iteration: %i. Current time: %f. Time step: %e. Max T[K]: %f. Residual(p): %e." \
-                % (iters,self.t,dt,self.thermoTable.getTemperature(self.r,self.p,self.Y).max(),res_p))
+                % (iters,self.t,dt,self.getTemperature(self.r,self.p,self.Y).max(),res_p))
             if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):
                 self.plotState("figures/anim/test_{0:05d}.png".format(iters//self.plotStateInterval))
