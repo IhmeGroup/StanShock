@@ -1626,29 +1626,45 @@ class stanScram(object):
             inputs
                 dt=time step
         '''
-        #initialize
+        # Using mixed-is-burned (MIB)
         (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
+        Z = rY[:, 0] / r
         Q = np.zeros(self.n)
-        L = self.fpv_table.L_from_C(self.Y[:,0], self.Y[:,1])
-        e_chem0 = r * self.fpv_table.lookup('E0_CHEM', self.Y[:,0], Q, L)
-        #1st stage of RK2
-        rhsY = np.zeros((self.n,self.n_scalars))
-        omegaC = self.injector.get_chemical_sources(self.Y[:,0], self.Y[:,1])
-        rhsY[:,1] = omegaC * r
-        rY1 = rY+dt*rhsY
-        L1 = self.fpv_table.L_from_C(rY1[:,0]/r, rY1[:,1]/r)
-        e_chem1 = r * self.fpv_table.lookup('E0_CHEM', rY1[:,0]/r, Q, L1)
+        C = rY[:, 1] / r
+        L = self.fpv_table.L_from_C(Z, C)
+        e_chem0 = r * self.fpv_table.lookup('E0_CHEM', Z, Q, L)
+        C1, e_chem1 = self.injector.get_MIB_profiles()
+        e_chem1 *= r
         E1 = E + e_chem0 - e_chem1
-        (r1,u1,p1,Y1)=self.conservativeToPrimitive(r,ru,E1,rY1,self.gamma)
-        #2nd stage of RK2
-        omegaC1 = self.injector.get_chemical_sources(Y1[:,0], Y1[:,1])
-        rhsY[:,1] = omegaC1 * r1
-        rY = 0.5*(rY+rY1+dt*rhsY)
-        L = self.fpv_table.L_from_C(rY[:,0]/r, rY[:,1]/r)
-        e_chem2 = r * self.fpv_table.lookup('E0_CHEM', rY[:,0]/r, Q, L)
-        E = E + e_chem0 - e_chem2
-        (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
-        #update
+        rY1 = rY
+        rY1[:, 1] = r * C1
+        (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E1,rY1,self.gamma)
+        
+        # Using FPV
+        # #initialize
+        # (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
+        # Q = np.zeros(self.n)
+        # L = self.fpv_table.L_from_C(rY[:,0]/r, rY[:,1]/r)
+        # e_chem0 = r * self.fpv_table.lookup('E0_CHEM', self.Y[:,0], Q, L)
+        # #1st stage of RK2
+        # rhsY = np.zeros((self.n,self.n_scalars))
+        # omegaC = self.injector.get_chemical_sources(self.Y[:,0], self.Y[:,1])
+        # rhsY[:,1] = omegaC * r
+        # rY1 = rY+dt*rhsY
+        # L1 = self.fpv_table.L_from_C(rY1[:,0]/r, rY1[:,1]/r)
+        # e_chem1 = r * self.fpv_table.lookup('E0_CHEM', rY1[:,0]/r, Q, L1)
+        # E1 = E + e_chem0 - e_chem1
+        # (r1,u1,p1,Y1)=self.conservativeToPrimitive(r,ru,E1,rY1,self.gamma)
+        # #2nd stage of RK2
+        # omegaC1 = self.injector.get_chemical_sources(Y1[:,0], Y1[:,1])
+        # rhsY[:,1] = omegaC1 * r1
+        # rY = 0.5*(rY+rY1+dt*rhsY)
+        # L = self.fpv_table.L_from_C(rY[:,0]/r, rY[:,1]/r)
+        # e_chem2 = r * self.fpv_table.lookup('E0_CHEM', rY[:,0]/r, Q, L)
+        # E = E + e_chem0 - e_chem2
+        # (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
+
+        #update properties
         T0 = self.getTemperature(r,p,Y)
         self.gamma=self.getGamma(T0,Y)
         (self.r,self.u,self.p,self.Y)=(r,u,p,Y)

@@ -255,8 +255,10 @@ jic = JICModel(gas, "H2",
                rho_in, U_in, T_in,
                alpha=1e6,
                fpv_table=fpv_table,
+               load_Z_3D=True,
                load_Z_avg_var_profiles=True,
-               load_chemical_sources=True)
+               load_chemical_sources=True,
+               load_MIB_profile=False)
 
 ###################################################################
 

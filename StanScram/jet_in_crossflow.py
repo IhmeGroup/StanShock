@@ -21,8 +21,10 @@ class JICModel():
                  rho, u, T,
                  alpha,
                  fpv_table=None,
+                 load_Z_3D=False,
                  load_Z_avg_var_profiles=False,
-                 load_chemical_sources=False):
+                 load_chemical_sources=False,
+                 load_MIB_profile=False):
         '''
         Method: __init__
         --------------------------------------------------------------------------
@@ -64,10 +66,14 @@ class JICModel():
             The relaxation parameter (used here only for storage)
         fpv_table: FPVTable
             The FPV table object, used for the chemical source terms
+        load_Z_3D: bool
+            Whether to load the 3D Z table
         load_Z_avg_var_profiles: bool
             Whether to load the Z average and variance profiles
         load_chemical_sources: bool
             Whether to load the chemical source terms
+        load_MIB_profile: bool
+            Whether to load the MIB profile
         '''
         self.gas = gas
         self.fuel = fuel
@@ -91,8 +97,8 @@ class JICModel():
         self.fpv_table = fpv_table
 
         # Geometry parameters
+        self.L = self.x[-1] - self.x[0]
         self.A = self.w * self.h
-        self.x_max = self.x[-1]
         self.A_inj = np.pi * (self.d_inj / 2.0)**2
 
         # Free stream properties
@@ -150,6 +156,23 @@ class JICModel():
 
         # Precompute the adjustment factor for the boundary clipping
         self.calc_adjustment_factor()
+
+        # Precompute a 3D array of the mixture fraction and generate an interpolator
+        if load_Z_3D:
+            self.x_3D_data = np.load(os.path.join(datadir, "Z_3D_x.npy"))
+            self.y_3D_data = np.load(os.path.join(datadir, "Z_3D_y.npy"))
+            self.z_3D_data = np.load(os.path.join(datadir, "Z_3D_z.npy"))
+            self.Z_3D_data = np.load(os.path.join(datadir, "Z_3D.npy"))
+            self.Z_3D_interp = []
+            for i_m in range(len(self.mdot_inj_unique)):
+                interp = interpolate.RegularGridInterpolator((self.x_3D_data,
+                                                              self.y_3D_data,
+                                                              self.z_3D_data),
+                                                             self.Z_3D_data[i_m],
+                                                             method='cubic')
+                self.Z_3D_interp.append(interp)
+        else:
+            self.calc_Z_3D_interp(write=True)
         
         # Precompute the axial mean and variance profiles of Z
         if load_Z_avg_var_profiles:
@@ -175,6 +198,14 @@ class JICModel():
                 self.omega_C_interpolators.append(omega_C_i)
         else:
             self.calc_chemical_sources(write=True)
+        
+        # Calculate the progress variable and chemical energy profiles for the
+        # mixed is burned (MIB) model
+        if load_MIB_profile:
+            self.C_profile = np.load(os.path.join(datadir, "C_profile_MIB.npy"))
+            self.E_CHEM_profile = np.load(os.path.join(datadir, "E_CHEM_profile_MIB.npy"))
+        else:
+            self.calc_MIB_profile(write=True)
    
     def __prep_zbilger(self):
         #             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H - (Y_O - Yo_O)/W_O
@@ -255,7 +286,7 @@ class JICModel():
         n2_func_y_cl = lambda y_cl: (x_local - self.x_cl_from_y_cl(y_cl))**2 + (y - y_cl           )**2 + dz**2
 
         # Compute the x_cl which minimizes n2
-        x_cl = optimize.fminbound(n2_func_x_cl, 0.0, self.x_max, disp=False)
+        x_cl = optimize.fminbound(n2_func_x_cl, self.x[0], self.x[-1], disp=False)
         y_cl = self.y_cl(x_cl)
         n2 = n2_func_x_cl(x_cl)
 
@@ -316,10 +347,10 @@ class JICModel():
     
     def calc_adjustment_factor(self):
         # Create array of points, L-shaped surrounding trajectory
-        y_cl_max = self.y_cl(self.x_max - self.x_inj)
+        y_cl_max = self.y_cl(self.x[-1] - self.x_inj)
         x_arr = np.concatenate([
             np.full(20, self.x_inj),
-            np.linspace(self.x_inj, self.x_max, 50)[1:]])
+            np.linspace(self.x_inj, self.x[-1], 50)[1:]])
         y_arr = np.concatenate([
             np.linspace(0, y_cl_max, 20),
             np.full(50, y_cl_max)[1:]])
@@ -622,6 +653,44 @@ class JICModel():
         grad_Yf = -Yf_cl * np.array([x - x_cl, y - y_cl, z - z_inj]) / (2 * sigma2) * np.exp(-n2 / (2 * sigma2))
 
         return grad_Yf
+    
+    def calc_Z_3D_interp(self, write=False):
+        print("Computing Z 3D array...")
+        dx = 5.0e-4
+        # dx = 1.0e-3
+        Nx = int(np.ceil(self.L / dx))
+        Ny = int(np.ceil(self.h / dx))
+        Nz = int(np.ceil(self.w / dx))
+        self.x_3D_data = np.linspace(self.x[0], self.x[-1], Nx)
+        self.y_3D_data = np.linspace(0, self.h, Ny)
+        self.z_3D_data = np.linspace(-self.w/2, self.w/2, Nz)
+        self.Z_3D_data = np.zeros([len(self.mdot_inj_unique), Nx, Ny, Nz])
+        for i in tqdm(range(Nx)):
+            for j in range(Ny):
+                for k in range(Nz):
+                    self.Z_3D_data[:, i, j, k] = self.Z_3D_adjusted(self.x_3D_data[i], self.y_3D_data[j], self.z_3D_data[k])
+        self.Z_3D_data[np.isnan(self.rho_inj_unique)] = 0.0
+        
+        if write:
+            np.save(os.path.join(datadir, "Z_3D_x.npy"), self.x_3D_data)
+            np.save(os.path.join(datadir, "Z_3D_y.npy"), self.y_3D_data)
+            np.save(os.path.join(datadir, "Z_3D_z.npy"), self.z_3D_data)
+            np.save(os.path.join(datadir, "Z_3D.npy"), self.Z_3D_data)
+
+        self.Z_3D_interp = []
+        for i_m in range(len(self.mdot_inj_unique)):
+            interp = interpolate.RegularGridInterpolator((self.x_3D_data,
+                                                          self.y_3D_data,
+                                                          self.z_3D_data),
+                                                          self.Z_3D_data[i_m],
+                                                         method='cubic')
+            self.Z_3D_interp.append(interp)
+    
+    def eval_Z_3D_interp(self, x, y, z):
+        Z_arr = np.zeros_like(self.mdot_inj_unique)
+        for i_m in range(len(self.mdot_inj_unique)):
+            Z_arr[i_m] = self.Z_3D_interp[i_m]((x, y, z))
+        return Z_arr
 
     def Z_avg_var(self, x):
         Z_avg = np.zeros_like(self.mdot_inj_unique)
@@ -633,9 +702,9 @@ class JICModel():
                 continue
 
             func = lambda z, y: self.Z_3D(x, y, z)[i_m]
-            Z_avg[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            Z_avg[i_m] = 2.0*integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w/2)[0] / (self.w * self.h)
             func = lambda z, y: (self.Z_3D(x, y, z)[i_m] - Z_avg[i_m])**2
-            Z_var[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            Z_var[i_m] = 2.0*integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w/2)[0] / (self.w * self.h)
         return Z_avg, Z_var
     
     def Z_avg_var_adjusted(self, x):
@@ -647,16 +716,18 @@ class JICModel():
                 Z_var[i_m] = 0.0
                 continue
 
-            func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_m]
-            Z_avg[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
-            func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_m] - Z_avg[i_m])**2
-            Z_var[i_m] = integrate.dblquad(func, 0, self.h, lambda y: -self.w/2, lambda y: self.w/2)[0] / (self.w * self.h)
+            # func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_m]
+            func = lambda z, y: self.Z_3D_interp[i_m]((x, y, z))
+            Z_avg[i_m] = 2.0*integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w/2)[0] / (self.w * self.h)
+            # func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_m] - Z_avg[i_m])**2
+            func = lambda z, y: (self.Z_3D_interp[i_m]((x, y, z)) - Z_avg[i_m])**2
+            Z_var[i_m] = 2.0*integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w/2)[0] / (self.w * self.h)
         return Z_avg, Z_var
     
     def calc_Z_avg_var_profiles(self, write=False):
+        print("Computing Z average and variance profiles...")
         self.Z_avg_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
         self.Z_var_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
-        print("Computing Z average and variance profiles...")
         for i in tqdm(range(len(self.x))):
             if self.x[i] > self.x_noz:
                 # Freeze the profiles in the nozzle
@@ -668,6 +739,65 @@ class JICModel():
         if write:
             np.save(os.path.join(datadir, "Z_avg_profile.npy"), self.Z_avg_profile)
             np.save(os.path.join(datadir, "Z_var_profile.npy"), self.Z_var_profile)
+    
+    def C_E_CHEM_avg_MIB(self, x):
+        C_avg = np.zeros_like(self.mdot_inj_unique)
+        E_CHEM_avg = np.zeros_like(self.mdot_inj_unique)
+        for i_m in range(len(self.mdot_inj_unique)):
+            if np.isnan(self.rho_inj_unique[i_m]):
+                C_avg[i_m] = self.fpv_table.lookup('PROG', 0.0, 0.0, 0.0)
+                E_CHEM_avg[i_m] = self.fpv_table.lookup('E0_CHEM', 0.0, 0.0, 0.0)
+                continue
+
+            def integrand(z, y):
+                # Z = self.Z_3D_adjusted(x, y, z)[i_m]
+                Z = self.Z_3D_interp[i_m]((x, y, z))
+                return self.fpv_table.lookup('PROG', Z, 0.0, 1.0)
+            C_avg[i_m] = 2.0*integrate.dblquad(integrand, 0, self.h, lambda y: 0, lambda y: self.w/2)[0] / (self.w * self.h)
+            def integrand(z, y):
+                # Z = self.Z_3D_adjusted(x, y, z)[i_m]
+                Z = self.Z_3D_interp[i_m]((x, y, z))
+                return self.fpv_table.lookup('E0_CHEM', Z, 0.0, 1.0)
+            E_CHEM_avg[i_m] = 2.0*integrate.dblquad(integrand, 0, self.h, lambda y: 0, lambda y: self.w/2)[0] / (self.w * self.h)
+        return C_avg, E_CHEM_avg
+
+    def calc_MIB_profile(self, write=False):
+        print("Computing MIB profile...")
+        self.C_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
+        self.E_CHEM_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
+
+        # Debugging way
+        C = self.fpv_table.lookup('PROG', self.Z_3D_data, 0.0, 1.0)
+        E_CHEM = self.fpv_table.lookup('E0_CHEM', self.Z_3D_data, 0.0, 1.0)
+        C_profile = np.mean(C, axis=(2, 3))
+        E_CHEM_profile = np.mean(E_CHEM, axis=(2, 3))
+        self.C_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
+        self.E_CHEM_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
+        for i_m in range(len(self.mdot_inj_unique)):
+            self.C_profile[i_m] = np.interp(self.x, self.x_3D_data, C_profile[i_m])
+            self.E_CHEM_profile[i_m] = np.interp(self.x, self.x_3D_data, E_CHEM_profile[i_m])
+
+        # # Real way
+        # for i in tqdm(range(len(self.x))):
+        #     if self.x[i] < self.x_inj:
+        #         # Assume no fuel in the domain
+        #         self.C_profile[:, i] = self.fpv_table.lookup('PROG', 0.0, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup('E0_CHEM', 0.0, 0.0, 0.0)
+        #     elif self.x[i] > self.x_noz:
+        #         # Freeze the profiles in the nozzle
+        #         self.C_profile[:, i] = self.C_profile[:, i-1]
+        #         self.E_CHEM_profile[:, i] = self.E_CHEM_profile[:, i-1]
+        #     elif self.x[i] < self.x_inj + 0.001:
+        #         # DEBUG: Assume nearly no mixing, so no burning
+        #         Z_avg = self.Z_avg_profile[:, i]
+        #         self.C_profile[:, i] = self.fpv_table.lookup('PROG', Z_avg, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup('E0_CHEM', Z_avg, 0.0, 0.0)
+        #     else:
+        #         self.C_profile[:,i], self.E_CHEM_profile[:, i] = self.C_E_CHEM_avg_MIB(self.x[i])
+
+        if write:
+            np.save(os.path.join(datadir, "C_profile_MIB.npy"), self.C_profile)
+            np.save(os.path.join(datadir, "E_CHEM_profile_MIB.npy"), self.E_CHEM_profile)
     
     def estimate_p_Z(self, x, Z):
         '''
@@ -711,7 +841,7 @@ class JICModel():
         self.fluid_tips = np.concatenate([self.fluid_tips, next_tip], axis=0)
 
         # Drop fluid tips that have passed the end of the domain
-        self.fluid_tips = self.fluid_tips[self.fluid_tips[:, 0] < self.x_max]
+        self.fluid_tips = self.fluid_tips[self.fluid_tips[:, 0] < self.x[-1]]
 
     def get_injector_sources(self, rho, rhoU, E, rhoZ, rhoC, gamma, t):
         '''
@@ -738,11 +868,6 @@ class JICModel():
         rhs[:, 2] = mdot * self.E_inj
         rhs[:, 3] = mdot
         rhs[:, 4] = 0.0
-
-        # DEBUG: Add some progress variable to trigger ignition
-        # i_ig = np.logical_and(self.x > self.x_inj, self.x < self.x_inj + 0.01)
-        # if (t < 1e-4):
-        #     rhs[i_ig, 4] = 1e1
 
         return rhs
     
@@ -833,3 +958,22 @@ class JICModel():
 
         return omega_C
     
+    def get_MIB_profiles(self):
+        '''
+        Method: get_MIB_profiles
+        --------------------------------------------------------------------------
+        This method returns the MIB profiles for the progress variable and chemical
+        energy.
+        '''
+        C = np.zeros(len(self.x))
+        E_CHEM = np.zeros(len(self.x))
+
+        for i_x in range(len(self.x)):
+            if self.x[i_x] < self.x_inj:
+                continue
+            # Interpolate into fluid tip positions to get the mass flow rate
+            mdot_inj = np.interp(self.x[i_x], self.fluid_tips[:, 0], self.fluid_tips[:, 1])
+            C[i_x] = np.interp(mdot_inj, self.mdot_inj_unique, self.C_profile[:,i_x])
+            E_CHEM[i_x] = np.interp(mdot_inj, self.mdot_inj_unique, self.E_CHEM_profile[:,i_x])
+        
+        return C, E_CHEM
