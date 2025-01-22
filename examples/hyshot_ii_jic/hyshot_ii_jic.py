@@ -23,7 +23,7 @@ import pickle
 from tqdm import tqdm
 from typing import Optional
 import numpy as np
-from scipy import interpolate, integrate
+from scipy import interpolate, integrate, optimize
 import cantera as ct
 import matplotlib.pyplot as plt
 
@@ -85,7 +85,7 @@ L_const       = 300.0e-3       # m
 L_exhaust     = 100.0e-3       # m
 x_inj         =  58.0e-3       # m
 theta_exhaust = np.deg2rad(12) # rad
-r_f           =   0.1e-3       # m
+r_f           =   1.0e-3       # m
 N_f           =   4            # -
 
 L       = L_const + L_exhaust # m
@@ -128,11 +128,39 @@ Z_st = gas.mixture_fraction(X_f, X_ox)
 
 # Fuel inflow rate
 
-# Minimum P0_f for choked flow
+# Get properties at combustor conditions
 gas.TPX = T0_f, P_in, X_f
 gamma_f = gas.cp / gas.cv
-P0_f_min = P_in * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
-# P0_f_min = P_2 * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
+R_f = ct.gas_constant / gas.mean_molecular_weight
+
+def f(M):
+    tmp = ((gamma_f + 1) / 2)**((gamma_f + 1) / (2 * (gamma_f - 1)))
+    return tmp * M / (1 + (gamma_f - 1) / 2 * M**2)**((gamma_f + 1) / (2 * (gamma_f - 1)))
+
+def calc_M(P0, Pa):
+    P0_choked = Pa * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
+    if P0 < P0_choked:
+        # Exit pressure is equal to the ambient pressure
+        M = np.sqrt(2 / (gamma_f - 1) * ((P0 / Pa)**((gamma_f - 1) / gamma_f) - 1))
+    else:
+        # Exit pressure is no longer equal to the ambient pressure
+        # We know based on geometry that the Mach number at the orifice is 1
+        M = 1.0
+    return M
+
+def calc_mdot(P0, T0, A, Pa):
+    P0_choked = Pa * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
+    M = calc_M(P0, Pa)
+    gamma_term = gamma_f / ((gamma_f + 1) / 2)**((gamma_f + 1) / (2 * (gamma_f - 1)))
+    return gamma_term * P0 * A / np.sqrt(gamma_f * R_f * T0) * f(M)
+
+def P0_from_mdot(mdot, T0, A):
+    P0_choked = P_in * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
+    eqn = lambda P0 : calc_mdot(P0, T0, A, P_in) - mdot
+    result = optimize.root_scalar(eqn, x0=P_in)
+    P0 = result.root
+    M = calc_M(P0, P_in)
+    return P0, M
 
 def fuel_props_from_phi(phi_gl):
     if phi_gl == 0.0:
@@ -144,14 +172,8 @@ def fuel_props_from_phi(phi_gl):
     mdot_f = (Yf_gl / gas.Y[gas.species_index('O2')]) * mdot_O2
     Z_gl = gas.mixture_fraction(X_f, X_ox)
 
-    # Remaining fuel properties
-    P0_f = mdot_f * np.sqrt(T0_f) / A_f_tot
-    if P0_f < P0_f_min:
-        print(f"Warning: at phi_gl = {phi_gl:.2f}, P0_f = {P0_f:.2e} Pa < P0_f_min = {P0_f_min:.2e} Pa")
-
-    gas.TPX = T0_f, P0_f, X_f
-    gamma_f = gas.cp / gas.cv
-    R_f = ct.gas_constant / gas.mean_molecular_weight
+    # Compute the fuel plenum (stagnation) pressure to achieve mdot_f
+    P0_f, M_f = P0_from_mdot(mdot_f, T0_f, A_f_tot)
     T_f = T0_f * (1 + (gamma_f - 1) / 2 * M_f**2)**(-1)
     a_f = np.sqrt(gamma_f * R_f * T_f)
     U_f = M_f * a_f
@@ -159,7 +181,6 @@ def fuel_props_from_phi(phi_gl):
     gas.TDX = T_f, rho_f, X_f
     P_f = gas.P
     H_f = gas.enthalpy_mass
-    # P_f = P0_f * (1 + (gamma_f - 1) / 2 * M_f**2)**(-gamma_f / (gamma_f - 1))
 
     # Compute the estimated temperature of the mixture
     # (Pressure will change but this doesn't affect the temperature)
@@ -258,7 +279,7 @@ jic = JICModel(gas, "H2",
                load_Z_3D=True,
                load_Z_avg_var_profiles=True,
                load_chemical_sources=True,
-               load_MIB_profile=False)
+               load_MIB_profile=True)
 
 ###################################################################
 

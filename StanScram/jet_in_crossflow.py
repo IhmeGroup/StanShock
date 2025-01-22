@@ -140,16 +140,30 @@ class JICModel():
         # self.rho_2 = self.rho * (self.gamma + 1) * self.M**2 / ((self.gamma - 1) * self.M**2 + 2)
         # self.u_2 = self.u * self.rho / self.rho_2
 
-        # Integral of Yf across centerline normal plane
+        # Integral of Z across centerline normal plane
         A_inj = np.pi * (self.d_inj / 2.0)**2
-        self.Yf_cl_int = self.rho_inj_unique * self.u_inj * A_inj / (self.rho * self.u)
-        self.d_eff = np.sqrt(self.Yf_cl_int / (2 * np.pi))
+        self.Z_cl_int = self.rho_inj_unique * self.u_inj * A_inj / (self.rho * self.u)
+        self.d_eff = np.sqrt(self.Z_cl_int / (2 * np.pi))
+
+        # Stoichiometry
+        mdot_a = self.rho * self.u * self.A
+        mdot_f = self.n_inj * self.mdot_inj_unique
+        self.phi_gl_unique = np.zeros_like(self.mdot_inj_unique)
+        self.Z_gl_unique = np.zeros_like(self.mdot_inj_unique)
+        for i_m in range(len(self.mdot_inj_unique)):
+            self.gas.TDY = self.T, self.rho, "O2:{0},N2:{1},{2}:{3}".format(0.233*mdot_a,
+                                                                            0.767*mdot_a,
+                                                                            self.fuel,
+                                                                            mdot_f[i_m])
+            self.phi_gl_unique[i_m] = self.gas.equivalence_ratio(self.fuel, "O2:0.21,N2:0.79")
+            self.Z_gl_unique[i_m] = self.gas.mixture_fraction(self.fuel, "O2:0.21,N2:0.79")
 
         # Compute the non-dimensional parameters
-        self.r_u = self.u_inj / self.u
-        self.r_W = self.W_inj / self.W
-        self.J = (self.gamma_inj * self.p_inj * self.M_inj) / (self.gamma * self.p * self.M)
-        # ^!!!! ASSUMES CHOKED FLOW
+        self.J = (self.rho_inj * self.u_inj**2) / (self.rho * self.u**2) # Momentum flux ratio
+        self.J_unique = self.J[self.mdot_inj_unique_idx]
+        self.r_u = np.sqrt(self.J) # Blowing ratio = sqrt(J)
+        self.r_u_unique = np.sqrt(self.J_unique)
+        self.r_W = self.W_inj / self.W # Molecular weight ratio
         
         # Create the array of injectors
         self.z_inj = np.linspace(-self.w/2, self.w/2, n_inj+2)[1:-1]
@@ -253,47 +267,56 @@ class JICModel():
         self.Z_weight_N2 = self.Z_weights[self.gas.species_index("N2")]
     
     def y_cl(self, x_cl):
-        # SUBSONIC VERSION
+        # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
         # return self.d_inj * 1.6 * (x_cl / self.d_inj)**(1.0/3.0) * self.r_u**(2.0/3.0) # Torrez 2011 (Same as Margason 1968)
         # return 1.6 * x_cl**(1.0/3.0) * (self.d_inj * self.r_u)**(2.0/3.0) # Margason 1968
-        return self.r_u * self.d_inj * 1.6 * (x_cl / (self.r_u * self.d_inj))**(1.0/3.0) # Hasselbrink and Mungal 2001 Pt. 2
+        # return self.r_u * self.d_inj * 1.6 * (x_cl / (self.r_u * self.d_inj))**(1.0/3.0) # Hasselbrink and Mungal 2001 Pt. 2
         # return self.d_inj * 0.527 * self.r_u**1.178 * (x_cl / self.d_inj)**0.314 # Karagozian 1986
 
-        # SUPERSONIC VERSION
-        # return self.d_inj * self.J * 1.20 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J))**0.344 # Gruber 1997 Phys. Fluids
-        # return self.d_inj * 2.173 / self.J**0.276 * (x_cl / self.d_inj)**0.281 # Rothstein and Wantuck 1992
+        # SONIC VERSION
+        return self.d_inj * self.J_unique * 1.23 * (x_cl / (self.d_inj * self.J_unique))**0.344 # Gruber 1995 JPP
+        # return self.d_inj * self.J_unique * 1.20 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J_unique))**0.344 # Gruber 1997 Phys. Fluids
+        # return self.d_inj * 2.173 / self.J_unique**0.276 * (x_cl / self.d_inj)**0.281 # Rothstein and Wantuck 1992
     
     def x_cl_from_y_cl(self, y_cl):
-        # SUBSONIC VERSION
-        return (y_cl / (self.r_u * self.d_inj * 1.6))**(3.0) * self.r_u * self.d_inj # Hasselbrink and Mungal 2001 Pt. 2
+        # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
+        # return (y_cl / (self.r_u * self.d_inj * 1.6))**(3.0) * self.r_u * self.d_inj # Hasselbrink and Mungal 2001 Pt. 2
 
-        # SUPERSONIC VERSION
-        # return (y_cl / (self.d_inj * self.J * 1.20))**(1.0 / 0.344) * self.d_inj * self.J - self.d_inj/2 # Gruber 1997 Phys. Fluids
+        # SONIC VERSION
+        return (y_cl / (self.d_inj * self.J_unique * 1.23))**(1.0 / 0.344) * self.d_inj * self.J_unique # Gruber 1995 JPP
+        # return (y_cl / (self.d_inj * self.J_unique * 1.20))**(1.0 / 0.344) * self.d_inj * self.J_unique - self.d_inj/2 # Gruber 1997 Phys. Fluids
     
     def dy_cl_dx(self, x_cl):
-        # SUBSONIC VERSION
-        return (self.r_u * self.d_inj)**(2.0/3.0) * 1.6 * (1.0/3.0) * x_cl**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 2
+        # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
+        # return (self.r_u * self.d_inj)**(2.0/3.0) * 1.6 * (1.0/3.0) * x_cl**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 2
 
-        # SUPERSONIC VERSION
-        # return self.d_inj * self.J * 1.20 * 0.344 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J))**(0.344 - 1.0) # Gruber 1997 Phys. Fluids
+        # SONIC VERSION
+        return (0.344 *
+                self.d_inj * self.J_unique * 1.23 * (x_cl / (self.d_inj * self.J_unique))**(0.344 - 1.0) *
+                (1.0 / (self.d_inj * self.J_unique))) # Gruber 1995 JPP
+        # return (0.344 *
+        #         self.d_inj * self.J_unique * 1.20 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J_unique))**(0.344 - 1.0) *
+        #         (1.0 / (self.d_inj * self.J_unique))) # Gruber 1997 Phys. Fluids
     
-    def __nearest_on_cl_single(self, x, y, dz=0.0):
+    def __nearest_on_cl_single(self, x, y, dz, i_m):
         # Offset coordinate
         x_local = x - self.x_inj
 
         # Define the centerline
-        n2_func_x_cl = lambda x_cl: (x_local - x_cl                     )**2 + (y - self.y_cl(x_cl))**2 + dz**2
-        n2_func_y_cl = lambda y_cl: (x_local - self.x_cl_from_y_cl(y_cl))**2 + (y - y_cl           )**2 + dz**2
+        # Note: dz makes no difference in the minimization, but it's more convenient to include it here
+        # so that the n2 is correct
+        n2_func_x_cl = lambda x_cl: (x_local - x_cl                          )**2 + (y - self.y_cl(x_cl)[i_m])**2 + dz**2
+        n2_func_y_cl = lambda y_cl: (x_local - self.x_cl_from_y_cl(y_cl)[i_m])**2 + (y - y_cl                )**2 + dz**2
 
         # Compute the x_cl which minimizes n2
         x_cl = optimize.fminbound(n2_func_x_cl, self.x[0], self.x[-1], disp=False)
-        y_cl = self.y_cl(x_cl)
+        y_cl = self.y_cl(x_cl)[i_m]
         n2 = n2_func_x_cl(x_cl)
 
-        if self.dy_cl_dx(x_cl) > 1:
+        if self.dy_cl_dx(x_cl)[i_m] > 1:
             # Compute the y_cl which minimizes n2
             y_cl = optimize.fminbound(n2_func_y_cl, 0.0, self.h, disp=False)
-            x_cl = self.x_cl_from_y_cl(y_cl)
+            x_cl = self.x_cl_from_y_cl(y_cl)[i_m]
             n2 = n2_func_y_cl(y_cl)
 
         return x_cl, y_cl, n2
@@ -313,7 +336,7 @@ class JICModel():
                 args_out.append(np.full(shape, args[i]))
         return args_out
     
-    def nearest_on_cl(self, x, y, dz=0.0):
+    def nearest_on_cl(self, x, y, dz, i_m):
         x_match, y_match, dz_match = self.__match_ndarray_shapes(x, y, dz)
 
         if isinstance(x_match, np.ndarray):
@@ -324,7 +347,7 @@ class JICModel():
             y_cl = np.zeros_like(x_flat)
             n2 = np.zeros_like(x_flat)
             for i in range(len(x_flat)):
-                x_cl[i], y_cl[i], n2[i] = self.__nearest_on_cl_single(x_flat[i], y_flat[i], dz_flat[i])
+                x_cl[i], y_cl[i], n2[i] = self.__nearest_on_cl_single(x_flat[i], y_flat[i], dz_flat[i], i_m)
             x_cl = x_cl.reshape(x_match.shape)
             y_cl = y_cl.reshape(x_match.shape)
             n2 = n2.reshape(x_match.shape)
@@ -332,47 +355,46 @@ class JICModel():
         else:
             return self.__nearest_on_cl_single(x, y, dz)
     
-    def Yf_cl(self, x_cl):
+    def Z_cl(self, x_cl):
         if isinstance(x_cl, np.ndarray):
             rho_inj_unique = self.rho_inj_unique[:, np.newaxis]
+            r_u_unique = self.r_u_unique[:, np.newaxis]
         else:
             rho_inj_unique = self.rho_inj_unique
+            r_u_unique = self.r_u_unique
 
-        # Centerline mole fraction
-        y_cl = self.y_cl(x_cl)
-        xi = 0.4 * (1 / self.r_u) * (rho_inj_unique / self.rho)**(0.5) * (y_cl / (self.r_u * self.d_inj))**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 1
-        X_f = np.minimum(xi, 1.0)
-        Y_f = X_f * self.W_inj / (X_f * self.W_inj + (1 - X_f) * self.W)
-        return Y_f
+        # Following Torrez 2011
+        # xi = 0.85 * ((self.rho_inj_unique / self.rho) * (self.u / self.u_inj) * (self.d_inj / x_cl)**2)**(1.0/3.0)
+        # Z = xi * self.r_W / (1 + (self.r_W - 1) * xi)
+
+        # Taking Z directly
+        Z = 0.85 * (1 / self.r_u_unique) * (self.rho_inj_unique / self.rho)**(0.5) * (x_cl / (self.r_u_unique * self.d_inj))**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 1
+        Z = np.clip(Z, self.Z_gl_unique, 1.0)
+        return Z
     
     def calc_adjustment_factor(self):
-        # Create array of points, L-shaped surrounding trajectory
-        y_cl_max = self.y_cl(self.x[-1] - self.x_inj)
-        x_arr = np.concatenate([
-            np.full(20, self.x_inj),
-            np.linspace(self.x_inj, self.x[-1], 50)[1:]])
-        y_arr = np.concatenate([
-            np.linspace(0, y_cl_max, 20),
-            np.full(50, y_cl_max)[1:]])
-        x_cl_arr = np.zeros_like(x_arr)
-        y_cl_arr = np.zeros_like(y_arr)
-        print("Computing trajectory...")
-        x_cl_arr, y_cl_arr, _ = self.nearest_on_cl(x_arr, y_arr)
-
-        # Iterate over the centerline
         print("Computing adjustment factor...")
-        adjustment_factor_arr = np.zeros([len(self.mdot_inj_unique), len(x_cl_arr)])
-        idx = (x_cl_arr > 0)
-        adjustment_factor_arr[:, idx] = self.calc_adjustment_factor_xy(x_cl_arr[idx], y_cl_arr[idx])
-        adjustment_factor_arr[np.isnan(adjustment_factor_arr)] = 1.0
-        
-        print("Building interpolators...")
-        self.adjustment_factor_interp_x = interpolate.CubicSpline(x_cl_arr, adjustment_factor_arr, axis=1)
-        self.adjustment_factor_interp_y = interpolate.CubicSpline(y_cl_arr, adjustment_factor_arr, axis=1)
+        self.adjustment_factor_interp = []
+        for i_m in tqdm(range(len(self.mdot_inj_unique))):
+            if np.isnan(self.rho_inj_unique[i_m]):
+                self.adjustment_factor_interp.append(lambda x: np.ones_like(x))
+                continue
+
+            # Create grid along the centerline
+            y_cl_max = self.y_cl(self.x[-1] - self.x_inj)[i_m]
+            y_cl_arr = np.linspace(0, y_cl_max, 1000)
+            x_cl_arr = self.x_cl_from_y_cl(y_cl_arr[:,np.newaxis])[:,i_m]
+
+            # Iterate over the centerline
+            adjustment_factor_arr = self.calc_adjustment_factor_xy(x_cl_arr, y_cl_arr, i_m)
+            adjustment_factor_arr[np.isnan(adjustment_factor_arr)] = 1.0
+
+            # Interpolate over y because the most rapid variation is near the injection point
+            self.adjustment_factor_interp.append(interpolate.CubicSpline(y_cl_arr, adjustment_factor_arr, axis=1))
     
-    def calc_adjustment_factor_xy(self, x_cl, y_cl):
+    def calc_adjustment_factor_xy(self, x_cl, y_cl, i_m):
         # Compute the normal to the centerline
-        dy_cl_dx = self.dy_cl_dx(x_cl)
+        dy_cl_dx = self.dy_cl_dx(x_cl[:,np.newaxis])[:,i_m]
         ds = np.stack([np.full_like(x_cl, 1.0), dy_cl_dx], axis=0)
         ds /= np.linalg.norm(ds, axis=0)
         dn = np.array([-ds[1], ds[0]])
@@ -383,17 +405,17 @@ class JICModel():
         xi_lo = -np.sqrt((x_bot - x_cl)**2 + (     0 - y_cl)**2)
         xi_hi =  np.sqrt((x_top - x_cl)**2 + (self.h - y_cl)**2)
         
-        Yf_int_nobound = self.n_inj * self.Yf_cl_int[:, np.newaxis]
+        Z_int_nobound = self.n_inj * self.Z_cl_int[i_m]
 
-        Yf_cl = self.Yf_cl(x_cl)
-        sigma2 = self.Yf_cl_int[:, np.newaxis] / (2 * np.pi * Yf_cl)
+        Z_cl = self.Z_cl(x_cl[:,np.newaxis])[:,i_m]
+        sigma2 = self.Z_cl_int[i_m] / (2 * np.pi * Z_cl)
         s2s = np.sqrt(2 * sigma2)
 
-        Yf_int_bound = 0.0
+        Z_int_bound = 0.0
         for z_inj in self.z_inj:
-            Yf_int_bound += Yf_cl * (np.pi / 2) * sigma2 * \
-                            (special.erf(xi_hi              / s2s) - special.erf(xi_lo               / s2s)) * \
-                            (special.erf((self.w/2 - z_inj) / s2s) - special.erf((-self.w/2 - z_inj) / s2s))
+            Z_int_bound += Z_cl * (np.pi / 2) * sigma2 * \
+                           (special.erf(xi_hi              / s2s) - special.erf(xi_lo               / s2s)) * \
+                           (special.erf((self.w/2 - z_inj) / s2s) - special.erf((-self.w/2 - z_inj) / s2s))
 
         # max_xi_val = 0.01
         # xi_lo = max(xi_lo, -max_xi_val)
@@ -402,38 +424,39 @@ class JICModel():
         #     x = x_cl + xi * dn[0] + self.x_inj
         #     y = y_cl + xi * dn[1]
         #     # print("x = {0}, y = {1}, z = {2}".format(x, y, z))
-        #     return self.Yf_3D(x, y, z)
-        # Yf_int_bound = integrate.dblquad(
+        #     return self.Z_3D(x, y, z)
+        # Z_int_bound = integrate.dblquad(
         #     integrand,
         #     xi_lo, xi_hi,
         #     lambda xi: -self.w/2,
         #     lambda xi: self.w/2)[0]
 
-        fac = Yf_int_nobound / Yf_int_bound
+        fac = Z_int_nobound / Z_int_bound
         return fac
     
     def get_adjustment_factor(self, x, y):
         if np.isscalar(x):
             x_arr = np.array([x])
             y_arr = np.array([y])
-
-        x_cl, y_cl, _ = self.nearest_on_cl(x_arr, y_arr)
-        dy_cl_dx = self.dy_cl_dx(x_cl)
-        idx_g1 = dy_cl_dx > 1
-        fac = np.zeros([len(self.mdot_inj_unique), len(x_cl)])
-        fac[:,  idx_g1] = self.adjustment_factor_interp_x(x_cl[ idx_g1])
-        fac[:, ~idx_g1] = self.adjustment_factor_interp_y(y_cl[~idx_g1])
-
+        else:
+            x_arr = x
+            y_arr = y
+        
+        fac = np.zeros([len(x_arr), len(self.mdot_inj_unique)])
+        for i_m in range(len(self.mdot_inj_unique)):
+            _, y_cl, _ = self.nearest_on_cl(x_arr, y_arr, np.zeros_like(x_arr), i_m)
+            fac[:, i_m] = self.adjustment_factor_interp[i_m](y_cl)
+        
         if np.isscalar(x):
-            return fac.T[0]
+            return fac[0]
         else:
             return fac
     
-    def Yf_3D(self, x, y, z):
+    def Z_3D(self, x, y, z):
         '''
-        Method: Yf_3D
+        Method: Z_3D
         --------------------------------------------------------------------------
-        This method computes the fuel mass fraction for the Jet-in-Crossflow
+        This method computes the mixture fraction for the Jet-in-Crossflow
         model in 3D for all injectors (summed).
         x: float
             The query x-coordinate
@@ -442,34 +465,16 @@ class JICModel():
         z: float
             The query z-coordinate
         '''
-        Yf = 0.0
+        Z = 0.0
         for z_inj in self.z_inj:
-            Yf += self.Yf_3D_single_inj(x, y, z, z_inj)
-        return Yf
-    
-    def grad_Yf_3D(self, x, y, z):
-        '''
-        Method: grad_Yf_3D
-        --------------------------------------------------------------------------
-        This method computes the gradient of the fuel mass fraction for the Jet-in-Crossflow
-        model in 3D for all injectors (summed).
-        x: float
-            The query x-coordinate
-        y: float
-            The query y-coordinate
-        z: float
-            The query z-coordinate
-        '''
-        grad_Yf = np.zeros([3] + list(y.shape))
-        for z_inj in self.z_inj:
-            grad_Yf += self.grad_Yf_3D_single_inj(x, y, z, z_inj)
-        return grad_Yf
+            Z += self.Z_3D_single_inj(x, y, z, z_inj)
+        return Z
     
     def grad_Z_3D(self, x, y, z):
         '''
         Method: grad_Z_3D
         --------------------------------------------------------------------------
-        This method computes the gradient of the Bilger mixture fraction for the Jet-in-Crossflow
+        This method computes the gradient of the mixture fraction for the Jet-in-Crossflow
         model in 3D for all injectors (summed).
         x: float
             The query x-coordinate
@@ -478,13 +483,9 @@ class JICModel():
         z: float
             The query z-coordinate
         '''
-        grad_Yf = self.grad_Yf_3D(x, y, z)
-        grad_Ya = -grad_Yf
-        grad_YO2 = 0.23291 * grad_Ya
-        grad_YN2 = grad_Ya - grad_YO2
-        grad_Z = (self.Z_weight_f  * grad_Yf +
-                  self.Z_weight_O2 * grad_YO2 +
-                  self.Z_weight_N2 * grad_YN2)
+        grad_Z = np.zeros([3] + list(y.shape))
+        for z_inj in self.z_inj:
+            grad_Z += self.grad_Z_3D_single_inj(x, y, z, z_inj)
         return grad_Z
     
     def __Yf_to_Z(self, Yf):
@@ -496,27 +497,11 @@ class JICModel():
              self.Z_weight_N2 * YN2) + self.Z_offset
         return np.minimum(np.maximum(Z, 0.0), 1.0)
     
-    def Z_3D(self, x, y, z):
+    def Z_3D_adjusted(self, x, y, z):
         '''
-        Method: Z_3D
+        Method: Z_3D_adjusted
         --------------------------------------------------------------------------
-        This method computes the Bilger mixture fraction for the Jet-in-Crossflow
-        model in 3D for all injectors (summed).
-        x: float
-            The query x-coordinate
-        y: float
-            The query y-coordinate
-        z: float
-            The query z-coordinate
-        '''
-        Yf = self.Yf_3D(x, y, z)
-        return self.__Yf_to_Z(Yf)
-    
-    def Yf_3D_adjusted(self, x, y, z):
-        '''
-        Method: Yf_3D_adjusted
-        --------------------------------------------------------------------------
-        This method computes the fuel mass fraction for the Jet-in-Crossflow
+        This method computes the mixture fraction for the Jet-in-Crossflow
         model in 3D for all injectors (summed) with the boundary clipping adjustment.
         x: float
             The query x-coordinate
@@ -525,31 +510,15 @@ class JICModel():
         z: float
             The query z-coordinate
         '''
-        Yf_adjusted = self.Yf_3D(x, y, z) * self.get_adjustment_factor(x, y)
-        # return Yf_adjusted
-        return np.minimum(Yf_adjusted, 1.0) # TODO: This cap introduces error in the integral. Distribute somehow?
-    
-    def grad_Yf_3D_adjusted(self, x, y, z):
-        '''
-        Method: grad_Yf_3D_adjusted
-        --------------------------------------------------------------------------
-        This method computes the gradient of the fuel mass fraction for the Jet-in-Crossflow
-        model in 3D for all injectors (summed) with the boundary clipping adjustment.
-        x: float
-            The query x-coordinate
-        y: float
-            The query y-coordinate
-        z: float
-            The query z-coordinate
-        '''
-        grad_Yf = self.grad_Yf_3D(x, y, z) * self.get_adjustment_factor(x, y)
-        return grad_Yf
+        Z_adjusted = self.Z_3D(x, y, z) * self.get_adjustment_factor(x, y)
+        # return Z_adjusted
+        return np.minimum(Z_adjusted, 1.0) # TODO: This cap introduces error in the integral. Distribute somehow?
     
     def grad_Z_3D_adjusted(self, x, y, z):
         '''
         Method: grad_Z_3D_adjusted
         --------------------------------------------------------------------------
-        This method computes the gradient of the Bilger mixture fraction for the Jet-in-Crossflow
+        This method computes the gradient of the mixture fraction for the Jet-in-Crossflow
         model in 3D for all injectors (summed) with the boundary clipping adjustment.
         x: float
             The query x-coordinate
@@ -561,27 +530,11 @@ class JICModel():
         grad_Z = self.grad_Z_3D(x, y, z) * self.get_adjustment_factor(x, y)
         return grad_Z
     
-    def Z_3D_adjusted(self, x, y, z):
+    def Z_3D_single_inj(self, x, y, z, z_inj):
         '''
-        Method: Z_3D_adjusted
+        Method: Z_3D_single_inj
         --------------------------------------------------------------------------
-        This method computes the Bilger mixture fraction for the Jet-in-Crossflow
-        model in 3D for all injectors (summed) with the boundary clipping adjustment.
-        x: float
-            The query x-coordinate
-        y: float
-            The query y-coordinate
-        z: float
-            The query z-coordinate
-        '''
-        Yf = self.Yf_3D_adjusted(x, y, z)
-        return self.__Yf_to_Z(Yf)
-    
-    def Yf_3D_single_inj(self, x, y, z, z_inj):
-        '''
-        Method: Yf_3D_single_inj
-        --------------------------------------------------------------------------
-        This method computes the fuel mass fraction for the Jet-in-Crossflow
+        This method computes the mixture fraction for the Jet-in-Crossflow
         model in 3D for a single injector at (x_inj, 0, z_inj).
         x: float
             The query x-coordinate
@@ -592,9 +545,20 @@ class JICModel():
         z_inj: float
             The injector z-coordinate
         '''
-
+        if np.isscalar(x):
+            x_arr = np.array([x])
+            y_arr = np.array([y])
+            z_arr = np.array([z])
+        else:
+            x_arr = x
+            y_arr = y
+            z_arr = z
+        
         # Compute the nearest point on the centerline and the distance squared
-        x_cl, y_cl, n2 = self.nearest_on_cl(x, y, z - z_inj)
+        x_cl = np.zeros([len(x_arr), len(self.mdot_inj_unique)])
+        n2 = np.zeros_like(x_cl)
+        for i_m in range(len(self.mdot_inj_unique)):
+            x_cl[:,i_m], _, n2[:,i_m] = self.nearest_on_cl(x_arr, y_arr, z_arr - z_inj, i_m)
 
         # If we haven't passed the edge of the injector, assume it's still a perfect cylinder
         # if x_cl < self.d_inj / 2:
@@ -604,26 +568,24 @@ class JICModel():
         #         return 0.0
 
         # Compute the centerline fuel mass fraction
-        Yf_cl = self.Yf_cl(x_cl)
-
-        # Spreading scaling law based on Hasselbrink and Mungal 2001 Pt. 2 (u_rms)
-        # b = self.d_inj * 0.76 * self.r_u**(2.0/3.0) * (x_cl / self.d_inj)**(1.0/3.0)
-        # b = max(b, self.d_inj / 2.0)
-        # Yf = Yf_cl * np.exp(-n2 / (2*b**2))
+        Z_cl = self.Z_cl(x_cl)
 
         # Spreading based on scalar conservation
-        # (Assume gaussian, rho_inj * u_inj * Yf_inj * A_inj = rho * u * int(Yf * dA))
-        # where int(Yf * dA) = 2 * pi * sigma^2 * Yf_cl
-        sigma2 = self.Yf_cl_int / (Yf_cl * 2 * np.pi)
-        Yf = Yf_cl * np.exp(-n2 / (2 * sigma2))
+        # (Assume gaussian, rho_inj * u_inj * Z_inj * A_inj = rho * u * int(Z * dA))
+        # where int(Z * dA) = 2 * pi * sigma^2 * Z_cl
+        sigma2 = self.Z_cl_int / (Z_cl * 2 * np.pi)
+        Z = Z_cl * np.exp(-n2 / (2 * sigma2))
 
-        return Yf
+        if np.isscalar(x):
+            return Z[0]
+        else:
+            return Z
     
-    def grad_Yf_3D_single_inj(self, x, y, z, z_inj):
+    def grad_Z_3D_single_inj(self, x, y, z, z_inj):
         '''
-        Method: grad_Yf_3D_single_inj
+        Method: grad_Z_3D_single_inj
         --------------------------------------------------------------------------
-        This method computes the gradient of the fuel mass fraction for the Jet-in-Crossflow
+        This method computes the gradient of the mixture fraction for the Jet-in-Crossflow
         model in 3D for a single injector at (x_inj, 0, z_inj).
         x: float
             The query x-coordinate
@@ -634,36 +596,41 @@ class JICModel():
         z_inj: float
             The injector z-coordinate
         '''
+        breakpoint()
 
         # Compute the nearest point on the centerline and the distance squared
         x_cl, y_cl, n2 = self.nearest_on_cl(x, y, z - z_inj)
 
         # Compute the centerline fuel mass fraction
-        Yf_cl = self.Yf_cl(x_cl)
-
-        # Spreading scaling law based on Hasselbrink and Mungal 2001 Pt. 2 (u_rms)
-        # b = self.d_inj * 0.76 * self.r_u**(2.0/3.0) * (x_cl / self.d_inj)**(1.0/3.0)
-        # b = max(b, self.d_inj / 2.0)
-        # Yf = Yf_cl * np.exp(-n2 / (2*b**2))
+        Z_cl = self.Z_cl(x_cl)
 
         # Spreading based on scalar conservation
-        # (Assume gaussian, rho_inj * u_inj * Yf_inj * A_inj = rho * u * int(Yf * dA))
-        # where int(Yf * dA) = 2 * pi * sigma^2 * Yf_cl
-        sigma2 = self.Yf_cl_int / (Yf_cl * 2 * np.pi)
-        grad_Yf = -Yf_cl * np.array([x - x_cl, y - y_cl, z - z_inj]) / (2 * sigma2) * np.exp(-n2 / (2 * sigma2))
+        # (Assume gaussian, rho_inj * u_inj * Z_inj * A_inj = rho * u * int(Z * dA))
+        # where int(Z * dA) = 2 * pi * sigma^2 * Z_cl
+        sigma2 = self.Z_cl_int / (Z_cl * 2 * np.pi)
+        grad_Z = -Z_cl * np.array([x - x_cl, y - y_cl, z - z_inj]) / (2 * sigma2) * np.exp(-n2 / (2 * sigma2))
 
-        return grad_Yf
+        return grad_Z
+    
+    def __stretched_grid(self, x_start, x_end, dx, growth_rate, target_x):
+        x_grid = [x_start, x_end]
+        for direction in [-1, 1]:
+            x, spacing = target_x, dx
+            while (x_start <= x <= x_end):
+                x_grid.append(x)
+                x += direction * spacing
+                spacing *= growth_rate
+        return np.sort(np.unique(x_grid))
     
     def calc_Z_3D_interp(self, write=False):
         print("Computing Z 3D array...")
         dx = 5.0e-4
-        # dx = 1.0e-3
-        Nx = int(np.ceil(self.L / dx))
         Ny = int(np.ceil(self.h / dx))
         Nz = int(np.ceil(self.w / dx))
-        self.x_3D_data = np.linspace(self.x[0], self.x[-1], Nx)
         self.y_3D_data = np.linspace(0, self.h, Ny)
         self.z_3D_data = np.linspace(-self.w/2, self.w/2, Nz)
+        self.x_3D_data = self.__stretched_grid(self.x[0], self.x[-1], dx, 1.1, self.x_inj)
+        Nx = len(self.x_3D_data)
         self.Z_3D_data = np.zeros([len(self.mdot_inj_unique), Nx, Ny, Nz])
         for i in tqdm(range(Nx)):
             for j in range(Ny):
