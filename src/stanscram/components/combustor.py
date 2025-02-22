@@ -27,7 +27,14 @@ import cantera as ct
 import matplotlib.pyplot as plt
 from scipy.optimize import root
 
+from stanscram.numerics.face_extrapolation import WENO5
+from stanscram.numerics.inviscid_flux import HLLC
 from stanscram.physics.skinfriction import skinFriction
+from stanscram.processing.initialize import (
+    initializeConstant,
+    initializeDiffuseInterface,
+    initializeRiemannProblem,
+)
 
 #Global variables (paramters) used by the solver
 mt=3 #number of ghost nodes
@@ -228,41 +235,6 @@ class thermoTable(object):
         R = self.getR(Y)
         return p/(r*R)
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-def smoothingFunction(x,xShock,Delta,phiLeft,phiRight):
-            '''
-            Function: smoothingFunction
-            ----------------------------------------------------------------------
-            This helper function returns the function of the variable smoothed
-            over the interface
-                inputs:
-                    x = numpy array of cell centers
-                    phiLeft = the value of the variable on the left side
-                    phiRight = the value of the variable on the right side
-                    xShock = the mean of the shock location
-            '''
-            dphidx = (phiRight-phiLeft)/Delta
-            phi = (phiLeft+phiRight)/2.0+dphidx*(x-xShock)
-            phi[x<(xShock-Delta/2.0)]=phiLeft
-            phi[x>(xShock+Delta/2.0)]=phiRight
-            return phi
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-def dSFdx(x,xShock,Delta,phiLeft,phiRight):
-            '''
-            Function: dSFdx
-            ----------------------------------------------------------------------
-            This helper function returns the derivative of the smoothing function
-                inputs:
-                    x = numpy array of cell centers
-                    phiLeft = the value of the variable on the left side
-                    phiRight = the value of the variable on the right side
-                    xShock = the mean of the shock location
-            '''
-            dphidx = (phiRight-phiLeft)/Delta
-            dphidx = np.ones(len(x))*dphidx
-            dphidx[x<(xShock-Delta/2.0)]=0.0
-            dphidx[x>(xShock+Delta/2.0)]=0.0
-            return dphidx
-#%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 class stanScram(object):
     '''
     Class: stanScram
@@ -278,124 +250,6 @@ class stanScram(object):
         initialization of the object with default values. The keyword arguments
         allow the user to initialize the state
         '''
-        #######################################################################
-        def initializeConstant(self,state,x):
-            '''
-            Method: initializeConstant
-            ----------------------------------------------------------------------
-            This helper function initializes a constant state
-                inputs:
-                    state = a tuple containing the Cantera solution object at the
-                            the desired thermodynamic state and the velocity:
-                            (canteraSolution,u)
-                    x = the grid for the problem
-            '''
-            # Initialize grid
-            self.n = len(x)
-            self.x = x
-            self.dx = self.x[1] - self.x[0]
-            # Initialize state
-            self.r = np.ones(self.n) * state[0].density
-            self.u = np.ones(self.n) * state[1]
-            self.p = np.ones(self.n) * state[0].P
-            self.Y = np.zeros((self.n, self.n_scalars))
-            if self.physics == "FPV":
-                self.Y[:, 0] = self.ZBilger(state[0].Y)
-                self.Y[:, 1] = self.Prog(state[0].Y)
-            elif self.physics == "FRC":
-                for k in range(self.n_scalars):
-                    self.Y[:, k] = state[0].Y[k]
-            self.gamma = np.ones(self.n) * (state[0].cp / state[0].cv)
-            # No flame thickening
-            self.F = np.ones_like(self.r)
-        #######################################################################
-        def initializeRiemannProblem(self,leftState,rightState,geometry):
-            '''
-            Method: initializeRiemannProblem
-            ----------------------------------------------------------------------
-            This helper function initializes a Riemann Problem
-                inputs:
-                    leftState = a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)
-                    rightState = a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)
-                    geometry = a tuple containing the relevant geometry for the
-                               problem: (numberCells,xMinimum,xMaximum,shockLocation)
-            '''
-            if leftState[0].species_names!=gas.species_names or \
-              rightState[0].species_names!=gas.species_names:
-                  raise Exception("Inputed gasses must be the same as the initialized gas.")
-            self.n=geometry[0]
-            self.x=np.linspace(geometry[1],geometry[2],self.n)
-            self.dx = self.x[1]-self.x[0]
-            #initialization for left state
-            self.r=np.ones(self.n)*leftState[0].density
-            self.u=np.ones(self.n)*leftState[1]
-            self.p=np.ones(self.n)*leftState[0].P
-            self.Y=np.zeros((self.n,self.n_scalars))
-            if self.physics=="FPV":
-                self.Y[:,0]=self.ZBilger(leftState[0].Y)
-                self.Y[:,1]=self.Prog(leftState[0].Y)
-            elif self.physics=="FRC":
-                for kSp in range(self.n_scalars): self.Y[:,kSp]=leftState[0].Y[kSp]
-            self.gamma=np.ones(self.n)*(leftState[0].cp/leftState[0].cv)
-            #right state
-            index=self.x>=geometry[3]
-            self.r[index]=rightState[0].density
-            self.u[index]=rightState[1]
-            self.p[index]=rightState[0].P
-            if self.physics=="FPV":
-                self.Y[index,0]=self.ZBilger(rightState[0].Y)
-                self.Y[index,1]=self.Prog(rightState[0].Y)
-            elif self.physics=="FRC":
-                for kSp in range(self.n_scalars): self.Y[index,kSp]=rightState[0].Y[kSp]
-            self.gamma[index]=rightState[0].cp/rightState[0].cv
-            self.F = np.ones_like(self.r)
-        #######################################################################
-        def initializeDiffuseInterface(self,leftState,rightState,geometry,Delta):
-            '''
-            Method: initializeDiffuseInterface
-            ----------------------------------------------------------------------
-            This helper function initializes an interface smoothed over a distance
-                inputs:
-                    leftState = a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)
-                    rightState =  a tuple containing the Cantera solution object at the
-                               the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)
-                    geometry = a tuple containing the relevant geometry for the
-                               problem: (numberCells,xMinimum,xMaximum,shockLocation)
-                    Delta =    distance over which the interface is smoothed linearly
-            '''
-            if leftState[0].species_names!=gas.species_names or \
-              rightState[0].species_names!=gas.species_names:
-                  raise Exception("Inputed gasses must be the same as the initialized gas.")
-            self.n=geometry[0]
-            self.x=np.linspace(geometry[1],geometry[2],self.n)
-            self.dx = self.x[1]-self.x[0]
-            xShock = geometry[3]
-            leftGas = leftState[0]
-            uLeft = leftState[1]
-            gammaLeft = leftGas.cp/leftGas.cv
-            rightGas = rightState[0]
-            uRight = rightState[1]
-            gammaRight = rightGas.cp/rightGas.cv
-            #initialization for left state
-            self.r = smoothingFunction(self.x,xShock,Delta,leftGas.density,rightGas.density)
-            self.u = smoothingFunction(self.x,xShock,Delta,uLeft,uRight)
-            self.p = smoothingFunction(self.x,xShock,Delta,leftGas.P,rightGas.P)
-            self.Y=np.zeros((self.n,self.n_scalars))
-            if self.physics=="FPV":
-                self.Y[:,0]=smoothingFunction(self.x,xShock,Delta,self.ZBilger(leftGas.Y),self.ZBilger(rightGas.Y))
-                self.Y[:,1]=smoothingFunction(self.x,xShock,Delta,self.Prog(leftGas.Y),self.Prog(rightGas.Y))
-            elif self.physics=="FRC":
-                for kSp in range(self.n_scalars): self.Y[:,kSp]=smoothingFunction(self.x,xShock,Delta,leftGas.Y[kSp],rightGas.Y[kSp])
-            self.gamma=smoothingFunction(self.x,xShock,Delta,gammaLeft,gammaRight)
-            self.F = np.ones_like(self.r)
-        #########################################################################
         #initialize the class
         self.cfl=1.0 #stability condition
         self.dx=1.0 #grid spacing
