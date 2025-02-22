@@ -29,6 +29,7 @@ from scipy.optimize import root
 
 from stanscram.numerics.face_extrapolation import WENO5
 from stanscram.numerics.inviscid_flux import HLLC
+from stanscram.numerics.viscous_flux import viscousFluxFunction
 from stanscram.physics.skinfriction import skinFriction
 from stanscram.physics.thermo.table import thermoTable
 from stanscram.processing.initialize import (
@@ -521,59 +522,6 @@ class stanScram(object):
             outputs:
                 rhs=the update due to the viscous flux
         '''
-        ##############################################################################
-        def viscousFluxFunction(self,rLR,uLR,pLR,YLR):
-            '''
-            ------------------------------------------------------------.----------
-            This method computes the viscous flux at each interface
-                inputs:
-                    rLR=array containing left and right density states [nLR,nFaces]
-                    uLR=array containing left and right velocity states [nLR,nFaces]
-                    pLR=array containing left and right pressure states [nLR,nFaces]
-                    YLR=array containing left and right scalar states
-                        [nLR,nFaces,nSp]
-                return:
-                    f=modeled viscous fluxes [nFaces,mn+nSp]
-            '''
-            #get the temperature, pressure, and composition for each cell (including the two ghosts)
-            nT = self.n+2
-            T=np.zeros(nT)
-            T[:-1] = self.getTemperature(rLR[0,:],pLR[0,:],YLR[0,:,:])
-            T[-1] = self.getTemperature(np.array([rLR[1,-1]]),
-                                        np.array([pLR[1,-1]]),
-                                        np.array([YLR[1,-1,:]]).reshape((1,-1)))
-            p, F, Y = np.zeros(nT), np.ones(nT), np.zeros((nT,self.n_scalars))
-            p[:-1], p[-1] = pLR[0,:], pLR[1,-1]
-            F[1:-1] = self.F
-            F[0], F[-1] = self.F[0], self.F[-1] #no gradient in F at boundary
-            Y[:-1,:], Y[-1,:] = YLR[0,:,:], YLR[1,-1,:]
-            mu = self.getMu(T,Y)
-            cp = self.getCp(T,Y)
-            k = self.getLoc(T,Y) * cp * F
-            diff = np.zeros((nT,self.n_scalars))
-            if self.physics == "FPV":
-                diff_ = k / (self.r * cp)
-                diff = diff_.reshape(-1,1)
-            elif self.physics == "FRC":
-                for i,Ti in enumerate(T):
-                    self.gas.TP = Ti,p[i]
-                    if self.gas.n_species>1: self.gas.Y= Y[i,:]
-                    diff[i,:]=self.gas.mix_diff_coeffs*F[i]
-            #compute the gas properties at the face
-            viscosity=(mu[1:]+mu[:-1])/2.0
-            conductivity=(k[1:]+k[:-1])/2.0
-            diffusivities=(diff[1:,:]+diff[:-1,:])/2.0
-            r = ((rLR[0,:]+rLR[1,:])/2.0).reshape(-1,1)
-            #get the central differences
-            dudx=(uLR[1,:]-uLR[0,:])/self.dx
-            dTdx=(T[1:]-T[:-1])/self.dx
-            dYdx=(YLR[1,:,:]-YLR[0,:,:])/self.dx
-            #compute the fluxes
-            f=np.zeros((nT-1,mn+self.n_scalars))
-            f[:,1]=4.0/3.0*viscosity*dudx
-            f[:,2]=conductivity*dTdx
-            f[:,mn:]=r*diffusivities*dYdx
-            return f
         ##############################################################################
         #first order interpolation to the edge states and apply boundary conditions
         rLR = np.concatenate((r[mt-1:-mt].reshape(1,-1),r[mt:-mt+1].reshape(1,-1)),axis=0)
