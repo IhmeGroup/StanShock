@@ -36,6 +36,7 @@ from stanscram.processing.initialize import (
     initializeDiffuseInterface,
     initializeRiemannProblem,
 )
+from stanscram.processing.plot import plotState
 
 #Global variables (paramters) used by the solver
 mt=3 #number of ghost nodes
@@ -91,7 +92,7 @@ class stanScram(object):
         self.fluxFunction=HLLC
         self.initialization=None #initialization options
         self.probes=[] #list of probe objects
-        self.XTDiagrams=dict() #dictionary of XT diagram objects
+        self.XTDiagrams=[] #list of XT diagram objects
         self.cf = None #skin friction functor
         self.thermoTable = thermoTable(gas) #thermodynamic table object
         self.optimizationIteration = 0 #counter to keep track of optimization
@@ -135,256 +136,6 @@ class stanScram(object):
         if not self.n==len(self.x)==len(self.r)==len(self.u)==len(self.p)==len(self.gamma):
             raise Exception("Initialization Error")
 
-##############################################################################
-    class __probe(object):
-        '''
-        Class: probe
-        -----------------------------------------------------------------------
-        This class is used to store the relavant data for the probe
-        '''
-        def __init__(self):
-            self.probeLocation=None
-            self.name=None
-            self.skipSteps=0 #number of timesteps to skip
-            self.t=[]
-            self.r=[] #density
-            self.u=[] #velocity
-            self.p=[] #pressure
-            self.gamma=[] #specific heat ratio
-            self.Y=[] #scalars
-##############################################################################
-    def addProbe(self,probeLocation,skipSteps=0,probeName=None):
-        '''
-        Method: addProbe
-        -----------------------------------------------------------------------
-        This method adds a new probe to the solver
-        '''
-        if probeLocation>np.max(self.x) or probeLocation<np.min(self.x):
-            raise Exception("Invalid Probe Location")
-        if probeName == None: probeName="probe"+str(len(self.probes))
-        newProbe = self.__probe()
-        newProbe.probeLocation=probeLocation
-        newProbe.skipSteps=0
-        newProbe.name=probeName
-        self.probes.append(newProbe)
-##############################################################################
-    class XTDiagram(object):
-        '''
-        Class: __XTDiagram
-        --------------------------------------------------------------------------
-        This class is used to store the relavant data for the XT diagram
-        '''
-        def __init__(self):
-            self.name=None
-            self.skipSteps=0 #number of timesteps to skip
-            self.variable=[] #list of numpy arrays of the variable w.r.t x
-            self.t=[] #list of times
-            self.x=None #numpy array of x (the interpolated grid)
-##############################################################################
-    def __updateXTDiagram(self,XTDiagram):
-        '''
-        Method: __updateXTDiagram
-        --------------------------------------------------------------------------
-        This method updates the XT diagram.
-            inputs:
-                XTDiagram: the XTDiagram object
-        '''
-        variable=XTDiagram.name
-        scalarNames = []
-        if self.physics == "FPV":
-            scalarNames = ["mixture fraction","progress variable"]
-        elif self.physics == "FRC":
-            scalarNames = [species.lower() for species in self.gas.species_names]
-        if variable in ["density","r","rho"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.r))
-        elif variable in ["velocity","u"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.u))
-        elif variable in ["pressure","p"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.p))
-        elif variable in ["temperature","t"]:
-            T = self.getTemperature(self.r,self.p,self.Y)
-            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, T))
-        elif variable in ["gamma","g","specific heat ratio", "heat capacity ratio"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.gamma))
-        elif variable in scalarNames:
-            scalarIndex= scalarNames.index(variable)
-            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.Y[:,scalarIndex]))
-        elif variable in ["mach","m"]:
-            M = np.abs(self.u) / self.soundSpeed(self.r, self.p, self.gamma)
-            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, M))
-        else:
-            raise Exception("Invalid Variable Name")
-        XTDiagram.t.append(self.t)
-
-##############################################################################
-    def addXTDiagram(self,variable,skipSteps=0,x=None):
-        '''
-        Method: addXTDiagram
-        --------------------------------------------------------------------------
-        This method initiates the XT diagram.
-            inputs:
-                variable=string of the variable
-                skipSteps=polling frequency
-                x=interpolation grid
-        '''
-        newXTDiagram = self.XTDiagram()
-        variable=variable.lower()
-        newXTDiagram.skipSteps=skipSteps
-        newXTDiagram.name=variable
-        #check interpolation grid
-        if x is None:
-            newXTDiagram.x = self.x
-        elif (x[-1]>self.x[-1]) or (x[0]<self.x[0]):
-            raise Exception("Invalid Interpolation Grid")
-        else:
-            newXTDiagram.x = self.x
-        self.__updateXTDiagram(newXTDiagram)
-        #store the XT Diagram
-        self.XTDiagrams[variable]=newXTDiagram
-##############################################################################
-    def plotXTDiagram(self,diagram,limits=None,figdir=""):
-        '''
-        Method: plotXTDiagram
-        --------------------------------------------------------------------------
-        This method creates a contour plot of the XTDiagram data
-            inputs:
-                XTDiagram=XTDiagram object; obtained from the XTDiagrams dictionary
-                limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
-        '''
-        plt.figure()
-        t = [t*1000.0 for t in diagram.t]
-        X, T = np.meshgrid(diagram.x,t)
-        variableMatrix = np.zeros(X.shape)
-        for k, variablek in enumerate(diagram.variable):
-            variableMatrix[k,:]=variablek
-        variable=diagram.name
-        if variable in ["density","r","rho"]:
-            plt.title(r"$\rho~[\mathrm{kg/m^3}]$")
-        elif variable in ["velocity","u"]:
-            plt.title(r"$u~[\mathrm{m/s}]$")
-        elif variable in ["pressure","p"]:
-            variableMatrix /= 1.0e5 #convert to bar
-            plt.title(r"$p~[\mathrm{bar}]$")
-        elif variable in ["temperature","t"]:
-            plt.title(r"$T~[\mathrm{K}]$")
-        elif variable in ["gamma","g","specific heat ratio", "heat capacity ratio"]:
-            plt.title(r"$\gamma~[\mathrm{-}]$")
-        elif variable in ["mixture fraction"]:
-            plt.title(r"$Z~[\mathrm{-}]$")
-        elif variable in ["progress variable"]:
-            plt.title(r"$C~[\mathrm{-}]$")
-        elif variable in ["mach","m"]:
-            plt.title(r"$M~[\mathrm{-}]$")
-        else:
-            plt.title(r"$\mathrm{"+variable+"}$")
-        if limits is None:
-            plt.pcolormesh(X,T,variableMatrix,cmap='jet')
-        else:
-            plt.pcolormesh(X,T,variableMatrix,cmap='jet',vmin=limits[0],vmax=limits[1])
-        plt.xlabel(r"$x~[\mathrm{m}]$")
-        plt.ylabel(r"$t~[\mathrm{ms}]$")
-        plt.axis([min(diagram.x), max(diagram.x), min(t), max(t)])
-        plt.colorbar()
-        plt.savefig(os.path.join(figdir, variable+".png"), bbox_inches='tight', dpi=300)
-##############################################################################
-    def plotXTDiagrams(self,limits=None,figdir=""):
-        '''
-        Method: plotXTDiagrams
-        --------------------------------------------------------------------------
-        This method creates a contour plot of the XTDiagram data
-            inputs:
-                limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
-
-        '''
-        for diagram in self.XTDiagrams.values():
-            self.plotXTDiagram(diagram,limits,figdir)
-##############################################################################
-    def add_h_plot(self, ax, scale=1.0):
-        ax1 = ax.twinx()
-        ax1.set_zorder(-np.inf)
-        ax.patch.set_visible(False)
-        ax1.plot(self.x*scale, self.h*scale, color='0.8', linestyle='--')
-        ax1.axhline(0, color='0.8', linestyle='--')
-        ax1.set_aspect('equal')
-        ax1.set_ylabel('h [mm]')
-        return ax1
-##############################################################################
-    def plotState(self, filename):
-        xscale = 1.0e3
-        T = self.getTemperature(self.r, self.p, self.Y)
-
-        fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
-        ax[0].plot(self.x*xscale, self.r)
-        ax[0].set_ymargin(0.1)
-        ax[0].set_ylabel(r'$\rho$ [kg/m$^3$]')
-        if self.h is not None:
-            self.add_h_plot(ax[0], scale=xscale)
-
-        ax[1].plot(self.x*xscale, self.u)
-        ax[1].set_ymargin(0.1)
-        ax[1].set_ylabel(r'$u$ [m/s]')
-        if self.h is not None:
-            self.add_h_plot(ax[1], scale=xscale)
-
-        ax[2].plot(self.x*xscale, self.p)
-        ax[2].set_ymargin(0.1)
-        ax[2].set_ylabel(r'$p$ [Pa]')
-        if self.h is not None:
-            self.add_h_plot(ax[2], scale=xscale)
-
-        ax[3].plot(self.x*xscale, T)
-        ax[3].set_ymargin(0.1)
-        ax[3].set_ylabel(r'$T$ [K]')
-        if self.h is not None:
-            self.add_h_plot(ax[3], scale=xscale)
-
-        M = np.abs(self.u) / self.soundSpeed(self.r, self.p, self.gamma)
-        ax[4].plot(self.x*xscale, M)
-        ax[4].axhline(1.0, color='r', linestyle='--')
-        ax[4].set_ymargin(0.1)
-        ax[4].set_ylabel(r'$M$ [-]')
-        if self.h is not None:
-            self.add_h_plot(ax[4], scale=xscale)
-
-        if self.physics == "FPV":
-            Z = self.Y[:, 0]
-            C = self.Y[:, 1]
-            Q = np.zeros_like(self.x)
-            L = self.fpv_table.L_from_C(Z, C)
-            Y_H2 = self.fpv_table.lookup('H2', Z, Q, L)
-            Y_OH = self.fpv_table.lookup('OH', Z, Q, L)
-            Y_H2O = self.fpv_table.lookup('H2O', Z, Q, L)
-        elif self.physics == "FRC":
-            Y_H2 = self.Y[:, self.gas.species_index('H2' )]
-            Y_OH = self.Y[:, self.gas.species_index('OH' )]
-            Y_H2O = self.Y[:, self.gas.species_index('H2O')]
-        ax[5].plot(self.x*xscale, Y_H2, label=r"$\mathrm{H}_2$")
-        ax[5].plot(self.x*xscale, Y_OH, label=r"$\mathrm{OH}$")
-        ax[5].plot(self.x*xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
-        if Y_H2.max() < 1e-6:
-            ax[5].set_ylim(-1e-3, 1e-3)
-        else:
-            ax[5].set_ymargin(0.1)
-        ax[5].set_ylabel(r'$Y_k$ [-]')
-        ax[5].legend(loc='upper right')
-        if self.h is not None:
-            self.add_h_plot(ax[5], scale=xscale)
-
-        ax[6].scatter(self.injector.fluid_tips[:, 0]*xscale,
-                      self.injector.fluid_tips[:, 1]*1e3*self.injector.n_inj,
-                      s=1)
-        ax[6].set_ymargin(0.1)
-        ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
-        if self.h is not None:
-            self.add_h_plot(ax[6], scale=xscale)
-
-        ax[6].set_xlabel('x [mm]')
-
-        fig.suptitle('$t = {:.4f}$ ms'.format(self.t*1.0e3))
-
-        plt.tight_layout()
-        plt.savefig(filename, bbox_inches='tight', dpi=300)
-        plt.close()
 ##############################################################################
     def getCp(self,T,Y):
         '''
@@ -1274,30 +1025,10 @@ class stanScram(object):
         ----------------------------------------------------------------------
         This method updates all the probes to the current value
         '''
-        def interpolate(xArray,qArray,x):
-            '''
-            function: interpolate
-            ----------------------------------------------------------------------
-            helper function for the probe
-            '''
-            xUpper = (xArray[xArray>=x])[0]
-            xLower = (xArray[xArray<x])[-1]
-            qUpper = (qArray[xArray>=x])[0]
-            qLower = (qArray[xArray<x])[-1]
-            q = qLower+(qUpper-qLower)/(xUpper-xLower)*(x-xLower)
-            return q
-        #update probes
-        YProbe= np.zeros(self.n_scalars)
+        # update probes
         for probe in self.probes:
-            if iters%(probe.skipSteps+1)==0:
-                probe.t.append(self.t)
-                probe.r.append((interpolate(self.x,self.r,probe.probeLocation)))
-                probe.u.append((interpolate(self.x,self.u,probe.probeLocation)))
-                probe.p.append((interpolate(self.x,self.p,probe.probeLocation)))
-                probe.gamma.append((interpolate(self.x,self.gamma,probe.probeLocation)))
-                YProbe=np.array([(interpolate(self.x,self.Y[:,kSp],probe.probeLocation))\
-                                  for kSp in range(self.n_scalars)])
-                probe.Y.append(YProbe)
+            if iters % (probe.skipSteps + 1) == 0:
+                probe.update(self)
 ##############################################################################
     def updateXTDiagrams(self,iters):
         '''
@@ -1306,9 +1037,9 @@ class stanScram(object):
         This method updates all the XT Diagrams to the current value.
         '''
         #update diagrams
-        for diagram in self.XTDiagrams.values():
-            if iters%(diagram.skipSteps+1)==0:
-                self.__updateXTDiagram(diagram)
+        for XTDiagram in self.XTDiagrams:
+            if iters%(XTDiagram.skipSteps+1)==0:
+                XTDiagram.update(self)
 ##############################################################################
     def advanceSimulation(self,tFinal,res_p_target=-1.0):
         '''
@@ -1348,4 +1079,4 @@ class stanScram(object):
                 print("Iteration: %i. Current time: %f. Time step: %e. Max T[K]: %f. Residual(p): %e." \
                 % (iters,self.t,dt,self.getTemperature(self.r,self.p,self.Y).max(),res_p))
             if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):
-                self.plotState("figures/anim/test_{0:05d}.png".format(iters//self.plotStateInterval))
+                plotState(self, "figures/anim/test_{0:05d}.png".format(iters//self.plotStateInterval))
