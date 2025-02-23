@@ -1,77 +1,82 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-'''
-    Copyright 2017 Kevin Grogan
-    Copyright 2024 Matthew Bonanni
+"""
+Copyright 2017 Kevin Grogan
+Copyright 2024 Matthew Bonanni
 
-    This file is part of StanScram.
+This file is part of StanScram.
 
-    StanScram is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License.
+StanScram is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation, either version 3 of the License.
 
-    StanScram is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
+StanScram is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
 
-    You should have received a copy of the GNU Lesser General Public License
-    along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
-'''
-import os
-import pickle
-from tqdm import tqdm
-from typing import Optional
-import numpy as np
-from scipy import interpolate, integrate, optimize
+You should have received a copy of the GNU Lesser General Public License
+along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+from __future__ import annotations
+
+import code
+from pathlib import Path
+
 import cantera as ct
 import matplotlib.pyplot as plt
+import numpy as np
+from scipy import interpolate, optimize
 
-from StanScram.stanScram import stanScram
-from StanScram.fpv_table import FPVTable
-from StanScram.jet_in_crossflow import JICModel
-from StanScram.monte_carlo_sampler_2d import MonteCarloSampler2D
+from stanscram.components.combustor import stanScram
+from stanscram.physics.flamelet import FPVTable
+from stanscram.physics.jicf import JICModel
 
-import matplotlib.font_manager
-plt.rcParams.update({
-    "text.usetex": True,
-    "font.family": "serif",
-    "font.serif": ["Computer Modern Roman"],
-})
-plt.rcParams['axes.xmargin'] = 0
-plt.rcParams['axes.ymargin'] = 0
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+    }
+)
+plt.rcParams["axes.xmargin"] = 0
+plt.rcParams["axes.ymargin"] = 0
 
 XSMALL_SIZE = 12
 SMALL_SIZE = 14
 MEDIUM_SIZE = 16
 BIGGER_SIZE = 18
 
-plt.rc('font', size=SMALL_SIZE)          # controls default text sizes
-plt.rc('axes', titlesize=SMALL_SIZE)     # fontsize of the axes title
-plt.rc('axes', labelsize=MEDIUM_SIZE)    # fontsize of the x and y labels
-plt.rc('xtick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-plt.rc('ytick', labelsize=SMALL_SIZE)    # fontsize of the tick labels
-plt.rc('legend', fontsize=XSMALL_SIZE)   # legend fontsize
-plt.rc('figure', titlesize=BIGGER_SIZE)  # fontsize of the figure title
+plt.rc("font", size=SMALL_SIZE)  # controls default text sizes
+plt.rc("axes", titlesize=SMALL_SIZE)  # fontsize of the axes title
+plt.rc("axes", labelsize=MEDIUM_SIZE)  # fontsize of the x and y labels
+plt.rc("xtick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
+plt.rc("ytick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
+plt.rc("legend", fontsize=XSMALL_SIZE)  # legend fontsize
+plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
 
 # Plotting utilities
 scale = 1e3
+
+
 def add_h_plot(ax):
     ax1 = ax.twinx()
-    ax1.plot(x*scale, h*scale, 'k', linestyle='--')
-    ax1.axhline(0, color='k', linestyle='--')
-    ax1.set_aspect('equal')
-    ax1.set_ylabel('h [mm]')
+    ax1.plot(x * scale, h * scale, "k", linestyle="--")
+    ax1.axhline(0, color="k", linestyle="--")
+    ax1.set_aspect("equal")
+    ax1.set_ylabel("h [mm]")
     return ax1
 
+
 # Data
-datadir = "./data"
-figdir = "./figures"
+datadir = Path("./data")
+datadir.mkdir(exist_ok=True)
+figdir = Path("./figures")
+figdir.mkdir(exist_ok=True)
+(figdir / "anim").mkdir(exist_ok=True)
 
 # Chemistry
-# mech = "./HydrogenAirNOx_15sp-47st.yaml"
-mech = "./h2_boivin_9sp_12r_mod.yaml"
-table_file = "./H2_O2_p01_3_tf0250_to1367_200x2x200.h5"
+mech = "ohn.yaml"
+table_file = "./flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5"
 gas = ct.Solution(mech)
 X_ox = "O2:0.21,N2:0.79"
 X_f = "H2:1"
@@ -79,26 +84,26 @@ X_f = "H2:1"
 # Specs from the HyShot II scramjet
 
 # Geometry definition
-h_const       =   9.8e-3       # m
-w             =  75.0e-3       # m
-L_const       = 300.0e-3       # m
-L_exhaust     = 100.0e-3       # m
-x_inj         =  58.0e-3       # m
-theta_exhaust = np.deg2rad(12) # rad
-r_f           =   1.0e-3       # m
-N_f           =   4            # -
+h_const = 9.8e-3  # m
+w = 75.0e-3  # m
+L_const = 300.0e-3  # m
+L_exhaust = 100.0e-3  # m
+x_inj = 58.0e-3  # m
+theta_exhaust = np.deg2rad(12)  # rad
+r_f = 1.0e-3  # m
+N_f = 4  # -
 
-L       = L_const + L_exhaust # m
-A_f     = np.pi * r_f**2      # m^2
-A_f_tot = N_f * A_f           # m^2
+L = L_const + L_exhaust  # m
+A_f = np.pi * r_f**2  # m^2
+A_f_tot = N_f * A_f  # m^2
 
 # Define the boundary conditions (from Tim Dawson email)
-P_in   =  127.444e3  # Pa
-rho_in =    0.323551 # kg/m^3
-U_in   = 1791.05     # m/s
-T_in   = 1366.81     # K
-M_in   =    2.48942  # -
-T0_f   = 300.0       # K
+P_in = 127.444e3  # Pa
+rho_in = 0.323551  # kg/m^3
+U_in = 1791.05  # m/s
+T_in = 1366.81  # K
+M_in = 2.48942  # -
+T0_f = 300.0  # K
 
 # Time parameters
 tau = L / U_in
@@ -122,7 +127,7 @@ mdot_O2 = 0.23291 * mdot_a
 mdot_N2 = mdot_a - mdot_O2
 gas.TP = 298.15, ct.one_atm
 gas.set_equivalence_ratio(1.0, X_f, X_ox)
-Yf_st = gas.Y[gas.species_index('H2')]
+Yf_st = gas.Y[gas.species_index("H2")]
 Z_st = gas.mixture_fraction(X_f, X_ox)
 
 # Fuel inflow rate
@@ -132,54 +137,59 @@ gas.TPX = T0_f, P_in, X_f
 gamma_f = gas.cp / gas.cv
 R_f = ct.gas_constant / gas.mean_molecular_weight
 
+
 def f(M):
-    tmp = ((gamma_f + 1) / 2)**((gamma_f + 1) / (2 * (gamma_f - 1)))
-    return tmp * M / (1 + (gamma_f - 1) / 2 * M**2)**((gamma_f + 1) / (2 * (gamma_f - 1)))
+    tmp = ((gamma_f + 1) / 2) ** ((gamma_f + 1) / (2 * (gamma_f - 1)))
+    return (
+        tmp
+        * M
+        / (1 + (gamma_f - 1) / 2 * M**2) ** ((gamma_f + 1) / (2 * (gamma_f - 1)))
+    )
+
 
 def calc_M(P0, Pa):
-    P0_choked = Pa * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
-    if P0 < P0_choked:
+    P0_choked = Pa * ((gamma_f + 1) / 2) ** (gamma_f / (gamma_f - 1))
+    if P0_choked > P0:
         # Exit pressure is equal to the ambient pressure
-        M = np.sqrt(2 / (gamma_f - 1) * ((P0 / Pa)**((gamma_f - 1) / gamma_f) - 1))
+        M = np.sqrt(2 / (gamma_f - 1) * ((P0 / Pa) ** ((gamma_f - 1) / gamma_f) - 1))
     else:
         # Exit pressure is no longer equal to the ambient pressure
         # We know based on geometry that the Mach number at the orifice is 1
         M = 1.0
     return M
 
+
 def calc_mdot(P0, T0, A, Pa):
-    P0_choked = Pa * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
     M = calc_M(P0, Pa)
-    gamma_term = gamma_f / ((gamma_f + 1) / 2)**((gamma_f + 1) / (2 * (gamma_f - 1)))
+    gamma_term = gamma_f / ((gamma_f + 1) / 2) ** ((gamma_f + 1) / (2 * (gamma_f - 1)))
     return gamma_term * P0 * A / np.sqrt(gamma_f * R_f * T0) * f(M)
 
+
 def P0_from_mdot(mdot, T0, A):
-    P0_choked = P_in * ((gamma_f + 1) / 2)**(gamma_f / (gamma_f - 1))
-    eqn = lambda P0 : calc_mdot(P0, T0, A, P_in) - mdot
+    def eqn(P0):
+        return calc_mdot(P0, T0, A, P_in) - mdot
+
     result = optimize.root_scalar(eqn, x0=P_in)
     P0 = result.root
     M = calc_M(P0, P_in)
     return P0, M
+
 
 def fuel_props_from_phi(phi_gl):
     if phi_gl == 0.0:
         return np.nan, 0.0, 300.0
 
     gas.set_equivalence_ratio(phi_gl, X_f, X_ox)
-    X_mix = gas.X
-    Yf_gl = gas.Y[gas.species_index('H2')]
-    mdot_f = (Yf_gl / gas.Y[gas.species_index('O2')]) * mdot_O2
-    Z_gl = gas.mixture_fraction(X_f, X_ox)
+    Yf_gl = gas.Y[gas.species_index("H2")]
+    mdot_f = (Yf_gl / gas.Y[gas.species_index("O2")]) * mdot_O2
 
     # Compute the fuel plenum (stagnation) pressure to achieve mdot_f
     P0_f, M_f = P0_from_mdot(mdot_f, T0_f, A_f_tot)
-    T_f = T0_f * (1 + (gamma_f - 1) / 2 * M_f**2)**(-1)
+    T_f = T0_f * (1 + (gamma_f - 1) / 2 * M_f**2) ** (-1)
     a_f = np.sqrt(gamma_f * R_f * T_f)
     U_f = M_f * a_f
     rho_f = mdot_f / (U_f * A_f_tot)
     gas.TDX = T_f, rho_f, X_f
-    P_f = gas.P
-    H_f = gas.enthalpy_mass
 
     # Compute the estimated temperature of the mixture
     # (Pressure will change but this doesn't affect the temperature)
@@ -189,14 +199,18 @@ def fuel_props_from_phi(phi_gl):
 
     return rho_f, U_f, T_f
 
+
 eps_t = 1.0e-6
 t_phi_gl_schedule = np.array(
-    [[ 0.0    , 0.0 ],
-     [ 0.1*tau, 0.0 ],
-     [ 8.0*tau, 0.35],
-     [10.0*tau, 0.35],
-     [14.0*tau, 0.6 ],
-     [16.0*tau, 0.6 ]])
+    [
+        [0.0, 0.0],
+        [0.1 * tau, 0.0],
+        [8.0 * tau, 0.35],
+        [10.0 * tau, 0.35],
+        [14.0 * tau, 0.6],
+        [16.0 * tau, 0.6],
+    ]
+)
 # t_phi_gl_schedule = np.array(
 #     [[ 0.0,           0.0 ],
 #      [ 0.1*tau-eps_t, 0.0 ],
@@ -226,8 +240,12 @@ h[x >= L_const] = h_const + (x[x >= L_const] - L_const) * np.tan(theta_exhaust)
 A = h * w
 lnA = np.log(A)
 dlnAdx_data = np.gradient(lnA, x)
-dlnAdx_interp = interpolate.interp1d(x, dlnAdx_data, kind='cubic')
-dlnAdx = lambda x, t : dlnAdx_interp(x)
+dlnAdx_interp = interpolate.interp1d(x, dlnAdx_data, kind="cubic")
+
+
+def dlnAdx(x, t):
+    return dlnAdx_interp(x)
+
 
 # PDF sampling parameters
 dx_Z_pdf = 5.0e-3
@@ -241,7 +259,7 @@ initState = gas_init, U_in
 
 # Define the boundary conditions
 BC_inlet = gas_init.density, U_in, gas_init.P, (0.0, 0.0)
-BC_outlet = 'outflow'
+BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
 # Load the FPV table
@@ -250,16 +268,30 @@ fpv_table = FPVTable(table_file)
 # #################################################################
 
 # Build the injector model
-jic = JICModel(gas, "H2",
-               x, x_inj, L_const, w, h[0], N_f, 2*r_f,
-               t_f, rho_f, U_f, T_f,
-               rho_in, U_in, T_in,
-               alpha=1e6,
-               fpv_table=fpv_table,
-               load_Z_3D=True,
-               load_Z_avg_var_profiles=True,
-               load_chemical_sources=True,
-               load_MIB_profile=False)
+jic = JICModel(
+    gas,
+    "H2",
+    x,
+    x_inj,
+    L_const,
+    w,
+    h[0],
+    N_f,
+    2 * r_f,
+    t_f,
+    rho_f,
+    U_f,
+    T_f,
+    rho_in,
+    U_in,
+    T_in,
+    alpha=1e6,
+    fpv_table=fpv_table,
+    load_Z_3D=(datadir / "Z_3D.npy").exists(),
+    load_Z_avg_var_profiles=(datadir / "Z_var_profile.npy").exists(),
+    load_chemical_sources=(datadir / "L_probe.npy").exists(),
+    load_MIB_profile=(datadir / "C_profile_MIB.npy").exists(),
+)
 
 ###################################################################
 
@@ -344,7 +376,7 @@ jic = JICModel(gas, "H2",
 #     # Plot, mapping color to x coordinate
 #     ax.plot(Z_plot, Z_pdf_i(Z_plot), c=plt.cm.viridis(i_x / (len(x) - 1)))
 #     fig.savefig(os.path.join(figdir, "Z_pdf.png"), bbox_inches='tight', dpi=300)
-    
+
 # for i_x in range(i_last_const, len(x)):
 #     Z_pdf.append(Z_pdf[i_last_const-1])
 #     Z_pdf_samples.append(Z_pdf_samples[i_last_const-1])
@@ -383,26 +415,28 @@ jic = JICModel(gas, "H2",
 ###################################################################
 
 # Initialize and run the simulation
-ss = stanScram(gas,
-               h = h,
-               w = w,
-               dlnAdx = dlnAdx,
-               Tw = 300.0,
-               includeBoundaryLayerTerms = True,
-               initialization = ("constant", initState, x),
-               boundaryConditions = BCs,
-               sourceTerms = None,
-               injector = jic,
-               ox_def = X_ox,
-               fuel_def = X_f,
-               prog_def = {"H2O" : 1.0},
-               cfl = 0.5,
-               physics = "FPV",
-               fpv_table = fpv_table,
-               reacting = True,
-               includeDiffusion = False,
-               outputEvery = 10,
-               plotStateInterval = 10)
+ss = stanScram(
+    gas,
+    h=h,
+    w=w,
+    dlnAdx=dlnAdx,
+    Tw=300.0,
+    includeBoundaryLayerTerms=True,
+    initialization=("constant", initState, x),
+    boundaryConditions=BCs,
+    sourceTerms=None,
+    injector=jic,
+    ox_def=X_ox,
+    fuel_def=X_f,
+    prog_def={"H2O": 1.0},
+    cfl=0.5,
+    physics="FPV",
+    fpv_table=fpv_table,
+    reacting=True,
+    includeDiffusion=False,
+    outputEvery=10,
+    plotStateInterval=10,
+)
 ss.addXTDiagram("density", skipSteps=10)
 ss.addXTDiagram("velocity", skipSteps=10)
 ss.addXTDiagram("pressure", skipSteps=10)
@@ -413,4 +447,4 @@ ss.addXTDiagram("mach", skipSteps=10)
 ss.advanceSimulation(t_f[-1])
 ss.plotXTDiagrams(figdir=figdir)
 
-import code; code.interact(local=locals())
+code.interact(local=locals())

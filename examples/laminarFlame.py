@@ -1,134 +1,164 @@
-#!/usr/bin/env python2
-# -*- coding: utf-8 -*-
-'''
-    Copyright 2017 Kevin Grogan
-    Copyright 2024 Matthew Bonanni
-    
-    This file is part of StanScram.
-    
-    StanScram is free software: you can redistribute it and/or modify
-    it under the terms of the GNU Lesser General Public License as published by
-    the Free Software Foundation, either version 3 of the License.
-    
-    StanScram is distributed in the hope that it will be useful,
-    but WITHOUT ANY WARRANTY; without even the implied warranty of
-    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-    GNU Lesser General Public License for more details.
-    
-    You should have received a copy of the GNU Lesser General Public License
-    along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
-'''
-import os
-from typing import Optional
+"""
+Copyright 2017 Kevin Grogan
+Copyright 2024 Matthew Bonanni
 
-from StanScram.stanScram import stanScram
-import numpy as np
-import matplotlib as mpl
-from matplotlib import pyplot as plt
+This file is part of StanScram.
+
+StanScram is free software: you can redistribute it and/or modify
+it under the terms of the GNU Lesser General Public License as published by
+the Free Software Foundation, either version 3 of the License.
+
+StanScram is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU Lesser General Public License for more details.
+
+You should have received a copy of the GNU Lesser General Public License
+along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
+"""
+
+from __future__ import annotations
+
 import time
+from pathlib import Path
+
 import cantera as ct
+import matplotlib as mpl
+import numpy as np
+from matplotlib import pyplot as plt
+
+from stanscram.components.combustor import stanScram
 
 
-def main(mech_filename: str = "data/mechanisms/Hong.xml",
-         show_results: bool = True,
-         results_location: Optional[str] = None) -> None:
-    #user parameters
-    TU=300.0
+def main(
+    mech_filename: str = "ohn.yaml",
+    show_results: bool = False,
+    results_location: str | None = ".",
+) -> None:
+    # user parameters
+    TU = 300.0
     p = 1e5
-    estFlameThickness=1e-2
-    ntFlowThrough=.1
-    fontsize=12
-    f = 0.1 #factor to reduce Cantera domain
+    estFlameThickness = 1e-2
+    ntFlowThrough = 0.1
+    fontsize = 12
+    f = 0.1  # factor to reduce Cantera domain
 
-
-    #find the initial state of the fluids
+    # find the initial state of the fluids
     gas = ct.Solution(mech_filename)
-    unburnedState = TU,p,"H2:2,O2:1,N2:3.76"
+    unburnedState = TU, p, "H2:2,O2:1,N2:3.76"
     gas.TPX = unburnedState
 
-    #get the flame thickness
-    _, flame = flameSpeed(gas,estFlameThickness,returnFlame=True)
-    TU, TB = flame.T[0] ,flame.T[-1]
-    flameThickness=(TB-TU)/max(np.gradient(flame.T,flame.grid))
+    # get the flame thickness
+    _, flame = flameSpeed(gas, estFlameThickness, returnFlame=True)
+    TU, TB = flame.T[0], flame.T[-1]
+    flameThickness = (TB - TU) / max(np.gradient(flame.T, flame.grid))
 
-    #get flame parameters
+    # get flame parameters
     gasUnburned = ct.Solution(mech_filename)
-    gasUnburned.TPY = flame.T[0], flame.P, flame.Y[:,0]
+    gasUnburned.TPY = flame.T[0], flame.P, flame.Y[:, 0]
     uUnburned = flame.velocity[0]
     unburnedState = gasUnburned, uUnburned
     gasBurned = ct.Solution(mech_filename)
-    gasBurned.TPY = flame.T[-1], flame.P, flame.Y[:,-1]
+    gasBurned.TPY = flame.T[-1], flame.P, flame.Y[:, -1]
     uBurned = flame.velocity[-1]
     burnedState = gasBurned, uBurned
 
-
-    #set up grid
+    # set up grid
     nX = flame.grid.shape[0]
-    xCenter = flame.grid[np.argmax(np.gradient(flame.T,flame.grid))]
+    xCenter = flame.grid[np.argmax(np.gradient(flame.T, flame.grid))]
     L = flame.grid[-1] - flame.grid[0]
-    xUpper, xLower = xCenter +L*f, xCenter-L*f
+    xUpper, xLower = xCenter + L * f, xCenter - L * f
 
-    geometry=(nX,xLower,xUpper,(xUpper+xLower)/2.0)
-    boundaryConditions = (gasUnburned.density,uUnburned,None,gasUnburned.Y),(None,None,gasBurned.P,None)
-    ss = stanScram(gas,initializeRiemannProblem=(unburnedState,burnedState,geometry),
-                   boundaryConditions=boundaryConditions,
-                   cfl=.9,
-                   reacting=True,
-                   includeDiffusion=True,
-                   outputEvery=10)
+    geometry = (nX, xLower, xUpper, (xUpper + xLower) / 2.0)
+    boundaryConditions = (
+        (gasUnburned.density, uUnburned, None, gasUnburned.Y),
+        (None, None, gasBurned.P, None),
+    )
+    ss = stanScram(
+        gas,
+        initialization=("Riemann", unburnedState, burnedState, geometry),
+        physics="FRC",
+        boundaryConditions=boundaryConditions,
+        cfl=0.9,
+        reacting=True,
+        includeDiffusion=True,
+        outputEvery=10,
+    )
 
-    #interpolate flame solution
-    ss.r = np.interp(ss.x,flame.grid,flame.density)
-    ss.u = np.interp(ss.x,flame.grid,flame.velocity)
+    # interpolate flame solution
+    ss.r = np.interp(ss.x, flame.grid, flame.density)
+    ss.u = np.interp(ss.x, flame.grid, flame.velocity)
     ss.p[:] = flame.P
     for iSp in range(gas.n_species):
-        ss.Y[:,iSp] = np.interp(ss.x,flame.grid,flame.Y[iSp,:])
-    T = ss.thermoTable.getTemperature(ss.r,ss.p,ss.Y)
-    ss.gamma = ss.thermoTable.getGamma(T,ss.Y)
-    #calculate the final time
-    tFinal = ntFlowThrough*(xUpper-xLower)/(uUnburned+uBurned)*2.0
+        ss.Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
+    T = ss.thermoTable.getTemperature(ss.r, ss.p, ss.Y)
+    ss.gamma = ss.thermoTable.getGamma(T, ss.Y)
+    # calculate the final time
+    tFinal = ntFlowThrough * (xUpper - xLower) / (uUnburned + uBurned) * 2.0
 
-    #Solve
+    # Solve
     t0 = time.perf_counter()
     ss.advanceSimulation(tFinal)
     t1 = time.perf_counter()
-    print("The process took ", t1-t0)
+    print("The process took ", t1 - t0)
 
-    #plot setup
+    # plot setup
     plt.close("all")
-    font = {'family':'serif', 'serif': ['computer modern roman']}
-    plt.rc('font',**font)
-    mpl.rcParams['font.size']=fontsize
-    plt.rc('text',usetex=True)
-    #plot
-    plt.plot((flame.grid-xCenter)/flameThickness,flame.T/flame.T[-1],'r',label="$T/T_\mathrm{F}$")
-    T = ss.thermoTable.getTemperature(ss.r,ss.p,ss.Y)
-    plt.plot((ss.x-xCenter)/flameThickness,T/flame.T[-1],'r--s')
+    font = {"family": "serif", "serif": ["computer modern roman"]}
+    plt.rc("font", **font)
+    mpl.rcParams["font.size"] = fontsize
+    plt.rc("text", usetex=True)
+    # plot
+    plt.plot(
+        (flame.grid - xCenter) / flameThickness,
+        flame.T / flame.T[-1],
+        "r",
+        label=r"$T/T_\mathrm{F}$",
+    )
+    T = ss.thermoTable.getTemperature(ss.r, ss.p, ss.Y)
+    plt.plot((ss.x - xCenter) / flameThickness, T / flame.T[-1], "r--s")
     iOH = gas.species_index("OH")
-    plt.plot((flame.grid-xCenter)/flameThickness,flame.Y[iOH,:]*10,'k',label="$Y_\mathrm{OH}\\times 10$")
-    plt.plot((ss.x-xCenter)/flameThickness,ss.Y[:,iOH]*10,'k--s')
+    plt.plot(
+        (flame.grid - xCenter) / flameThickness,
+        flame.Y[iOH, :] * 10,
+        "k",
+        label=r"$Y_\mathrm{OH}\times 10$",
+    )
+    plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iOH] * 10, "k--s")
     iO2 = gas.species_index("O2")
-    plt.plot((flame.grid-xCenter)/flameThickness,flame.Y[iO2,:],'g',label="$Y_\mathrm{O_2}$")
-    plt.plot((ss.x-xCenter)/flameThickness,ss.Y[:,iO2],'g--s')
+    plt.plot(
+        (flame.grid - xCenter) / flameThickness,
+        flame.Y[iO2, :],
+        "g",
+        label=r"$Y_\mathrm{O_2}$",
+    )
+    plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iO2], "g--s")
     iH2 = gas.species_index("H2")
-    plt.plot((flame.grid-xCenter)/flameThickness,flame.Y[iH2,:],'b',label="$Y_\mathrm{H_2}$")
-    plt.plot((ss.x-xCenter)/flameThickness,ss.Y[:,iH2],'b--s')
-    plt.xlabel("$x/\delta_\mathrm{F}$")
+    plt.plot(
+        (flame.grid - xCenter) / flameThickness,
+        flame.Y[iH2, :],
+        "b",
+        label=r"$Y_\mathrm{H_2}$",
+    )
+    plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iH2], "b--s")
+    plt.xlabel(r"$x/\delta_\mathrm{F}$")
     plt.legend(loc="best")
     if show_results:
         plt.show()
 
     if results_location is not None:
+        results_location = Path(results_location)
+        results_location.mkdir(parents=True, exist_ok=True)
         np.savez(
-            os.path.join(results_location, "laminarFlame.npz"),
+            results_location / "laminarFlame.npz",
             position=ss.x,
-            temperature=ss.thermoTable.getTemperature(ss.r,ss.p,ss.Y),
+            temperature=ss.thermoTable.getTemperature(ss.r, ss.p, ss.Y),
         )
-        plt.savefig(os.path.join(results_location, "laminarFlame.png"))
+        plt.savefig(results_location / "laminarFlame.pdf")
 
 
-def flameSpeed(gas,flameThickness,returnFlame=False):
-    '''
+def flameSpeed(gas, flameThickness, returnFlame=False):
+    """
     Function flameSpeed
     ======================================================================
     This function returns the flame speed for a gas. The cantera implementation
@@ -136,29 +166,28 @@ def flameSpeed(gas,flameThickness,returnFlame=False):
         gas: cantera phase object at the desired state
         flameThickness: a guess on the flame thickness
         return: Sl
-    '''
-    #solution parameters
-    width = 5.0*flameThickness  # m
+    """
+    # solution parameters
+    width = 5.0 * flameThickness  # m
     loglevel = 1  # amount of diagnostic output (0 to 8)
     # Flame object
     try:
         f = ct.FreeFlame(gas, width=width)
-    except:
+    except Exception:
         f = ct.FreeFlame(gas)
     f.set_refine_criteria(ratio=3, slope=0.06, curve=0.12)
-    f.show_solution()
-    f.transport_model = 'Mix'
+    f.show()  # f.show_solution()
+    f.transport_model = "Mix"
     try:
         f.solve(loglevel=loglevel, auto=True)
-    except:
+    except Exception:
         f.solve(loglevel=loglevel)
-    f.show_solution()
-    print('mixture-averaged flamespeed = {0:7f} m/s'.format(f.velocity[0]))
-    #f.show_solution()
+    f.show()  # f.show_solution()
+    print(f"mixture-averaged flamespeed = {f.velocity[0]:7f} m/s")
+    # f.show_solution()
     if returnFlame:
         return f.velocity[0], f
-    else:
-        return f.velocity[0]
+    return f.velocity[0]
 
 
 if __name__ == "__main__":
