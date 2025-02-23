@@ -20,7 +20,6 @@ parts/
 sdist/
 var/
 wheels/
-pip-wheel-metadata/
 share/python-wheels/
 *.egg-info/
 .installed.cfg
@@ -50,6 +49,7 @@ coverage.xml
 *.py,cover
 .hypothesis/
 .pytest_cache/
+cover/
 
 # Translations
 *.mo
@@ -72,6 +72,7 @@ instance/
 docs/_build/
 
 # PyBuilder
+.pybuilder/
 target/
 
 # Jupyter Notebook
@@ -128,11 +129,28 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# PyCharm
-.idea/
+# pytype static type analyzer
+.pytype/
 
-# Mac
+# Cython debug symbols
+cython_debug/
+
+# setuptools_scm
+src/*/_version.py
+
+
+# ruff
+.ruff_cache/
+
+# OS specific stuff
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# examples (for now)
-examples/
+# Common editor files
+*~
+*.swp
