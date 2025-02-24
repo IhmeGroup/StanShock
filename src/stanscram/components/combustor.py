@@ -129,11 +129,11 @@ class stanScram:
         if self.initialization is None:
             msg = "No initialization method selected"
             raise Exception(msg)
-        if self.initialization[0] == "constant":
+        if self.initialization[0].lower() == "constant":
             initializeConstant(self, *self.initialization[1:])
-        elif self.initialization[0] == "riemann":
+        elif self.initialization[0].lower() == "riemann":
             initializeRiemannProblem(self, *self.initialization[1:])
-        elif self.initialization[0] == "diffuse_interface":
+        elif self.initialization[0].lower() == "diffuse_interface":
             initializeDiffuseInterface(self, *self.initialization[1:])
         if (
             not self.n

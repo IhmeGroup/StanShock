@@ -73,6 +73,7 @@ scripts.test = "pytest {args}"
 
 
 [tool.uv]
+reinstall-package = ["stanscram"]
 dev-dependencies = [
   "stanscram[test]",
 ]

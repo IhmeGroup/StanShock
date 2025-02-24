@@ -169,22 +169,21 @@ def flameSpeed(gas, flameThickness, returnFlame=False):
     """
     # solution parameters
     width = 5.0 * flameThickness  # m
-    loglevel = 1  # amount of diagnostic output (0 to 8)
+    loglevel = 0  # amount of diagnostic output (0 to 8)
     # Flame object
     try:
         f = ct.FreeFlame(gas, width=width)
     except Exception:
         f = ct.FreeFlame(gas)
     f.set_refine_criteria(ratio=3, slope=0.06, curve=0.12)
-    f.show()  # f.show_solution()
-    f.transport_model = "Mix"
+    # f.show()
+    f.transport_model = "mixture-averaged"
     try:
         f.solve(loglevel=loglevel, auto=True)
     except Exception:
         f.solve(loglevel=loglevel)
-    f.show()  # f.show_solution()
+    # f.show()
     print(f"mixture-averaged flamespeed = {f.velocity[0]:7f} m/s")
-    # f.show_solution()
     if returnFlame:
         return f.velocity[0], f
     return f.velocity[0]

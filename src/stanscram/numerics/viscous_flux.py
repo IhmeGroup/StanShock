@@ -42,7 +42,7 @@ def viscousFluxFunction(domain, rLR, uLR, pLR, YLR):
     nT = domain.n + 2
     T = np.zeros(nT)
     T[:-1] = domain.getTemperature(rLR[0, :], pLR[0, :], YLR[0, :, :])
-    T[-1] = domain.getTemperature(
+    T[[-1]] = domain.getTemperature(
         np.array([rLR[1, -1]]),
         np.array([pLR[1, -1]]),
         np.array([YLR[1, -1, :]]).reshape((1, -1)),

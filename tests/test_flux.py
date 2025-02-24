@@ -1,8 +1,10 @@
+from __future__ import annotations
+
 import unittest
 
 import numpy as np
 
-from StanScram.stanScram import LF, HLLC
+from stanscram.numerics.inviscid_flux import HLLC, LF
 
 LF = LF.__wrapped__  # unwrap for coverage testing
 HLLC = HLLC.__wrapped__
@@ -20,11 +22,11 @@ class TestFlux(unittest.TestCase):
             uLR=np.array([[u], [u]]),
             pLR=np.array([[p], [p]]),
             YLR=np.array([[[Y]], [[Y]]]),
-            gamma=np.array([gamma])
+            gamma=np.array([gamma]),
         )[0]
-        H = gamma*p/(gamma-1.0) + 0.5*r*u**2.0
-        expected_flux = np.array([r*u, r*u**2+p, H*u, r*Y*u])
-        self.assertTrue(np.allclose(flux, expected_flux))
+        H = gamma * p / (gamma - 1.0) + 0.5 * r * u**2.0
+        expected_flux = np.array([r * u, r * u**2 + p, H * u, r * Y * u])
+        assert np.allclose(flux, expected_flux)
 
     def test_hllc_predicts_constant_flux(self):
         r = 2.0
@@ -40,13 +42,15 @@ class TestFlux(unittest.TestCase):
             uLR=u * np.ones((num_sides, num_faces)),
             pLR=p * np.ones((num_sides, num_faces)),
             YLR=Y * np.ones((num_sides, num_faces, num_species)),
-            gamma=gamma * np.ones(num_faces)
+            gamma=gamma * np.ones(num_faces),
         )
-        H = gamma*p/(gamma-1.0) + 0.5*r*u**2.0
-        expected_flux = np.array([r*u, r*u**2+p, H*u, r*Y*u])[np.newaxis, ...]
+        H = gamma * p / (gamma - 1.0) + 0.5 * r * u**2.0
+        expected_flux = np.array([r * u, r * u**2 + p, H * u, r * Y * u])[
+            np.newaxis, ...
+        ]
         expected_flux = np.repeat(expected_flux, num_faces, axis=0)
-        self.assertTrue(np.allclose(flux, expected_flux))
+        assert np.allclose(flux, expected_flux)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     unittest.main()
