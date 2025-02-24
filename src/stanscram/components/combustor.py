@@ -430,40 +430,38 @@ class stanScram:
         """
         self.Z_weights = np.zeros(self.gas.n_species)
         self.Z_offset = 0.0
+        denom = 0.0
 
-        i_C = self.gas.element_index("C")
-        i_H = self.gas.element_index("H")
-        i_O = self.gas.element_index("O")
+        # Set the values for C, H, and O:
+        stoich = {
+            "C": 2.0,
+            "H": 0.5,
+            "O": -1.0,
+        }
 
-        W_C = self.gas.atomic_weight(i_C)
-        W_H = self.gas.atomic_weight(i_H)
-        W_O = self.gas.atomic_weight(i_O)
+        for element in self.gas.element_names:
+            if element not in stoich:
+                continue
+            C = stoich[element]
 
-        self.gas.X = self.ox_def
-        Yo_C = self.gas.elemental_mass_fraction("C")
-        Yo_H = self.gas.elemental_mass_fraction("H")
-        Yo_O = self.gas.elemental_mass_fraction("O")
+            idx_element = self.gas.element_index(element)
+            W = self.gas.atomic_weight(element)
 
-        self.gas.X = self.fuel_def
-        Yf_C = self.gas.elemental_mass_fraction("C")
-        Yf_H = self.gas.elemental_mass_fraction("H")
-        Yf_O = self.gas.elemental_mass_fraction("O")
+            self.gas.X = self.ox_def
+            Yo = self.gas.elemental_mass_fraction(element)
 
-        s = 1.0 / (
-            2.0 * (Yf_C - Yo_C) / W_C
-            + 0.5 * (Yf_H - Yo_H) / W_H
-            - 1.0 * (Yf_O - Yo_O) / W_O
-        )
-        for k in range(self.gas.n_species):
-            self.Z_weights[k] = (
-                2.0 * self.gas.n_atoms(k, i_C)
-                + 0.5 * self.gas.n_atoms(k, i_H)
-                - 1.0 * self.gas.n_atoms(k, i_O)
-            ) / self.gas.molecular_weights[k]
-        self.Z_offset = -(2.0 * Yo_C / W_C + 0.5 * Yo_H / W_H - 1.0 * Yo_O / W_O)
+            self.gas.X = self.fuel_def
+            Yf = self.gas.elemental_mass_fraction(element)
 
-        self.Z_weights *= s
-        self.Z_offset *= s
+            denom += C * (Yf - Yo) / W
+
+            for k in range(self.gas.n_species):
+                self.Z_weights[k] += C * self.gas.n_atoms(k, idx_element)
+
+            self.Z_offset -= C * Yo / W
+
+        self.Z_weights /= denom * self.gas.molecular_weights
+        self.Z_offset /= denom
 
     def ZBilger(self, Y):
         """
