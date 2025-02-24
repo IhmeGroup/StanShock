@@ -31,10 +31,8 @@ double3D = double[:, :, :]
 
 
 @njit(double1D(double2D, double1D))
-def getR(Y, molecularWeights):
+def get_specific_gas_constants_compiled(Y, molecularWeights):
     """
-    function: getR_python
-    --------------------------------------------------------------------------
     Function used by the thermoTable class to find the gas constant. This
     function is compiled for speed-up.
         inputs:
@@ -58,10 +56,8 @@ def getR(Y, molecularWeights):
 
 
 @njit(double1D(double1D, double2D, double1D, double2D, double2D))
-def getCp(T, Y, TTable, a, b):
+def get_cp_compiled(T, Y, TTable, a, b):
     """
-    function: getCp_python
-    --------------------------------------------------------------------------
     Function used by the thermoTable class to find the constant pressure
     specific heats. This function is compiled for speed-up.
         inputs:
@@ -100,18 +96,14 @@ def getCp(T, Y, TTable, a, b):
     return cp
 
 
-class thermoTable:
+class ThermoTable:
     """
-    Class: thermoTable
-    --------------------------------------------------------------------------
     This is a class defined to encapsulate the temperature table with the
     relevant methods
     """
 
     def __init__(self, gas: ct.Solution):
         """
-        Method: __init__
-        --------------------------------------------------------------------------
         This method initializes the temperature table. The table uses a
         piecewise linear function for the constant pressure specific heat
         coefficients. The coefficients are selected to retain the exact
@@ -148,22 +140,18 @@ class thermoTable:
                 cpk = self.a[kT, kSp] * (Tkp1) + self.b[kT, kSp]
                 hk = hkp1
 
-    def getR(self, Y):
+    def get_specific_gas_constants(self, Y):
         """
-        Method: getR
-        --------------------------------------------------------------------------
         This method computes the mixture-specific gas constat
             inputs:
                 Y: matrix of mass fractions [n,nSp]
             outputs:
                 R: vector of mixture-specific gas constants [n]
         """
-        return getR(Y, self.molecularWeights)
+        return get_specific_gas_constants_compiled(Y, self.molecularWeights)
 
-    def getCp(self, T, Y):
+    def get_cp(self, T, Y):
         """
-        Method: getCp
-        --------------------------------------------------------------------------
         This method computes the constant pressure specific heat as determined
         by Billet and Abgrall (2003) for the double flux method.
             inputs:
@@ -172,12 +160,10 @@ class thermoTable:
             outputs:
                 cp: vector of constant pressure specific heats
         """
-        return getCp(T, Y, self.T, self.a, self.b)
+        return get_cp_compiled(T, Y, self.T, self.a, self.b)
 
-    def getH0(self, T, Y):
+    def get_frozen_enthalpy(self, T, Y):
         """
-        Method: getH0
-        --------------------------------------------------------------------------
         This method computes the enthalpy according to Billet and Abgrall (2003).
         This is the enthalpy that is frozen over the time step
             inputs:
@@ -197,10 +183,8 @@ class thermoTable:
             h0[k] = np.dot(Y[k, :], self.h[index] - bbar * self.T[index])
         return h0
 
-    def getGamma(self, T, Y):
+    def get_gamma(self, T, Y):
         """
-        Method: getGamma
-        --------------------------------------------------------------------------
         This method computes the specific heat ratio, gamma.
             inputs:
                 T: vector of temperatures [n]
@@ -208,14 +192,12 @@ class thermoTable:
             outputs:
                 gamma: vector of specific heat ratios
         """
-        cp = self.getCp(T, Y)
-        R = self.getR(Y)
+        cp = self.get_cp(T, Y)
+        R = self.get_specific_gas_constants(Y)
         return cp / (cp - R)
 
-    def getTemperature(self, r, p, Y):
+    def get_temperature(self, r, p, Y):
         """
-        Method: getTemperature
-        --------------------------------------------------------------------------
         This method applies the ideal gas law to compute the temperature
             inputs:
                 r: vector of densities [n]
@@ -224,5 +206,5 @@ class thermoTable:
             outputs:
                 T: vector of temperatures
         """
-        R = self.getR(Y)
+        R = self.get_specific_gas_constants(Y)
         return p / (r * R)

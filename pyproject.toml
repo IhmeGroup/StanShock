@@ -37,6 +37,7 @@ dependencies = [
   "numba",
   "cantera",
   "tqdm",
+  "h5py",
 ]
 
 [project.optional-dependencies]

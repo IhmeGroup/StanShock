@@ -27,7 +27,7 @@ import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
-from stanscram.components.combustor import stanScram
+from stanscram.components.combustor import Combustor
 
 
 def main(
@@ -74,7 +74,7 @@ def main(
         (gasUnburned.density, uUnburned, None, gasUnburned.Y),
         (None, None, gasBurned.P, None),
     )
-    ss = stanScram(
+    ss = Combustor(
         gas,
         initialization=("Riemann", unburnedState, burnedState, geometry),
         physics="FRC",
@@ -91,14 +91,14 @@ def main(
     ss.p[:] = flame.P
     for iSp in range(gas.n_species):
         ss.Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
-    T = ss.thermoTable.getTemperature(ss.r, ss.p, ss.Y)
-    ss.gamma = ss.thermoTable.getGamma(T, ss.Y)
+    T = ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y)
+    ss.gamma = ss.thermoTable.get_gamma(T, ss.Y)
     # calculate the final time
     tFinal = ntFlowThrough * (xUpper - xLower) / (uUnburned + uBurned) * 2.0
 
     # Solve
     t0 = time.perf_counter()
-    ss.advanceSimulation(tFinal)
+    ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
     print("The process took ", t1 - t0)
 
@@ -115,7 +115,7 @@ def main(
         "r",
         label=r"$T/T_\mathrm{F}$",
     )
-    T = ss.thermoTable.getTemperature(ss.r, ss.p, ss.Y)
+    T = ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y)
     plt.plot((ss.x - xCenter) / flameThickness, T / flame.T[-1], "r--s")
     iOH = gas.species_index("OH")
     plt.plot(
@@ -152,7 +152,7 @@ def main(
         np.savez(
             results_location / "laminarFlame.npz",
             position=ss.x,
-            temperature=ss.thermoTable.getTemperature(ss.r, ss.p, ss.Y),
+            temperature=ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y),
         )
         plt.savefig(results_location / "laminarFlame.pdf")
 

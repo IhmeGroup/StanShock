@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 from numba import double, njit
 
-# Global variables (paramters) used by the solver
+# Global variables (parameters) used by the solver
 mn = 3  # number of 1D Euler equations
 
 # Type signatures for numba
@@ -33,10 +33,8 @@ double3D = double[:, :, :]
 
 
 @njit(double2D(double2D, double2D, double2D, double3D, double1D))
-def LF(rLR, uLR, pLR, YLR, gamma):
+def lax_friedrichs_flux(rLR, uLR, pLR, YLR, gamma):
     """
-    Method: LF
-    ------------------------------------------------------------.----------
     This method computes the flux at each interface
         inputs:
             rLR=array containing left and right density states [nLR,nFaces]
@@ -98,10 +96,8 @@ def LF(rLR, uLR, pLR, YLR, gamma):
 
 
 @njit(double2D(double2D, double2D, double2D, double3D, double1D))
-def HLLC(rLR, uLR, pLR, YLR, gamma):
+def hllc_flux(rLR, uLR, pLR, YLR, gamma):
     """
-    Method: HLLC
-    ------------------------------------------------------------.----------
     This method computes the flux at each interface
         inputs:
             rLR=array containing left and right density states [nLR,nFaces]

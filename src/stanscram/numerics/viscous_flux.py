@@ -21,13 +21,12 @@ from __future__ import annotations
 
 import numpy as np
 
-# Global variables (paramters) used by the solver
+# Global variables (parameters) used by the solver
 mn = 3  # number of 1D Euler equations
 
 
-def viscousFluxFunction(domain, rLR, uLR, pLR, YLR):
+def viscous_flux(domain, rLR, uLR, pLR, YLR):
     """
-    ------------------------------------------------------------.----------
     This method computes the viscous flux at each interface
         inputs:
             rLR=array containing left and right density states [nLR,nFaces]
@@ -41,8 +40,8 @@ def viscousFluxFunction(domain, rLR, uLR, pLR, YLR):
     # get the temperature, pressure, and composition for each cell (including the two ghosts)
     nT = domain.n + 2
     T = np.zeros(nT)
-    T[:-1] = domain.getTemperature(rLR[0, :], pLR[0, :], YLR[0, :, :])
-    T[[-1]] = domain.getTemperature(
+    T[:-1] = domain.get_temperature(rLR[0, :], pLR[0, :], YLR[0, :, :])
+    T[[-1]] = domain.get_temperature(
         np.array([rLR[1, -1]]),
         np.array([pLR[1, -1]]),
         np.array([YLR[1, -1, :]]).reshape((1, -1)),
@@ -52,9 +51,9 @@ def viscousFluxFunction(domain, rLR, uLR, pLR, YLR):
     F[1:-1] = domain.F
     F[0], F[-1] = domain.F[0], domain.F[-1]  # no gradient in F at boundary
     Y[:-1, :], Y[-1, :] = YLR[0, :, :], YLR[1, -1, :]
-    mu = domain.getMu(T, p, Y)
-    cp = domain.getCp(T, Y)
-    k = domain.getLoc(T, p, Y) * cp * F
+    mu = domain.get_mu(T, p, Y)
+    cp = domain.get_cp(T, Y)
+    k = domain.get_lambda_over_cv(T, p, Y) * cp * F
     diff = np.zeros((nT, domain.n_scalars))
     if domain.physics == "FPV":
         diff_ = k / (domain.r * cp)

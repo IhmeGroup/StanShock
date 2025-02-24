@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import interpolate
 
-from stanscram.components.combustor import stanScram
+from stanscram.components.combustor import Combustor
 
 plt.rcParams.update(
     {
@@ -164,7 +164,7 @@ def sourceTerms(rho, rhou, rhoE, rhoY, gamma, x, t):
 
 
 # Initialize and run the simulation
-ss = stanScram(
+ss = Combustor(
     gas,
     dlnAdx=dlnAdx,
     initialization=("constant", initState, x),
@@ -176,7 +176,7 @@ ss = stanScram(
     outputEvery=10,
     physics="FRC",
 )
-ss.advanceSimulation(t_end)
+ss.advance_simulation(t_end)
 
 
 # Plot the results

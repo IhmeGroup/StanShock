@@ -23,7 +23,7 @@ from __future__ import annotations
 import numpy as np
 from numba import double, njit
 
-# Global variables (paramters) used by the solver
+# Global variables (parameters) used by the solver
 mt = 3  # number of ghost nodes
 mn = 3  # number of 1D Euler equations
 
@@ -34,10 +34,8 @@ double3D = double[:, :, :]
 
 
 @njit(double3D(double1D, double1D, double1D, double2D, double1D))
-def WENO5(r, u, p, Y, gamma):
+def weno5(r, u, p, Y, gamma):
     """
-    Method: WENO5
-    ------------------------------------------------------------.----------
     This method implements the fifth-order WENO interpolation. This method
     follows that of Houim and Kuo (JCP2011)
         inputs:

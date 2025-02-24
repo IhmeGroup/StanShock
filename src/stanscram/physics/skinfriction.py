@@ -23,10 +23,8 @@ import numpy as np
 from scipy.optimize import root
 
 
-class skinFriction:
+class SkinFriction:
     """
-    Functor: skinFriction
-    ---------------------------------------------------------------------------
     This functor computes the skin friction function. Since the skin friction
     function is partially implicit, it interpolates from a table of values at
     outset.

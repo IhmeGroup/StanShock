@@ -25,8 +25,6 @@ import numpy as np
 
 class XTDiagram:
     """
-    Class: __XTDiagram
-    --------------------------------------------------------------------------
     This class is used to store the relevant data for the XT diagram
         inputs:
             domain=component to be plotted
@@ -57,8 +55,6 @@ class XTDiagram:
 
     def update(self, domain):
         """
-        Method: update
-        --------------------------------------------------------------------------
         This method updates the XT diagram.
             inputs:
                 XTDiagram: the XTDiagram object
@@ -81,18 +77,14 @@ class XTDiagram:
             self.variable.append(np.interp(self.x, domain.x, domain.gamma))
         elif variable in scalarNames:
             scalarIndex = scalarNames.index(variable)
-            self.variable.append(
-                np.interp(self.x, domain.x, domain.Y[:, scalarIndex])
-            )
+            self.variable.append(np.interp(self.x, domain.x, domain.Y[:, scalarIndex]))
         else:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
         self.t.append(domain.t)
 
-    def plotXTDiagram(self, limits=None):
+    def plot(self, limits=None):
         """
-        Method: plotXTDiagram
-        --------------------------------------------------------------------------
         This method creates a contour plot of the XTDiagram data
             inputs:
                 XTDiagram=XTDiagram object; obtained from the XTDiagrams dictionary
@@ -130,6 +122,7 @@ class XTDiagram:
         plt.axis([min(self.x), max(self.x), min(t), max(t)])
         plt.colorbar()
 
+
 def add_h_plot(domain, ax, scale=1.0):
     ax1 = ax.twinx()
     ax1.set_zorder(-np.inf)
@@ -140,7 +133,8 @@ def add_h_plot(domain, ax, scale=1.0):
     ax1.set_ylabel("h [mm]")
     return ax1
 
-def plotState(domain, filename):
+
+def plot_state(domain, filename):
     xscale = 1.0e3
     T = domain.getTemperature(domain.r, domain.p, domain.Y)
 

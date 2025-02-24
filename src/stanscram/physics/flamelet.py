@@ -55,7 +55,7 @@ class FPVTable:
                 )
                 self.variables.append(TableVariable(var, data, self.Z, self.Q, self.L))
 
-    def L_from_C(self, Z, C):
+    def get_normalized_progress_variable(self, Z, C):
         """
         Compute the normalized progress variable value at the given Z and C values.
         """
@@ -90,7 +90,7 @@ class FPVTable:
         T0 = self.lookup("T0", Z, Q, L)
         return gamma0 + ag * (T - T0)
 
-    def get_R(self, Z, Q, L):
+    def get_specific_gas_constant(self, Z, Q, L):
         """
         Compute the gas constant at the given Z, Q, and L values.
         """
@@ -100,7 +100,7 @@ class FPVTable:
         """
         Compute the specific heat at the given Z, Q, L and T values.
         """
-        R = self.get_R(Z, Q, L)
+        R = self.get_specific_gas_constant(Z, Q, L)
         gamma = self.get_gamma(Z, Q, L, T)
         return R * gamma / (gamma - 1)
 
@@ -108,7 +108,7 @@ class FPVTable:
         """
         Compute the specific heat at constant volume at the given Z, Q, and L values.
         """
-        R = self.get_R(Z, Q, L)
+        R = self.get_specific_gas_constant(Z, Q, L)
         gamma = self.get_gamma(Z, Q, L, 0)
         return R / (gamma - 1)
 
@@ -121,7 +121,7 @@ class FPVTable:
         amu = self.lookup("AMU", Z, Q, L)
         return mu0 * (T / T0) ** amu
 
-    def get_loc(self, Z, Q, L, T):
+    def get_thermal_conductivity(self, Z, Q, L, T):
         """
         Compute the thermal conductivity at the given Z, Q, and L values.
         """

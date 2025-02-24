@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 
 import numpy as np
 
-from examples import laminarFlame
+from examples import laminar_flame
 
 
 class TestExamples(unittest.TestCase):
@@ -14,7 +14,7 @@ class TestExamples(unittest.TestCase):
 
     def test_laminar_flame(self):
         with TemporaryDirectory(dir=self._directory_prefix) as temp_dir:
-            laminarFlame.main(show_results=False, results_location=temp_dir)
+            laminar_flame.main(show_results=False, results_location=temp_dir)
             results_filename = Path(temp_dir) / "laminarFlame.npz"
             baseline_filename = self._directory_prefix / "laminarFlame.npz"
             self.assertResultsCloseToBaseline(results_filename, baseline_filename)

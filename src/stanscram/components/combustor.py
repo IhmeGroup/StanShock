@@ -23,31 +23,27 @@ from __future__ import annotations
 import cantera as ct
 import numpy as np
 
-from stanscram.numerics.face_extrapolation import WENO5
-from stanscram.numerics.inviscid_flux import HLLC
-from stanscram.numerics.viscous_flux import viscousFluxFunction
-from stanscram.physics.skinfriction import skinFriction
-from stanscram.physics.thermo.table import thermoTable
+from stanscram.numerics.face_extrapolation import weno5
+from stanscram.numerics.inviscid_flux import hllc_flux
+from stanscram.numerics.viscous_flux import viscous_flux
+from stanscram.physics.skinfriction import SkinFriction
+from stanscram.physics.thermo.table import ThermoTable
 from stanscram.processing.initialize import (
-    initializeConstant,
-    initializeDiffuseInterface,
-    initializeRiemannProblem,
+    initialize_constant,
+    initialize_diffuse_interface,
+    initialize_riemann_problem,
 )
-from stanscram.processing.plot import plotState
+from stanscram.processing.plot import plot_state
 
 
-class stanScram:
+class Combustor:
     """
-    Class: stanScram
-    --------------------------------------------------------------------------
     This is a class defined to encapsulate the data and methods used for the
-    1D gasdynamics solver stanScram.
+    1D gasdynamics solver.
     """
 
     def __init__(self, gas, **kwargs):
         """
-        Method: __init__
-        ----------------------------------------------------------------------
         initialization of the object with default values. The keyword arguments
         allow the user to initialize the state
         """
@@ -86,18 +82,18 @@ class stanScram:
         self.ox_def = None  # oxidizer definition
         self.fuel_def = None  # fuel definition
         self.prog_def = None  # progress variable definition
-        self.fluxFunction = HLLC
+        self.fluxFunction = hllc_flux
         self.initialization = None  # initialization options
         self.probes = []  # list of probe objects
         self.XTDiagrams = []  # list of XT diagram objects
         self.cf = None  # skin friction functor
-        self.thermoTable = thermoTable(gas)  # thermodynamic table object
+        self.thermoTable = ThermoTable(gas)  # thermodynamic table object
         self.optimizationIteration = 0  # counter to keep track of optimization
         self.physics = "FPV"  # flag to determine the physics model
         self.fpv_table = None  # table for FPV model
         self.reacting = False  # flag to solver about whether to solve source terms
         self.inReactingRegion = (
-            lambda x, t: True
+            lambda _x, _t: True
         )  # the reacting region of the shock tube.
         self.includeDiffusion = False  # exclude diffusion
         self.thickening = None  # thickening function
@@ -113,8 +109,8 @@ class stanScram:
                 msg = "FPV table must be defined"
                 raise Exception(msg)
             self.n_scalars = 2
-            self.initZBilger()
-            self.initProg()
+            self.initialize_bilger_mixture_fraction()
+            self.initialize_progress_variable()
         elif self.physics == "FRC":
             if self.injector is not None:
                 msg = "JIC injector model not supported for FRC"
@@ -130,11 +126,11 @@ class stanScram:
             msg = "No initialization method selected"
             raise Exception(msg)
         if self.initialization[0].lower() == "constant":
-            initializeConstant(self, *self.initialization[1:])
+            initialize_constant(self, *self.initialization[1:])
         elif self.initialization[0].lower() == "riemann":
-            initializeRiemannProblem(self, *self.initialization[1:])
+            initialize_riemann_problem(self, *self.initialization[1:])
         elif self.initialization[0].lower() == "diffuse_interface":
-            initializeDiffuseInterface(self, *self.initialization[1:])
+            initialize_diffuse_interface(self, *self.initialization[1:])
         if (
             not self.n
             == len(self.x)
@@ -146,10 +142,8 @@ class stanScram:
             msg = "Initialization Error"
             raise Exception(msg)
 
-    def getCp(self, T, Y):
+    def get_cp(self, T, Y):
         """
-        Method: getCp
-        ----------------------------------------------------------------------
         This method computes the constant pressure specific heat as determined
         by Billet and Abgrall (2003) for the double flux method.
             inputs:
@@ -166,13 +160,11 @@ class stanScram:
             L = self.fpv_table.L_from_C(Z, C)
             cp = self.fpv_table.get_cp(Z, Q, L, T)
         elif self.physics == "FRC":
-            cp = self.thermoTable.getCp(T, Y)
+            cp = self.thermoTable.get_cp(T, Y)
         return cp
 
-    def getGamma(self, T, Y):
+    def get_gamma(self, T, Y):
         """
-        Method: getGamma
-        ----------------------------------------------------------------------
         This method computes the specific heat ratio, gamma.
             inputs:
                 T: vector of temperatures [n]
@@ -188,13 +180,11 @@ class stanScram:
             L = self.fpv_table.L_from_C(Z, C)
             gamma = self.fpv_table.get_gamma(Z, Q, L, T)
         elif self.physics == "FRC":
-            gamma = self.thermoTable.getGamma(T, Y)
+            gamma = self.thermoTable.get_gamma(T, Y)
         return gamma
 
-    def getMu(self, T, p, Y):
+    def get_mu(self, T, p, Y):
         """
-        Method: getMu
-        ----------------------------------------------------------------------
         This method computes the dynamic viscosity of the gas at the current state
             inputs:
                 T: vector of temperatures [n]
@@ -218,10 +208,8 @@ class stanScram:
                 mu[i] = self.gas.viscosity
         return mu
 
-    def getLoc(self, T, p, Y):
+    def get_lambda_over_cv(self, T, p, Y):
         """
-        Method: getLoc
-        ----------------------------------------------------------------------
         This method computes lambda / cv, where lambda is the thermal conductivity
         and cv is the specific heat at constant volume.
             inputs:
@@ -245,10 +233,8 @@ class stanScram:
                 loc[i] = self.gas.thermal_conductivity / self.gas.cv
         return loc
 
-    def getTemperature(self, r, p, Y):
+    def get_temperature(self, r, p, Y):
         """
-        Method: getTemperature
-        ----------------------------------------------------------------------
         This method computes the temperature of the gas at the current state
             inputs:
                 r=density
@@ -266,46 +252,40 @@ class stanScram:
             R = self.fpv_table.get_R(Z, Q, L)
             T = p / (r * R)
         elif self.physics == "FRC":
-            T = self.thermoTable.getTemperature(r, p, Y)
+            T = self.thermoTable.get_temperature(r, p, Y)
         return T
 
-    def soundSpeed(self, r, p, gamma):
+    def get_sound_speed(self, r, p, gamma):
         """
-        Method: soundSpeed
-        ----------------------------------------------------------------------
         This method returns the speed of sound for the gas at its current state
             outputs:
                 speed of sound
         """
         return np.sqrt(gamma * p / r)
 
-    def waveSpeed(self):
+    def get_wave_speed(self):
         """
-        Method: waveSpeed
-        ----------------------------------------------------------------------
         This method determines the absolute maximum of the wave speed
             outputs:
                 speed of acoustic wave
         """
-        return abs(self.u) + self.soundSpeed(self.r, self.p, self.gamma)
+        return abs(self.u) + self.get_sound_speed(self.r, self.p, self.gamma)
 
-    def timeStep(self):
+    def get_time_step(self):
         """
-        Method: timeStep
-        ----------------------------------------------------------------------
         This method determines the maximal timestep in accord with the CFL
         condition
             outputs:
                 timestep
         """
-        localDts = self.dx / self.waveSpeed()
+        localDts = self.dx / self.get_wave_speed()
         if self.includeDiffusion:
-            T = self.getTemperature(self.r, self.p, self.Y)
-            cp = self.getCp(T, self.Y)
+            T = self.get_temperature(self.r, self.p, self.Y)
+            cp = self.get_cp(T, self.Y)
             # cv = cp / self.gamma
-            mu = self.getMu(T, self.p, self.Y)
+            mu = self.get_mu(T, self.p, self.Y)
             nu = mu / self.r
-            k = self.getLoc(T, self.p, self.Y) * cp * self.F
+            k = self.get_lambda_over_cv(T, self.p, self.Y) * cp * self.F
             alpha = k / (self.r * cp)
             if self.physics == "FPV":
                 # unity Lewis number
@@ -323,10 +303,8 @@ class stanScram:
             localDts = np.minimum(localDts, viscousDts)
         return self.cfl * min(localDts)
 
-    def applyBoundaryConditions(self, rLR, uLR, pLR, YLR):
+    def apply_boundary_conditions(self, rLR, uLR, pLR, YLR):
         """
-        Method: applyBoundaryConditions
-        ----------------------------------------------------------------------
         This method applies the prescribed BCs declared by the user.
         Currently, only reflecting (adiabatic wall) and outflow (symmetry)
         boundary conditions are supported. The user may include Dirichlet
@@ -372,10 +350,8 @@ class stanScram:
                     YLR[NAssign, iX, :] = self.boundaryConditions[ibc][3]
         return (rLR, uLR, pLR, YLR)
 
-    def primitiveToConservative(self, r, u, p, Y, gamma):
+    def primitive_to_conservative(self, r, u, p, Y, gamma):
         """
-        Method: conservativeToPrimitive
-        ----------------------------------------------------------------------
         This method transforms the primitive variables to conservative
             inputs:
                 r=density
@@ -394,10 +370,8 @@ class stanScram:
         rY = Y * r.reshape((-1, 1))
         return (r, ru, E, rY)
 
-    def conservativeToPrimitive(self, r, ru, E, rY, gamma):
+    def conservative_to_primitive(self, r, ru, E, rY, gamma):
         """
-        Method: conservativeToPrimitive
-        ----------------------------------------------------------------------
         This method transforms the conservative variables to the primitives
             inputs:
                 r=density
@@ -422,10 +396,8 @@ class stanScram:
             Y = Y / np.sum(Y, axis=1).reshape((-1, 1))
         return (r, u, p, Y)
 
-    def initZBilger(self):
+    def initialize_bilger_mixture_fraction(self):
         """
-        Method: initZBilger
-        ----------------------------------------------------------------------
         This method initializes the Bilger mixture fraction
         """
         self.Z_weights = np.zeros(self.gas.n_species)
@@ -463,10 +435,8 @@ class stanScram:
         self.Z_weights /= denom * self.gas.molecular_weights
         self.Z_offset /= denom
 
-    def ZBilger(self, Y):
+    def get_bilger_mixture_fraction(self, Y):
         """
-        Method: ZBilger
-        ----------------------------------------------------------------------
         This method calculates the Bilger mixture fraction
             inputs:
                 Y=species mass fraction
@@ -475,10 +445,8 @@ class stanScram:
         """
         return np.clip(np.dot(Y, self.Z_weights) + self.Z_offset, 0.0, 1.0)
 
-    def initProg(self):
+    def initialize_progress_variable(self):
         """
-        Method: initProg
-        ----------------------------------------------------------------------
         This method initializes the progress variable
         """
         if self.prog_def is None:
@@ -492,10 +460,8 @@ class stanScram:
             raise Exception(msg)
         self.prog_weights /= np.sum(self.prog_weights)
 
-    def Prog(self, Y):
+    def get_progress_variable(self, Y):
         """
-        Method: Prog
-        ----------------------------------------------------------------------
         This method computes the progress variable
             inputs:
                 Y=species mass fraction
@@ -504,10 +470,8 @@ class stanScram:
         """
         return np.clip(np.dot(Y, self.prog_weights), 0.0, 1.0)
 
-    def flux(self, r, u, p, Y, gamma):
+    def get_inviscid_flux(self, r, u, p, Y, gamma):
         """
-        Method: flux
-        ----------------------------------------------------------------------
         This method calculates the advective flux
             inputs:
                 r=density
@@ -522,13 +486,13 @@ class stanScram:
         mn = self.mn
         # find the left and right WENO states from the WENO interpolation
         nx = len(r)
-        PLR = WENO5(r, u, p, Y, gamma)
+        PLR = weno5(r, u, p, Y, gamma)
         # extract and apply boundary conditions
         rLR = PLR[:, :, 0]
         uLR = PLR[:, :, 1]
         pLR = PLR[:, :, 2]
         YLR = PLR[:, :, mt:]
-        rLR, uLR, pLR, YLR = self.applyBoundaryConditions(rLR, uLR, pLR, YLR)
+        rLR, uLR, pLR, YLR = self.apply_boundary_conditions(rLR, uLR, pLR, YLR)
         # calculate the flux
         fL = self.fluxFunction(rLR, uLR, pLR, YLR, gamma[mt : -mt + 1])
         fR = self.fluxFunction(rLR, uLR, pLR, YLR, gamma[mt - 1 : -mt])
@@ -536,10 +500,8 @@ class stanScram:
         rhs[mt:-mt, :] = -(fR[1:] - fL[:-1]) / self.dx
         return rhs
 
-    def viscousFlux(self, r, u, p, Y, gamma):
+    def get_viscous_flux(self, r, u, p, Y, gamma):
         """
-        Method: viscousFlux
-        ----------------------------------------------------------------------
         This method calculates the viscous flux
             inputs:
                 r=density
@@ -552,6 +514,7 @@ class stanScram:
         """
         mt = self.mt
         mn = self.mn
+        _ = gamma  # Hack to silence linter
 
         # first order interpolation to the edge states and apply boundary conditions
         rLR = np.concatenate(
@@ -570,17 +533,15 @@ class stanScram:
             ),
             axis=0,
         )
-        rLR, uLR, pLR, YLR = self.applyBoundaryConditions(rLR, uLR, pLR, YLR)
+        rLR, uLR, pLR, YLR = self.apply_boundary_conditions(rLR, uLR, pLR, YLR)
         # calculate the flux
-        f = viscousFluxFunction(self, rLR, uLR, pLR, YLR)
+        f = viscous_flux(self, rLR, uLR, pLR, YLR)
         rhs = np.zeros((self.n + 2 * mt, mn + self.n_scalars))
         rhs[mt:-mt, :] = (f[1:, :] - f[:-1, :]) / self.dx  # central difference
         return rhs
 
-    def advanceAdvection(self, dt):
+    def advance_advection(self, dt):
         """
-        Method: advanceAdvection
-        ----------------------------------------------------------------------
         This method advances the advection terms by the prescribed timestep.
         The advection terms are integrated using RK3.
             inputs
@@ -602,31 +563,31 @@ class stanScram:
             self.Y,
             self.gamma,
         )
-        (r, ru, E, rY) = self.primitiveToConservative(r, u, p, Y, gamma)
+        (r, ru, E, rY) = self.primitive_to_conservative(r, u, p, Y, gamma)
         # 1st stage of RK3
-        rhs = self.flux(r, u, p, Y, gamma)
+        rhs = self.get_inviscid_flux(r, u, p, Y, gamma)
         r1 = r + dt * rhs[:, 0]
         ru1 = ru + dt * rhs[:, 1]
         E1 = E + dt * rhs[:, 2]
         rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservativeToPrimitive(r1, ru1, E1, rY1, gamma)
+        (r1, u1, p1, Y1) = self.conservative_to_primitive(r1, ru1, E1, rY1, gamma)
         # 2nd stage of RK3
-        rhs = self.flux(r1, u1, p1, Y1, gamma)
+        rhs = self.get_inviscid_flux(r1, u1, p1, Y1, gamma)
         r2 = 0.75 * r + 0.25 * r1 + 0.25 * dt * rhs[:, 0]
         ru2 = 0.75 * ru + 0.25 * ru1 + 0.25 * dt * rhs[:, 1]
         E2 = 0.75 * E + 0.25 * E1 + 0.25 * dt * rhs[:, 2]
         rY2 = 0.75 * rY + 0.25 * rY1 + 0.25 * dt * rhs[:, mn:]
-        (r2, u2, p2, Y2) = self.conservativeToPrimitive(r2, ru2, E2, rY2, gamma)
+        (r2, u2, p2, Y2) = self.conservative_to_primitive(r2, ru2, E2, rY2, gamma)
         # 3rd stage of RK3
-        rhs = self.flux(r2, u2, p2, Y2, gamma)
+        rhs = self.get_inviscid_flux(r2, u2, p2, Y2, gamma)
         r = (1.0 / 3.0) * r + (2.0 / 3.0) * r2 + (2.0 / 3.0) * dt * rhs[:, 0]
         ru = (1.0 / 3.0) * ru + (2.0 / 3.0) * ru2 + (2.0 / 3.0) * dt * rhs[:, 1]
         E = (1.0 / 3.0) * E + (2.0 / 3.0) * E2 + (2.0 / 3.0) * dt * rhs[:, 2]
         rY = (1.0 / 3.0) * rY + (2.0 / 3.0) * rY2 + (2.0 / 3.0) * dt * rhs[:, mn:]
-        (r, u, p, Y) = self.conservativeToPrimitive(r, ru, E, rY, gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
         # update
-        T0 = self.getTemperature(r[mt:-mt], p[mt:-mt], Y[mt:-mt])
-        gamma[mt:-mt] = self.getGamma(T0, Y[mt:-mt])
+        T0 = self.get_temperature(r[mt:-mt], p[mt:-mt], Y[mt:-mt])
+        gamma[mt:-mt] = self.get_gamma(T0, Y[mt:-mt])
         (self.r, self.u, self.p, self.Y, self.gamma) = (
             r[mt:-mt],
             u[mt:-mt],
@@ -635,10 +596,8 @@ class stanScram:
             gamma[mt:-mt],
         )
 
-    def advanceChemistry(self, dt):
+    def advance_chemistry(self, dt):
         """
-        Method: advanceChemistry
-        ----------------------------------------------------------------------
         This method advances the combustion chemistry of a reacting system. It
         is only called if the "reacting" flag is set to True.
             inputs
@@ -647,14 +606,12 @@ class stanScram:
         if not self.reacting:
             return
         if self.physics == "FPV":
-            self.advanceChemistryFPV(dt)
+            self.advance_chemistry_FPV(dt)
         elif self.physics == "FRC":
-            self.advanceChemistryFRC(dt)
+            self.advance_chemistry_FRC(dt)
 
-    def advanceChemistryFPV(self, dt):
+    def advance_chemistry_FPV(self, dt):
         """
-        Method: advanceChemistryFPV
-        ----------------------------------------------------------------------
         This method advances the combustion chemistry of a reacting system using
         the flamelet progress variable approach. It is only called if the "reacting"
         flag is set to True.
@@ -677,7 +634,7 @@ class stanScram:
 
         # Using FPV
         # initialize
-        (r, ru, E, rY) = self.primitiveToConservative(
+        (r, ru, E, rY) = self.primitive_to_conservative(
             self.r, self.u, self.p, self.Y, self.gamma
         )
         Q = np.zeros(self.n)
@@ -691,7 +648,7 @@ class stanScram:
         L1 = self.fpv_table.L_from_C(rY1[:, 0] / r, rY1[:, 1] / r)
         e_chem1 = r * self.fpv_table.lookup("E0_CHEM", rY1[:, 0] / r, Q, L1)
         E1 = E + e_chem0 - e_chem1
-        (r1, u1, p1, Y1) = self.conservativeToPrimitive(r, ru, E1, rY1, self.gamma)
+        (r1, u1, p1, Y1) = self.conservative_to_primitive(r, ru, E1, rY1, self.gamma)
         # 2nd stage of RK2
         omegaC1 = self.injector.get_chemical_sources(Y1[:, 0], Y1[:, 1])
         rhsY[:, 1] = omegaC1 * r1
@@ -699,17 +656,15 @@ class stanScram:
         L = self.fpv_table.L_from_C(rY[:, 0] / r, rY[:, 1] / r)
         e_chem2 = r * self.fpv_table.lookup("E0_CHEM", rY[:, 0] / r, Q, L)
         E = E + e_chem0 - e_chem2
-        (r, u, p, Y) = self.conservativeToPrimitive(r, ru, E, rY, self.gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)
 
         # update properties
-        T0 = self.getTemperature(r, p, Y)
-        self.gamma = self.getGamma(T0, Y)
+        T0 = self.get_temperature(r, p, Y)
+        self.gamma = self.get_gamma(T0, Y)
         (self.r, self.u, self.p, self.Y) = (r, u, p, Y)
 
-    def advanceChemistryFRC(self, dt):
+    def advance_chemistry_FRC(self, dt):
         """
-        Method: advanceChemistryFRC
-        ----------------------------------------------------------------------
         This method advances the combustion chemistry of a reacting system using
         finite rate chemistry. It is only called if the "reacting" flag is set to True.
             inputs
@@ -725,6 +680,7 @@ class stanScram:
                 inputs
                     dt=time step
             """
+            _ = t  # Hack to silence linter
             # unpack the input
             r = args[0]
             F = args[1]
@@ -751,7 +707,7 @@ class stanScram:
 
         # get indices
         indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k], self.t)]
-        Ts = self.getTemperature(self.r[indices], self.p[indices], self.Y[indices, :])
+        Ts = self.get_temperature(self.r[indices], self.p[indices], self.Y[indices, :])
         # initialize integrator
         y0 = np.zeros(self.gas.n_species + 1)
         integrator = integrate.ode(dydt).set_integrator("lsoda")
@@ -775,13 +731,11 @@ class stanScram:
             self.gas.TDY = T, self.r[k], Y
             self.p[k] = self.gas.P
         # update gamma
-        T = self.getTemperature(self.r, self.p, self.Y)
-        self.gamma = self.getGamma(T, self.Y)
+        T = self.get_temperature(self.r, self.p, self.Y)
+        self.gamma = self.get_gamma(T, self.Y)
 
-    def advanceQuasi1D(self, dt):
+    def advance_quasi_1d(self, dt):
         """
-        Method: advanceQuasi1D
-        ----------------------------------------------------------------------
         This method advances the quasi-1D terms used to model area changes in
         the shock tube. The client must supply the functions dlnAdt and dlnAdx
         to the StanScram object.
@@ -823,7 +777,7 @@ class stanScram:
         # initialize integrator
         y0 = np.zeros(3)
         integrator = integrate.ode(dydt).set_integrator("lsoda")
-        (r, ru, E, _) = self.primitiveToConservative(
+        (r, ru, E, _) = self.primitive_to_conservative(
             self.r, self.u, self.p, self.Y, self.gamma
         )
         # determine the indices
@@ -861,26 +815,22 @@ class stanScram:
         ru[eIn] += dt * rhs[1]
         E[eIn] += dt * rhs[2]
         rY = r.reshape((r.shape[0], 1)) * self.Y
-        (self.r, self.u, self.p, _) = self.conservativeToPrimitive(
+        (self.r, self.u, self.p, _) = self.conservative_to_primitive(
             r, ru, E, rY, self.gamma
         )
-        T = self.getTemperature(self.r, self.p, self.Y)
-        self.gamma = self.getGamma(T, self.Y)
+        T = self.get_temperature(self.r, self.p, self.Y)
+        self.gamma = self.get_gamma(T, self.Y)
 
-    def advanceBoundaryLayer(self, dt):
+    def advance_boundary_layer(self, dt):
         """
-        Method: advanceBoundaryLayer
-        ----------------------------------------------------------------------
         This method advances the boundary layer terms
             inputs
                 dt=time step
         """
 
         #######################################################################
-        def nusseltNumber(Re, Pr, cf):
+        def get_nusselt_number(Re, Pr, cf):
             """
-            Function: nusseltNumber
-            ----------------------------------------------------------------------
             This function defines the nusselt Number as a function of the
             Reynolds number. These functions are empirical correlations taken
             from Kayes. The selection of the correlations assumes that this solver
@@ -928,38 +878,36 @@ class stanScram:
             raise Exception(msg)
         D = 2 * self.h * self.w / (self.h + self.w)
         # compute gas properties
-        T = self.getTemperature(self.r, self.p, self.Y)
-        cp = self.getCp(T, self.Y)
-        mu = self.getMu(T, self.p, self.Y)
-        k = self.getLoc(T, self.p, self.Y) * cp
+        T = self.get_temperature(self.r, self.p, self.Y)
+        cp = self.get_cp(T, self.Y)
+        mu = self.get_mu(T, self.p, self.Y)
+        k = self.get_lambda_over_cv(T, self.p, self.Y) * cp
         # compute non-dimensional numbers
         Re = abs(self.r * self.u * D / mu)
         Pr = cp * mu / k
-        # skin friction coefficent
+        # skin friction coefficient
         if self.cf is None:
-            self.cf = skinFriction()  # initialize the functor
+            self.cf = SkinFriction()  # initialize the functor
         cf = self.cf(Re)
         # shear stress on wall
         shear = cf * (0.5 * self.r * self.u**2.0) * (np.sign(self.u))
         # Stanton number and heat transfer to wall
-        Nu = nusseltNumber(Re, Pr, cf)
+        Nu = get_nusselt_number(Re, Pr, cf)
         qloss = Nu * k / D * (T - self.Tw)
         # update
-        (r, ru, E, rY) = self.primitiveToConservative(
+        (r, ru, E, rY) = self.primitive_to_conservative(
             self.r, self.u, self.p, self.Y, self.gamma
         )
         ru -= shear * 4.0 / D * dt
         E -= qloss * 4.0 / D * dt
-        (self.r, self.u, self.p, _) = self.conservativeToPrimitive(
+        (self.r, self.u, self.p, _) = self.conservative_to_primitive(
             r, ru, E, rY, self.gamma
         )
-        T = self.getTemperature(self.r, self.p, self.Y)
-        self.gamma = self.getGamma(T, self.Y)
+        T = self.get_temperature(self.r, self.p, self.Y)
+        self.gamma = self.get_gamma(T, self.Y)
 
-    def advanceDiffusion(self, dt):
+    def advance_diffusion(self, dt):
         """
-        Method: advanceDiffusion
-        ----------------------------------------------------------------------
         This method advances the diffusion terms in the axial direction
             inputs
                 dt=time step
@@ -980,26 +928,26 @@ class stanScram:
             self.Y,
             self.gamma,
         )
-        (r, ru, E, rY) = self.primitiveToConservative(r, u, p, Y, gamma)
+        (r, ru, E, rY) = self.primitive_to_conservative(r, u, p, Y, gamma)
         if self.thickening is not None:
             self.F = self.thickening(self)
         # 1st stage of RK2
-        rhs = self.viscousFlux(r, u, p, Y, gamma)
+        rhs = self.get_viscous_flux(r, u, p, Y, gamma)
         r1 = r + dt * rhs[:, 0]
         ru1 = ru + dt * rhs[:, 1]
         E1 = E + dt * rhs[:, 2]
         rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservativeToPrimitive(r1, ru1, E1, rY1, gamma)
+        (r1, u1, p1, Y1) = self.conservative_to_primitive(r1, ru1, E1, rY1, gamma)
         # 2nd stage of RK2
-        rhs = self.viscousFlux(r1, u1, p1, Y1, gamma)
+        rhs = self.get_viscous_flux(r1, u1, p1, Y1, gamma)
         r = 0.5 * (r + r1 + dt * rhs[:, 0])
         ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
         E = 0.5 * (E + E1 + dt * rhs[:, 2])
         rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservativeToPrimitive(r, ru, E, rY, gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
         # update
-        T0 = self.getTemperature(r[mt:-mt], p[mt:-mt], Y[mt:-mt])
-        gamma[mt:-mt] = self.getGamma(T0, Y[mt:-mt])
+        T0 = self.get_temperature(r[mt:-mt], p[mt:-mt], Y[mt:-mt])
+        gamma[mt:-mt] = self.get_gamma(T0, Y[mt:-mt])
         (self.r, self.u, self.p, self.Y, self.gamma) = (
             r[mt:-mt],
             u[mt:-mt],
@@ -1008,17 +956,15 @@ class stanScram:
             gamma[mt:-mt],
         )
 
-    def advanceSourceTerms(self, dt):
+    def advance_source_terms(self, dt):
         """
-        Method: advanceSourceTerms
-        ----------------------------------------------------------------------
         This method advances the source terms in the axial direction
             inputs
                 dt=time step
         """
         # initialize
         mn = self.mn
-        (r, ru, E, rY) = self.primitiveToConservative(
+        (r, ru, E, rY) = self.primitive_to_conservative(
             self.r, self.u, self.p, self.Y, self.gamma
         )
         # 1st stage of RK2
@@ -1027,23 +973,21 @@ class stanScram:
         ru1 = ru + dt * rhs[:, 1]
         E1 = E + dt * rhs[:, 2]
         rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservativeToPrimitive(r1, ru1, E1, rY1, self.gamma)
+        (r1, u1, p1, Y1) = self.conservative_to_primitive(r1, ru1, E1, rY1, self.gamma)
         # 2nd stage of RK2
         rhs = self.sourceTerms(r1, ru1, E1, rY1, self.gamma, self.x, self.t + dt)
         r = 0.5 * (r + r1 + dt * rhs[:, 0])
         ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
         E = 0.5 * (E + E1 + dt * rhs[:, 2])
         rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservativeToPrimitive(r, ru, E, rY, self.gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)
         # update
-        T0 = self.getTemperature(r, p, Y)
-        self.gamma = self.getGamma(T0, Y)
+        T0 = self.get_temperature(r, p, Y)
+        self.gamma = self.get_gamma(T0, Y)
         (self.r, self.u, self.p, self.Y) = (r, u, p, Y)
 
-    def advanceInjector(self, dt):
+    def advance_injector(self, dt):
         """
-        Method: advanceInjector
-        ----------------------------------------------------------------------
         This method advances the source terms from the injector using the
         jet-in-crossflow model.
             inputs
@@ -1051,7 +995,7 @@ class stanScram:
         """
         # initialize
         mn = self.mn
-        (r, ru, E, rY) = self.primitiveToConservative(
+        (r, ru, E, rY) = self.primitive_to_conservative(
             self.r, self.u, self.p, self.Y, self.gamma
         )
         self.injector.update_fluid_tip_positions(dt, self.t, self.u)
@@ -1063,7 +1007,7 @@ class stanScram:
         ru1 = ru + dt * rhs[:, 1]
         E1 = E + dt * rhs[:, 2]
         rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservativeToPrimitive(r1, ru1, E1, rY1, self.gamma)
+        (r1, _, _, _) = self.conservative_to_primitive(r1, ru1, E1, rY1, self.gamma)
         # 2nd stage of RK2
         rhs = self.injector.get_injector_sources(
             r1, ru1, E1, rY1[:, 0], rY1[:, 1], self.gamma, self.t + dt
@@ -1072,16 +1016,14 @@ class stanScram:
         ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
         E = 0.5 * (E + E1 + dt * rhs[:, 2])
         rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservativeToPrimitive(r, ru, E, rY, self.gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)
         # update
-        T0 = self.getTemperature(r, p, Y)
-        self.gamma = self.getGamma(T0, Y)
+        T0 = self.get_temperature(r, p, Y)
+        self.gamma = self.get_gamma(T0, Y)
         (self.r, self.u, self.p, self.Y) = (r, u, p, Y)
 
-    def updateProbes(self, iters):
+    def update_probes(self, iters):
         """
-        Method: updateProbes
-        ----------------------------------------------------------------------
         This method updates all the probes to the current value
         """
 
@@ -1090,10 +1032,8 @@ class stanScram:
             if iters % (probe.skipSteps + 1) == 0:
                 probe.update(self)
 
-    def updateXTDiagrams(self, iters):
+    def update_XT_diagrams(self, iters):
         """
-        Method: updateXTDiagrams
-        ----------------------------------------------------------------------
         This method updates all the XT Diagrams to the current value.
         """
         # update diagrams
@@ -1101,10 +1041,8 @@ class stanScram:
             if iters % (XTDiagram.skipSteps + 1) == 0:
                 XTDiagram.update(self)
 
-    def advanceSimulation(self, tFinal, res_p_target=-1.0):
+    def advance_simulation(self, tFinal, res_p_target=-1.0):
         """
-        Method: advanceSimulation
-        ----------------------------------------------------------------------
         This method advances the simulation until the prescribed time, tFinal
             inputs
                     tFinal=final time
@@ -1113,40 +1051,40 @@ class stanScram:
         res_p = np.inf
         while self.t < tFinal and res_p > res_p_target:
             p_old = self.p
-            dt = min(tFinal - self.t, self.timeStep())
+            dt = min(tFinal - self.t, self.get_time_step())
             # advance advection and chemistry
             if self.physics == "FPV":
-                self.advanceAdvection(dt)
-                self.advanceChemistry(dt)
+                self.advance_advection(dt)
+                self.advance_chemistry(dt)
             elif self.physics == "FRC":
                 # use Strang splitting
-                self.advanceChemistry(dt / 2.0)
-                self.advanceAdvection(dt)
-                self.advanceChemistry(dt / 2.0)
+                self.advance_chemistry(dt / 2.0)
+                self.advance_advection(dt)
+                self.advance_chemistry(dt / 2.0)
             # advance other terms
             if self.includeDiffusion:
-                self.advanceDiffusion(dt)
+                self.advance_diffusion(dt)
             if self.dlnAdt is not None or self.dlnAdx is not None:
-                self.advanceQuasi1D(dt)
+                self.advance_quasi_1d(dt)
             if self.includeBoundaryLayerTerms:
-                self.advanceBoundaryLayer(dt)
+                self.advance_boundary_layer(dt)
             if self.sourceTerms is not None:
-                self.advanceSourceTerms(dt)
+                self.advance_source_terms(dt)
             if self.injector is not None:
-                self.advanceInjector(dt)
+                self.advance_injector(dt)
             # perform other updates
             self.t += dt
-            self.updateProbes(iters)
-            self.updateXTDiagrams(iters)
+            self.update_probes(iters)
+            self.update_XT_diagrams(iters)
             iters += 1
             res_p = np.linalg.norm(self.p - p_old)
             if self.verbose and iters % self.outputEvery == 0:
                 print(
                     f"Iteration: {iters}. Current time: {self.t}. Time step: {dt:e}. "
-                    + f"Max T[K]: {self.getTemperature(self.r, self.p, self.Y).max()}. "
+                    + f"Max T[K]: {self.get_temperature(self.r, self.p, self.Y).max()}. "
                     + f"Residual(p): {res_p}."
                 )
             if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):
-                plotState(
+                plot_state(
                     self, f"figures/anim/test_{iters // self.plotStateInterval:05d}.png"
                 )

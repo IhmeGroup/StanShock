@@ -4,10 +4,10 @@ import unittest
 
 import numpy as np
 
-from stanscram.numerics.inviscid_flux import HLLC, LF
+from stanscram.numerics.inviscid_flux import hllc_flux, lax_friedrichs_flux
 
-LF = LF.__wrapped__  # unwrap for coverage testing
-HLLC = HLLC.__wrapped__
+lax_friedrichs_flux = lax_friedrichs_flux.__wrapped__  # unwrap for coverage testing
+hllc_flux = hllc_flux.__wrapped__
 
 
 class TestFlux(unittest.TestCase):
@@ -17,7 +17,7 @@ class TestFlux(unittest.TestCase):
         p = 3.0
         Y = 1.0
         gamma = 1.2
-        flux = LF(
+        flux = lax_friedrichs_flux(
             rLR=np.array([[r], [r]]),
             uLR=np.array([[u], [u]]),
             pLR=np.array([[p], [p]]),
@@ -37,7 +37,7 @@ class TestFlux(unittest.TestCase):
         num_faces = 10
         num_sides = 2
         num_species = 1
-        flux = HLLC(
+        flux = hllc_flux(
             rLR=r * np.ones((num_sides, num_faces)),
             uLR=u * np.ones((num_sides, num_faces)),
             pLR=p * np.ones((num_sides, num_faces)),

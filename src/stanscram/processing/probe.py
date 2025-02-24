@@ -24,8 +24,6 @@ import numpy as np
 
 def interpolate(xArray, qArray, x):
     """
-    function: interpolate
-    ----------------------------------------------------------------------
     helper function for the probe
     """
     xUpper = (xArray[xArray >= x])[0]
@@ -34,10 +32,9 @@ def interpolate(xArray, qArray, x):
     qLower = (qArray[xArray < x])[-1]
     return qLower + (qUpper - qLower) / (xUpper - xLower) * (x - xLower)
 
+
 class Probe:
     """
-    Class: probe
-    -----------------------------------------------------------------------
     This class is used to store the relevant data for the probe
     """
 

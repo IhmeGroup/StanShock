@@ -23,10 +23,8 @@ from __future__ import annotations
 import numpy as np
 
 
-def smoothingFunction(x, xShock, Delta, phiLeft, phiRight):
+def smoothing_function(x, xShock, Delta, phiLeft, phiRight):
     """
-    Function: smoothingFunction
-    ----------------------------------------------------------------------
     This helper function returns the function of the variable smoothed
     over the interface
         inputs:
@@ -42,10 +40,8 @@ def smoothingFunction(x, xShock, Delta, phiLeft, phiRight):
     return phi
 
 
-def dSFdx(x, xShock, Delta, phiLeft, phiRight):
+def smoothing_function_gradient(x, xShock, Delta, phiLeft, phiRight):
     """
-    Function: dSFdx
-    ----------------------------------------------------------------------
     This helper function returns the derivative of the smoothing function
         inputs:
             x = numpy array of cell centers
@@ -60,10 +56,8 @@ def dSFdx(x, xShock, Delta, phiLeft, phiRight):
     return dphidx
 
 
-def initializeConstant(domain, state, x):
+def initialize_constant(domain, state, x):
     """
-    Method: initializeConstant
-    ----------------------------------------------------------------------
     This helper function initializes a constant state
         inputs:
             state = a tuple containing the Cantera solution object at the
@@ -91,10 +85,8 @@ def initializeConstant(domain, state, x):
     domain.F = np.ones_like(domain.r)
 
 
-def initializeRiemannProblem(domain, leftState, rightState, geometry):
+def initialize_riemann_problem(domain, leftState, rightState, geometry):
     """
-    Method: initializeRiemannProblem
-    ----------------------------------------------------------------------
     This helper function initializes a Riemann Problem
         inputs:
             leftState = a tuple containing the Cantera solution object at the
@@ -111,7 +103,7 @@ def initializeRiemannProblem(domain, leftState, rightState, geometry):
         leftState[0].species_names != gas.species_names
         or rightState[0].species_names != gas.species_names
     ):
-        msg = "Inputed gasses must be the same as the initialized gas."
+        msg = "Input gasses must be the same as the initialized gas."
         raise Exception(msg)
     domain.n = geometry[0]
     domain.x = np.linspace(geometry[1], geometry[2], domain.n)
@@ -143,10 +135,8 @@ def initializeRiemannProblem(domain, leftState, rightState, geometry):
     domain.F = np.ones_like(domain.r)
 
 
-def initializeDiffuseInterface(domain, leftState, rightState, geometry, Delta):
+def initialize_diffuse_interface(domain, leftState, rightState, geometry, Delta):
     """
-    Method: initializeDiffuseInterface
-    ----------------------------------------------------------------------
     This helper function initializes an interface smoothed over a distance
         inputs:
             leftState = a tuple containing the Cantera solution object at the
@@ -164,7 +154,7 @@ def initializeDiffuseInterface(domain, leftState, rightState, geometry, Delta):
         leftState[0].species_names != gas.species_names
         or rightState[0].species_names != gas.species_names
     ):
-        msg = "Inputed gasses must be the same as the initialized gas."
+        msg = "Input gasses must be the same as the initialized gas."
         raise Exception(msg)
     domain.n = geometry[0]
     domain.x = np.linspace(geometry[1], geometry[2], domain.n)
@@ -177,27 +167,27 @@ def initializeDiffuseInterface(domain, leftState, rightState, geometry, Delta):
     uRight = rightState[1]
     gammaRight = rightGas.cp / rightGas.cv
     # initialization for left state
-    domain.r = smoothingFunction(
+    domain.r = smoothing_function(
         domain.x, xShock, Delta, leftGas.density, rightGas.density
     )
-    domain.u = smoothingFunction(domain.x, xShock, Delta, uLeft, uRight)
-    domain.p = smoothingFunction(domain.x, xShock, Delta, leftGas.P, rightGas.P)
+    domain.u = smoothing_function(domain.x, xShock, Delta, uLeft, uRight)
+    domain.p = smoothing_function(domain.x, xShock, Delta, leftGas.P, rightGas.P)
     domain.Y = np.zeros((domain.n, domain.n_scalars))
     if domain.physics == "FPV":
-        domain.Y[:, 0] = smoothingFunction(
+        domain.Y[:, 0] = smoothing_function(
             domain.x,
             xShock,
             Delta,
             domain.ZBilger(leftGas.Y),
             domain.ZBilger(rightGas.Y),
         )
-        domain.Y[:, 1] = smoothingFunction(
+        domain.Y[:, 1] = smoothing_function(
             domain.x, xShock, Delta, domain.Prog(leftGas.Y), domain.Prog(rightGas.Y)
         )
     elif domain.physics == "FRC":
         for kSp in range(domain.n_scalars):
-            domain.Y[:, kSp] = smoothingFunction(
+            domain.Y[:, kSp] = smoothing_function(
                 domain.x, xShock, Delta, leftGas.Y[kSp], rightGas.Y[kSp]
             )
-    domain.gamma = smoothingFunction(domain.x, xShock, Delta, gammaLeft, gammaRight)
+    domain.gamma = smoothing_function(domain.x, xShock, Delta, gammaLeft, gammaRight)
     domain.F = np.ones_like(domain.r)

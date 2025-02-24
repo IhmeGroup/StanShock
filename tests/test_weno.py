@@ -4,9 +4,9 @@ import unittest
 
 import numpy as np
 
-from stanscram.numerics.face_extrapolation import WENO5, mt
+from stanscram.numerics.face_extrapolation import mt, weno5
 
-WENO5 = WENO5.__wrapped__  # unwrap for test coverage
+weno5 = weno5.__wrapped__  # unwrap for test coverage
 
 
 class TestWENO(unittest.TestCase):
@@ -20,7 +20,7 @@ class TestWENO(unittest.TestCase):
         p = 3.0
         Y = 1.0 / num_species
         gamma = 5.0 / 3.0
-        face_values = WENO5(
+        face_values = weno5(
             r=r * np.ones(num_cells),
             u=u * np.ones(num_cells),
             p=p * np.ones(num_cells),
@@ -45,7 +45,7 @@ class TestWENO(unittest.TestCase):
         p = (1e6, 1.0)
         Y = ((1.0, 0.0), (0.0, 1.0))
         gamma = 1.4
-        face_values = WENO5(
+        face_values = weno5(
             r=np.concatenate(
                 [r[0] * np.ones(num_cells // 2), r[1] * np.ones(num_cells // 2)]
             ),
