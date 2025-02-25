@@ -1,6 +1,6 @@
 generator: YamlWriter
 cantera-version: 3.1.0
-git-commit: '6e00275'
+git-commit: "6e00275"
 date: Mon Feb 24 13:23:55 2025
 phases:
   - name: ""
@@ -10,10 +10,10 @@ phases:
     state:
       T: 1.0e-03
       density: 1.0e-03
-      Y: {Ar: 1.0}
+      Y: { Ar: 1.0 }
 species:
   - name: Ar
-    composition: {Ar: 1.0}
+    composition: { Ar: 1.0 }
     thermo:
       model: NASA7
       temperature-ranges: [200.0, 6000.0, 6000.0]
@@ -22,7 +22,7 @@ species:
         - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.37967491]
       note: L 6/88
   - name: He
-    composition: {He: 1.0}
+    composition: { He: 1.0 }
     thermo:
       model: NASA7
       temperature-ranges: [200.0, 6000.0, 6000.0]
