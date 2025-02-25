@@ -58,10 +58,12 @@ repos:
           - pytest
           - numpy
           - scipy
+          - scipy-stubs
           - matplotlib
           - numba
           - cantera
           - tqdm
+          - types-tqdm
           - h5py
 
   - repo: https://github.com/codespell-project/codespell

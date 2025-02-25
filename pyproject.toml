@@ -33,10 +33,12 @@ dynamic = ["version"]
 dependencies = [
   "numpy",
   "scipy",
+  "scipy-stubs",
   "matplotlib",
   "numba",
   "cantera",
   "tqdm",
+  "types-tqdm",
   "h5py",
 ]
 
@@ -109,6 +111,7 @@ enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 warn_unreachable = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
+mypy_path = "stubs"
 
 [[tool.mypy.overrides]]
 module = "stanscram.*"
