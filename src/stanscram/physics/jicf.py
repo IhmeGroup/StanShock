@@ -685,8 +685,6 @@ class JICModel:
         z_inj: float
             The injector z-coordinate
         """
-        breakpoint()
-
         # Compute the nearest point on the centerline and the distance squared
         x_cl, y_cl, n2 = self.nearest_on_cl(x, y, z - z_inj)
 
