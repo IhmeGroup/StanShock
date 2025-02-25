@@ -55,7 +55,7 @@ def get_specific_gas_constants_compiled(Y, molecularWeights):
     return R
 
 
-@njit(double1D(double1D, double2D, double1D, double2D, double2D))
+# @njit(double1D(double1D, double2D, double1D, double2D, double2D))
 def get_cp_compiled(T, Y, TTable, a, b):
     """
     Function used by the thermoTable class to find the constant pressure
@@ -79,9 +79,10 @@ def get_cp_compiled(T, Y, TTable, a, b):
     # determine the indices
     indices = np.zeros(nX, dtype=np.int64)
     for iX in range(nX):
+        print(f"{iX=}, {T[iX]=}, {TMin=}, {dT=}")
         indices[iX] = int((T[iX] - TMin) / dT)
     # determine cp
-    cp = np.zeros(nX)
+    cp = np.zeros((nX,))
     for iX in range(nX):
         if (T[iX] < TMin) or (T[iX] > TMax):
             msg = f"Temperature out of bounds: {T[iX]} not in range [{TMin}, {TMax}]"
@@ -174,7 +175,7 @@ class ThermoTable:
         """
         if any(np.logical_or(self.TMin > T, self.TMax < T)):
             msg = "Temperature not within table"
-            raise Exception(msg)
+            raise ValueError(msg)
         nT = len(T)
         indices = [int((Tk - self.TMin) / self.dT) for Tk in T]
         h0 = np.zeros(nT)
