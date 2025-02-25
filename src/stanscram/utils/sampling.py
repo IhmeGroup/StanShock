@@ -6,6 +6,8 @@ from scipy.integrate import quad
 from scipy.interpolate import interp1d
 from scipy.stats import beta
 
+rng = np.random.default_rng()
+
 
 def split_array(arr, n_chunks):
     """Split an array into n_chunks"""
@@ -98,8 +100,8 @@ class MonteCarloSampler2D:
         """Generate samples using 2D inverse transform sampling"""
         if self.alpha == 0.0:
             # Case where the density is uniform
-            x_samples = np.random.uniform(*self.ranges[0], num_samples)
-            y_samples = np.random.uniform(*self.ranges[1], num_samples)
+            x_samples = rng.uniform(*self.ranges[0], num_samples)
+            y_samples = rng.uniform(*self.ranges[1], num_samples)
             return x_samples, y_samples
 
         if self.P_x_cumsum is None:
@@ -118,7 +120,7 @@ class MonteCarloSampler2D:
 
         x_samples = np.zeros(num_samples)
         y_samples = np.zeros(num_samples)
-        uniform_samples = np.random.random((num_samples, 2))
+        uniform_samples = rng.random((num_samples, 2))
 
         for i, (ux, uy) in enumerate(uniform_samples):
             x_idx = np.searchsorted(self.P_x_cumsum, ux) - 1
@@ -222,7 +224,7 @@ class MonteCarloSampler2D:
         """Plot the results"""
         max_samples_plot = 10000
         if len(x_samples) > max_samples_plot:
-            idx = np.random.choice(len(x_samples), max_samples_plot, replace=False)
+            idx = rng.choice(len(x_samples), max_samples_plot, replace=False)
             x_samples, y_samples, phi_samples, weights = (
                 x_samples[idx],
                 y_samples[idx],

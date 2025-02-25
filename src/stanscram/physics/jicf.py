@@ -764,25 +764,25 @@ class JICModel:
                 Z_var[i_m] = 0.0
                 continue
 
-            def func(z, y):
+            def func(z, y, i_m=i_m):
                 return self.Z_3D(x, y, z)[i_m]
 
             Z_avg[i_m] = (
                 2.0
-                * integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w / 2)[
-                    0
-                ]
+                * integrate.dblquad(
+                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                )[0]
                 / (self.w * self.h)
             )
 
-            def func(z, y):
+            def func(z, y, i_m=i_m):
                 return (self.Z_3D(x, y, z)[i_m] - Z_avg[i_m]) ** 2
 
             Z_var[i_m] = (
                 2.0
-                * integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w / 2)[
-                    0
-                ]
+                * integrate.dblquad(
+                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                )[0]
                 / (self.w * self.h)
             )
         return Z_avg, Z_var
@@ -797,26 +797,26 @@ class JICModel:
                 continue
 
             # func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_m]
-            def func(z, y):
+            def func(z, y, i_m=i_m):
                 return self.Z_3D_interp[i_m]((x, y, z))
 
             Z_avg[i_m] = (
                 2.0
-                * integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w / 2)[
-                    0
-                ]
+                * integrate.dblquad(
+                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                )[0]
                 / (self.w * self.h)
             )
 
             # func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_m] - Z_avg[i_m])**2
-            def func(z, y):
+            def func(z, y, i_m=i_m):
                 return (self.Z_3D_interp[i_m]((x, y, z)) - Z_avg[i_m]) ** 2
 
             Z_var[i_m] = (
                 2.0
-                * integrate.dblquad(func, 0, self.h, lambda y: 0, lambda y: self.w / 2)[
-                    0
-                ]
+                * integrate.dblquad(
+                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                )[0]
                 / (self.w * self.h)
             )
         return Z_avg, Z_var
@@ -848,7 +848,7 @@ class JICModel:
                 E_CHEM_avg[i_m] = self.fpv_table.lookup("E0_CHEM", 0.0, 0.0, 0.0)
                 continue
 
-            def integrand(z, y):
+            def integrand(z, y, i_m=i_m):
                 # Z = self.Z_3D_adjusted(x, y, z)[i_m]
                 Z = self.Z_3D_interp[i_m]((x, y, z))
                 return self.fpv_table.lookup("PROG", Z, 0.0, 1.0)
@@ -856,12 +856,12 @@ class JICModel:
             C_avg[i_m] = (
                 2.0
                 * integrate.dblquad(
-                    integrand, 0, self.h, lambda y: 0, lambda y: self.w / 2
+                    integrand, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + y * 0
                 )[0]
                 / (self.w * self.h)
             )
 
-            def integrand(z, y):
+            def integrand(z, y, i_m=i_m):
                 # Z = self.Z_3D_adjusted(x, y, z)[i_m]
                 Z = self.Z_3D_interp[i_m]((x, y, z))
                 return self.fpv_table.lookup("E0_CHEM", Z, 0.0, 1.0)
@@ -869,7 +869,7 @@ class JICModel:
             E_CHEM_avg[i_m] = (
                 2.0
                 * integrate.dblquad(
-                    integrand, 0, self.h, lambda y: 0, lambda y: self.w / 2
+                    integrand, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + y * 0
                 )[0]
                 / (self.w * self.h)
             )
