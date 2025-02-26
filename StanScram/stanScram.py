@@ -20,6 +20,7 @@
 '''
 
 #necessary modules
+import os
 import numpy as np
 from numba import double, njit, int64
 import cantera as ct
@@ -43,7 +44,7 @@ def WENO5(r,u,p,Y,gamma):
     '''
     Method: WENO5
     ------------------------------------------------------------.----------
-    This method implements the fifth-order WENO interpolation. This method 
+    This method implements the fifth-order WENO interpolation. This method
     follows that of Houim and Kuo (JCP2011)
         inputs:
             r=density
@@ -56,7 +57,7 @@ def WENO5(r,u,p,Y,gamma):
     '''
     nLR=2
     nCells = len(r)-2*mt
-    nFaces = nCells+1 
+    nFaces = nCells+1
     nSc = len(Y[0])  # number of scalars
     nVar = mn+nSc  # [rho, rhou, rhoE, rhoY1, rhoY2, ...]
     nStencil=2*mt
@@ -67,7 +68,7 @@ def WENO5(r,u,p,Y,gamma):
     W[0,0,0]=0.333333333333333
     W[0,0,1]=0.833333333333333
     W[0,0,2]=-0.166666666666667
- 
+
     W[0,1,0]=-0.166666666666667
     W[0,1,1]=0.833333333333333
     W[0,1,2]=0.333333333333333
@@ -75,15 +76,15 @@ def WENO5(r,u,p,Y,gamma):
     W[0,2,0]=0.333333333333333
     W[0,2,1]=-1.166666666666667
     W[0,2,2]=1.833333333333333
- 
-    W[1,0,0]=W[0,2,2] 
+
+    W[1,0,0]=W[0,2,2]
     W[1,0,1]=W[0,2,1]
     W[1,0,2]=W[0,2,0]
- 
+
     W[1,1,0]=W[0,1,2]
     W[1,1,1]=W[0,1,1]
     W[1,1,2]=W[0,1,0]
- 
+
     W[1,2,0]=W[0,0,2]
     W[1,2,1]=W[0,0,1]
     W[1,2,2]=W[0,0,0]
@@ -97,48 +98,48 @@ def WENO5(r,u,p,Y,gamma):
     D[1,0]=D[0,2]
     D[1,1]=D[0,1]
     D[1,2]=D[0,0]
-    
+
     B1 = 1.083333333333333
-    B2 = 0.25 
-                    
+    B2 = 0.25
+
     B=np.empty(mt)
-    PLR=np.empty((nLR,nFaces,nVar)) 
+    PLR=np.empty((nLR,nFaces,nVar))
     YAverage = np.empty(nSc)
-    U = np.empty(nVar) 
+    U = np.empty(nVar)
     R=np.zeros((nVar,nVar))
     L=np.zeros((nVar,nVar))
     CStencil = np.empty((nStencil,nVar)) #all the characteristic values in the stencil
-    
+
     for iFace in range(nFaces): #iterate through each cell right edge
         iCell=iFace+2 #face is on the right side of the cell
-        
+
         # Face averages
         rAverage=0.5*(r[iCell]+r[iCell+1])
         uAverage=0.5*(u[iCell]+u[iCell+1])
         pAverage=0.5*(p[iCell]+p[iCell+1])
         gammaAverage=0.5*(gamma[iCell]+gamma[iCell+1])
-        for kSc in range(nSc): 
+        for kSc in range(nSc):
             YAverage[kSc]=0.5*(Y[iCell,kSc]+Y[iCell+1,kSc])
         eAverage=pAverage/(rAverage*(gammaAverage-1.0))+0.5*uAverage**2.0
         hAverage=eAverage+pAverage/rAverage
         cAverage=np.sqrt(gammaAverage*pAverage/rAverage)
-        
+
         # Right eigenvector matrix [rho, rhou, rhoE, rhoY1, rhoY2, ...]
         # Density wave
         R[0,0] = 1.0
         R[1,0] = uAverage - cAverage
         R[2,0] = hAverage - uAverage*cAverage
-        
+
         # Velocity wave
         R[0,1] = 1.0
         R[1,1] = uAverage
         R[2,1] = 0.5*uAverage**2.0
-        
+
         # Energy wave
         R[0,2] = 1.0
         R[1,2] = uAverage + cAverage
         R[2,2] = hAverage + uAverage*cAverage
-        
+
         # Scalar waves
         for i in range(nSc):
             R[0,3+i] = 0.0
@@ -146,56 +147,56 @@ def WENO5(r,u,p,Y,gamma):
             R[2,3+i] = 0.0
             for j in range(nSc):
                 R[3+j,3+i] = 1.0 if i == j else 0.0
-        
+
         # Left eigenvector matrix
         gammaHat=gammaAverage-1.0
         phi=0.5*gammaHat*uAverage**2.0
-        
+
         # Acoustic waves
         L[0,0] = 0.5*(phi + cAverage*uAverage)/cAverage**2
         L[0,1] = -0.5*(gammaHat*uAverage + cAverage)/cAverage**2
         L[0,2] = 0.5*gammaHat/cAverage**2
-        
+
         L[2,0] = 0.5*(phi - cAverage*uAverage)/cAverage**2
         L[2,1] = -0.5*(gammaHat*uAverage - cAverage)/cAverage**2
         L[2,2] = 0.5*gammaHat/cAverage**2
-        
+
         # Velocity wave
         L[1,0] = 1.0 - phi/cAverage**2
         L[1,1] = gammaHat*uAverage/cAverage**2
         L[1,2] = -gammaHat/cAverage**2
-        
+
         # Scalar waves
         for i in range(nSc):
             L[3+i,3+i] = 1.0
-        
+
         for iVar in range(nVar):
             for iStencil in range(nStencil):
                 iCellStencil=iStencil-2+iCell
-                
+
                 # Conservative variables [rho, rhou, rhoE, rhoY1, rhoY2, ...]
                 U[0] = r[iCellStencil]  # density
                 U[1] = r[iCellStencil]*u[iCellStencil]  # momentum
                 U[2] = p[iCellStencil]/(gammaAverage-1.0) + 0.5*r[iCellStencil]*u[iCellStencil]**2.0  # energy
                 for kSc in range(nSc):
                     U[3+kSc] = r[iCellStencil]*Y[iCellStencil,kSc]  # scalar densities
-                
+
                 CStencil[iStencil,iVar]=0.0
-                for jVar in range(nVar): 
+                for jVar in range(nVar):
                     CStencil[iStencil,iVar]+=L[iVar,jVar]*U[jVar]
-                    
+
         # WENO interpolation in characteristic variables
         for N in range(nLR):
-            for iVar in range(nVar): 
+            for iVar in range(nVar):
                 U[iVar]=0.0
             for iVar in range(nVar):
                 NO =N+2
-                
+
                 # Smoothness parameters
                 B[0]=B1*(CStencil[0+NO,iVar]-2.0*CStencil[1+NO,iVar]+CStencil[2+NO,iVar])**2.0+B2*(3.0*CStencil[0+NO,iVar]-4.0*CStencil[1+NO,iVar]+CStencil[2+NO,iVar])**2
                 B[1]=B1*(CStencil[-1+NO,iVar]-2.0*CStencil[0+NO,iVar]+CStencil[1+NO,iVar])**2.0+B2*(CStencil[-1+NO,iVar]-CStencil[1+NO,iVar])**2
                 B[2]=B1*(CStencil[-2+NO,iVar]-2.0*CStencil[-1+NO,iVar]+CStencil[0+NO,iVar])**2.0+B2*(CStencil[-2+NO,iVar]-4.0*CStencil[-1+NO,iVar]+3.0*CStencil[0+NO,iVar])**2
-                
+
                 # Edge interpolation
                 ATOT = 0.0
                 CW=0.0
@@ -206,23 +207,23 @@ def WENO5(r,u,p,Y,gamma):
                     ATOT+=A
                     CW+=CINT*A
                 CiVar=CW/ATOT
-                
-                for jVar in range(nVar): 
+
+                for jVar in range(nVar):
                     U[jVar]+=R[jVar,iVar]*CiVar
-                    
+
             # Reconstruct primitives from conservatives
             rLR=U[0]
             uLR=U[1]/rLR
             eLR=U[2]/rLR
             pLR=rLR*(gammaAverage-1.0)*(eLR-0.5*uLR**2.0)
-            
+
             # Fill primitive matrix [rho, u, p, Y1, Y2, ...]
             PLR[N,iFace,0]=rLR
             PLR[N,iFace,1]=uLR
             PLR[N,iFace,2]=pLR
             for kSc in range(nSc):
                 PLR[N,iFace,3+kSc]=U[3+kSc]/rLR
-                
+
     # First order at boundaries
     for N in range(nLR):
         for iFace in range(mt):
@@ -239,14 +240,14 @@ def WENO5(r,u,p,Y,gamma):
             PLR[N,iFace,2]=p[iCell+N]
             for kSc in range(nSc):
                 PLR[N,iFace,3+kSc]=Y[iCell+N,kSc]
-                
+
     # Create primitive matrix for limiter
     P = np.zeros((nCells+2*mt,nVar))
     P[:,0] = r[:]
     P[:,1] = u[:]
     P[:,2] = p[:]
     P[:,3:] = Y[:,:]
-    
+
     # Apply limiter
     alpha=2.0
     threshold=1e-6
@@ -261,18 +262,18 @@ def WENO5(r,u,p,Y,gamma):
                 iCellp2 = iCell+2-4*N
                 #check the error threshold for smooth regions
                 error=abs((-P[iCellm2,iVar]+4.0*P[iCellm1,iVar]+4.0*P[iCellp1,iVar]-P[iCellp2,iVar]+epsilon)/(6.0*P[iCell,iVar]+epsilon)-1.0)
-                if error < threshold: 
+                if error < threshold:
                     continue
                 #compute limiter
                 if P[iCell,iVar] != P[iCellm1,iVar]:
                     phi=min(alpha,alpha*(P[iCellp1,iVar]-P[iCell,iVar])/(P[iCell,iVar]-P[iCellm1,iVar]))
                     phi=min(phi,2.0*(PLR[N,iFace,iVar]-P[iCell,iVar])/(P[iCell,iVar]-P[iCellm1,iVar]))
                     phi=max(0.0,phi)
-                else: 
+                else:
                     phi=alpha
                 #apply limiter
                 PLR[N,iFace,iVar]=P[iCell,iVar]+0.5*phi*(P[iCell,iVar]-P[iCellm1,iVar])
-    
+
     return PLR
 
 
@@ -296,7 +297,7 @@ def LF(rLR,uLR,pLR,YLR,gamma):
     nFaces = len(rLR[0])
     nSc=YLR[0].shape[1]
     nDim=mn+nSc
-    
+
     #find the maximum wave speed
     lambdaMax=0.0
     for iFace in range(nFaces):
@@ -312,7 +313,7 @@ def LF(rLR,uLR,pLR,YLR,gamma):
             FLR[K,iFace,1]=rLR[K,iFace]*uLR[K,iFace]**2.0+pLR[K,iFace]
             FLR[K,iFace,2]=uLR[K,iFace]*(gamma[iFace]/(gamma[iFace]-1)*pLR[K,iFace]+0.5*rLR[K,iFace]*uLR[K,iFace]**2.0)
             for kSc in range(nSc): FLR[K,iFace,mn+kSc]=rLR[K,iFace]*uLR[K,iFace]*YLR[K,iFace,kSc]
-        
+
     #compute the modeled flux
     F=np.empty((nFaces,mn+nSc))
     U=np.empty((nLR,mn+nSc))
@@ -322,7 +323,7 @@ def LF(rLR,uLR,pLR,YLR,gamma):
             U[K,1]=rLR[K,iFace]*uLR[K,iFace]
             U[K,2]=pLR[K,iFace]/(gamma[iFace]-1.0)+0.5*rLR[K,iFace]*uLR[K,iFace]**2.0
             for kSc in range(nSc): U[K,mn+kSc]=rLR[K,iFace]*YLR[K,iFace,kSc]
-        for iDim in range(nDim): 
+        for iDim in range(nDim):
             FBar=0.5*(FLR[0,iFace,iDim]+FLR[1,iFace,iDim])
             F[iFace,iDim]=FBar-0.5*lambdaMax*(U[1,iDim]-U[0,iDim])
     return F
@@ -348,7 +349,7 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
     nFaces = len(rLR[0])
     nSc=YLR[0].shape[1]
     nDim=mn+nSc
-    
+
     #compute the wave speeds
     aLR=np.empty((2,nFaces))
     qLR=np.empty((2,nFaces))
@@ -357,12 +358,12 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
     for iFace in range(nFaces):
         aLR[0,iFace]= np.sqrt(gamma[iFace]*pLR[0,iFace]/rLR[0,iFace])
         aLR[1,iFace]= np.sqrt(gamma[iFace]*pLR[1,iFace]/rLR[1,iFace])
-        aBar=0.5*(aLR[0,iFace]+aLR[1,iFace])  
+        aBar=0.5*(aLR[0,iFace]+aLR[1,iFace])
         pBar=0.5*(pLR[0,iFace]+pLR[1,iFace])
         rBar=0.5*(rLR[0,iFace]+rLR[1,iFace])
         pPVRS=pBar-0.5*(uLR[1,iFace]-uLR[0,iFace])*rBar*aBar
         pStar=max(0.0,pPVRS)
-        qLR[0,iFace] = np.sqrt(1.0+(gamma[iFace]+1.0)/(2.0*gamma[iFace])*(pStar/pLR[0,iFace]-1.0)) if pStar>pLR[0,iFace] else 1.0 
+        qLR[0,iFace] = np.sqrt(1.0+(gamma[iFace]+1.0)/(2.0*gamma[iFace])*(pStar/pLR[0,iFace]-1.0)) if pStar>pLR[0,iFace] else 1.0
         qLR[1,iFace] = np.sqrt(1.0+(gamma[iFace]+1.0)/(2.0*gamma[iFace])*(pStar/pLR[1,iFace]-1.0)) if pStar>pLR[1,iFace] else 1.0
         SLR[0,iFace] = uLR[0,iFace]-aLR[0,iFace]*qLR[0,iFace]
         SLR[1,iFace] = uLR[1,iFace]+aLR[1,iFace]*qLR[1,iFace]
@@ -370,7 +371,7 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
         SStar[iFace]+= rLR[0,iFace]*uLR[0,iFace]*(SLR[0,iFace]-uLR[0,iFace])
         SStar[iFace]-= rLR[1,iFace]*uLR[1,iFace]*(SLR[1,iFace]-uLR[1,iFace])
         SStar[iFace]/= rLR[0,iFace]*(SLR[0,iFace]-uLR[0,iFace])-rLR[1,iFace]*(SLR[1,iFace]-uLR[1,iFace])
-    
+
     #find the regular flux
     FLR=np.empty((2,nFaces,nDim))
     for K in range(nLR):
@@ -379,7 +380,7 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
             FLR[K,iFace,1]=rLR[K,iFace]*uLR[K,iFace]**2.0+pLR[K,iFace]
             FLR[K,iFace,2]=uLR[K,iFace]*(gamma[iFace]/(gamma[iFace]-1)*pLR[K,iFace]+0.5*rLR[K,iFace]*uLR[K,iFace]**2.0)
             for kSc in range(nSc): FLR[K,iFace,3+kSc]=rLR[K,iFace]*uLR[K,iFace]*YLR[K,iFace,kSc]
-        
+
     #compute the modeled flux
     F=np.empty((nFaces,mn+nSc))
     U=np.empty(mn+nSc)
@@ -412,7 +413,7 @@ def HLLC(rLR,uLR,pLR,YLR,gamma):
             for iSp in range(nSc): UStar[mn+iSp]=prefactor*YFace[iSp]
             #flux update
             for iDim in range(nDim): F[iFace,iDim]=FLR[K,iFace,iDim]+SFace*(UStar[iDim]-U[iDim])
-    
+
     return F
 
 
@@ -421,9 +422,9 @@ def getR(Y,molecularWeights):
     '''
     function: getR_python
     --------------------------------------------------------------------------
-    Function used by the thermoTable class to find the gas constant. This 
+    Function used by the thermoTable class to find the gas constant. This
     function is compiled for speed-up.
-        inputs: 
+        inputs:
             Y: scalar [nX,nSp]
             molecularWeights: species molecular weights [nSp]
         output:
@@ -447,7 +448,7 @@ def getCp(T,Y,TTable,a,b):
     '''
     function: getCp_python
     --------------------------------------------------------------------------
-    Function used by the thermoTable class to find the constant pressure 
+    Function used by the thermoTable class to find the constant pressure
     specific heats. This function is compiled for speed-up.
         inputs:
             T: Temperatures [nX]
@@ -486,7 +487,7 @@ class thermoTable(object):
     '''
     Class: thermoTable
     --------------------------------------------------------------------------
-    This is a class defined to encapsulate the temperature table with the 
+    This is a class defined to encapsulate the temperature table with the
     relevant methods
     '''
     def __init__(self,gas):
@@ -494,8 +495,8 @@ class thermoTable(object):
         Method: __init__
         --------------------------------------------------------------------------
         This method initializes the temperature table. The table uses a
-        piecewise linear function for the constant pressure specific heat 
-        coefficients. The coefficients are selected to retain the exact 
+        piecewise linear function for the constant pressure specific heat
+        coefficients. The coefficients are selected to retain the exact
         enthalpies at the table points.
         '''
         nSp = gas.n_species
@@ -512,8 +513,8 @@ class thermoTable(object):
         #determine the coefficients
         for kSp, species in enumerate(gas.species()):
             #initialize with actual cp
-            cpk = species.thermo.cp(self.T[0])/self.molecularWeights[kSp] 
-            hk = species.thermo.h(self.T[0])/self.molecularWeights[kSp] 
+            cpk = species.thermo.cp(self.T[0])/self.molecularWeights[kSp]
+            hk = species.thermo.h(self.T[0])/self.molecularWeights[kSp]
             for kT, Tk in enumerate(self.T):
                 #compute next
                 Tkp1 = Tk+self.dT
@@ -529,7 +530,7 @@ class thermoTable(object):
 ##############################################################################
     def getR(self,Y):
         '''
-        Method: getR 
+        Method: getR
         --------------------------------------------------------------------------
         This method computes the mixture-specific gas constat
             inputs:
@@ -541,7 +542,7 @@ class thermoTable(object):
 ##############################################################################
     def getCp(self,T,Y):
         '''
-        Method: getCp 
+        Method: getCp
         --------------------------------------------------------------------------
         This method computes the constant pressure specific heat as determined
         by Billet and Abgrall (2003) for the double flux method.
@@ -555,7 +556,7 @@ class thermoTable(object):
 ##############################################################################
     def getH0(self,T,Y):
         '''
-        Method: getH0 
+        Method: getH0
         --------------------------------------------------------------------------
         This method computes the enthalpy according to Billet and Abgrall (2003).
         This is the enthalpy that is frozen over the time step
@@ -565,7 +566,7 @@ class thermoTable(object):
             outputs:
                 cp: vector of constant pressure specific heats
         '''
-        if any(np.logical_or(T<self.TMin,T>self.TMax)): raise Exception("Temperature not within table") 
+        if any(np.logical_or(T<self.TMin,T>self.TMax)): raise Exception("Temperature not within table")
         nT = len(T)
         indices = [int((Tk-self.TMin)/self.dT) for Tk in T]
         h0 = np.zeros(nT)
@@ -576,7 +577,7 @@ class thermoTable(object):
  ##############################################################################
     def getGamma(self,T,Y):
         '''
-        Method: getGamma 
+        Method: getGamma
         --------------------------------------------------------------------------
         This method computes the specific heat ratio, gamma.
             inputs:
@@ -592,7 +593,7 @@ class thermoTable(object):
  ##############################################################################
     def getTemperature(self,r,p,Y):
         '''
-        Method: getTemperature 
+        Method: getTemperature
         --------------------------------------------------------------------------
         This method applies the ideal gas law to compute the temperature
             inputs:
@@ -603,7 +604,7 @@ class thermoTable(object):
                 T: vector of temperatures
         '''
         R = self.getR(Y)
-        return p/(r*R)     
+        return p/(r*R)
 #%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 def smoothingFunction(x,xShock,Delta,phiLeft,phiRight):
             '''
@@ -645,17 +646,17 @@ class skinFriction(object):
     Functor: skinFriction
     ---------------------------------------------------------------------------
     This functor computes the skin friction function. Since the skin friction
-    function is partially implicit, it interpolates from a table of values at 
+    function is partially implicit, it interpolates from a table of values at
     outset.
         inputs:
             ReCrit = the critical Reynolds number for transition
             ReMax = the maximum value for the table
         outputs:
-            cf = numpy array of the skin friction coefficient 
+            cf = numpy array of the skin friction coefficient
     '''
     #######################################################################
     def __init__(self,ReCrit=2300,ReMax=1e9):
-        #store the values and compute the Reynolds number table 
+        #store the values and compute the Reynolds number table
         self.ReMax = ReMax
         self.ReCrit = ReCrit
         self.ReTable = np.logspace(np.log10(self.ReCrit),np.log10(ReMax))
@@ -701,7 +702,7 @@ class stanScram(object):
                 inputs:
                     state = a tuple containing the Cantera solution object at the
                             the desired thermodynamic state and the velocity:
-                            (canteraSolution,u)  
+                            (canteraSolution,u)
                     x = the grid for the problem
             '''
             # Initialize grid
@@ -723,7 +724,7 @@ class stanScram(object):
             # No flame thickening
             self.F = np.ones_like(self.r)
         #######################################################################
-        def initializeRiemannProblem(self,leftState,rightState,geometry): 
+        def initializeRiemannProblem(self,leftState,rightState,geometry):
             '''
             Method: initializeRiemannProblem
             ----------------------------------------------------------------------
@@ -731,15 +732,15 @@ class stanScram(object):
                 inputs:
                     leftState = a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)  
+                               (canteraSolution,u)
                     rightState = a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)  
-                    geometry = a tuple containing the relevant geometry for the 
+                               (canteraSolution,u)
+                    geometry = a tuple containing the relevant geometry for the
                                problem: (numberCells,xMinimum,xMaximum,shockLocation)
             '''
             if leftState[0].species_names!=gas.species_names or \
-              rightState[0].species_names!=gas.species_names: 
+              rightState[0].species_names!=gas.species_names:
                   raise Exception("Inputed gasses must be the same as the initialized gas.")
             self.n=geometry[0]
             self.x=np.linspace(geometry[1],geometry[2],self.n)
@@ -748,7 +749,7 @@ class stanScram(object):
             self.r=np.ones(self.n)*leftState[0].density
             self.u=np.ones(self.n)*leftState[1]
             self.p=np.ones(self.n)*leftState[0].P
-            self.Y=np.zeros((self.n,self.n_scalars)) 
+            self.Y=np.zeros((self.n,self.n_scalars))
             if self.physics=="FPV":
                 self.Y[:,0]=self.ZBilger(leftState[0].Y)
                 self.Y[:,1]=self.Prog(leftState[0].Y)
@@ -765,10 +766,10 @@ class stanScram(object):
                 self.Y[index,1]=self.Prog(rightState[0].Y)
             elif self.physics=="FRC":
                 for kSp in range(self.n_scalars): self.Y[index,kSp]=rightState[0].Y[kSp]
-            self.gamma[index]=rightState[0].cp/rightState[0].cv  
+            self.gamma[index]=rightState[0].cp/rightState[0].cv
             self.F = np.ones_like(self.r)
         #######################################################################
-        def initializeDiffuseInterface(self,leftState,rightState,geometry,Delta): 
+        def initializeDiffuseInterface(self,leftState,rightState,geometry,Delta):
             '''
             Method: initializeDiffuseInterface
             ----------------------------------------------------------------------
@@ -776,16 +777,16 @@ class stanScram(object):
                 inputs:
                     leftState = a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)  
+                               (canteraSolution,u)
                     rightState =  a tuple containing the Cantera solution object at the
                                the desired thermodynamic state and the velocity:
-                               (canteraSolution,u)  
-                    geometry = a tuple containing the relevant geometry for the 
+                               (canteraSolution,u)
+                    geometry = a tuple containing the relevant geometry for the
                                problem: (numberCells,xMinimum,xMaximum,shockLocation)
                     Delta =    distance over which the interface is smoothed linearly
             '''
             if leftState[0].species_names!=gas.species_names or \
-              rightState[0].species_names!=gas.species_names: 
+              rightState[0].species_names!=gas.species_names:
                   raise Exception("Inputed gasses must be the same as the initialized gas.")
             self.n=geometry[0]
             self.x=np.linspace(geometry[1],geometry[2],self.n)
@@ -801,7 +802,7 @@ class stanScram(object):
             self.r = smoothingFunction(self.x,xShock,Delta,leftGas.density,rightGas.density)
             self.u = smoothingFunction(self.x,xShock,Delta,uLeft,uRight)
             self.p = smoothingFunction(self.x,xShock,Delta,leftGas.P,rightGas.P)
-            self.Y=np.zeros((self.n,self.n_scalars)) 
+            self.Y=np.zeros((self.n,self.n_scalars))
             if self.physics=="FPV":
                 self.Y[:,0]=smoothingFunction(self.x,xShock,Delta,self.ZBilger(leftGas.Y),self.ZBilger(rightGas.Y))
                 self.Y[:,1]=smoothingFunction(self.x,xShock,Delta,self.Prog(leftGas.Y),self.Prog(rightGas.Y))
@@ -815,7 +816,7 @@ class stanScram(object):
         self.dx=1.0 #grid spacing
         self.n=10  #grid size
         self.boundaryConditions=['outflow','outflow']
-        self.x=np.linspace(0.0,self.dx*(self.n-1),self.n) 
+        self.x=np.linspace(0.0,self.dx*(self.n-1),self.n)
         self.gas = gas #cantera solution object for the gas
         self.r=np.ones(self.n)*gas.density #density
         self.u=np.zeros(self.n) #velocity
@@ -846,14 +847,14 @@ class stanScram(object):
         self.physics = "FPV" #flag to determine the physics model
         self.fpv_table = None #table for FPV model
         self.reacting = False #flag to solver about whether to solve source terms
-        self.inReactingRegion = lambda x,t: True #the reacting region of the shock tube. 
+        self.inReactingRegion = lambda x,t: True #the reacting region of the shock tube.
         self.includeDiffusion= False #exclude diffusion
         self.thickening=None #thickening function
         self.plotStateInterval=-1 #plot the state every n iterations
         #overwrite the default data
         for key in kwargs:
             if key in self.__dict__.keys(): self.__dict__[key]=kwargs[key]
-        
+
         #set the number of scalars
         if self.physics == "FPV":
             if self.fpv_table is None:
@@ -882,7 +883,7 @@ class stanScram(object):
             initializeDiffuseInterface(self, *self.initialization[1:])
         if not self.n==len(self.x)==len(self.r)==len(self.u)==len(self.p)==len(self.gamma):
             raise Exception("Initialization Error")
-        
+
 ##############################################################################
     class __probe(object):
         '''
@@ -935,31 +936,35 @@ class stanScram(object):
         --------------------------------------------------------------------------
         This method updates the XT diagram.
             inputs:
-                XTDiagram: the XTDiagram object 
+                XTDiagram: the XTDiagram object
         '''
         variable=XTDiagram.name
+        scalarNames = []
         if self.physics == "FPV":
             scalarNames = ["mixture fraction","progress variable"]
         elif self.physics == "FRC":
             scalarNames = [species.lower() for species in self.gas.species_names]
         if variable in ["density","r","rho"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.r))
+            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.r))
         elif variable in ["velocity","u"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.u))
+            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.u))
         elif variable in ["pressure","p"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.p))
+            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.p))
         elif variable in ["temperature","t"]:
             T = self.getTemperature(self.r,self.p,self.Y)
-            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, T))
+            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, T))
         elif variable in ["gamma","g","specific heat ratio", "heat capacity ratio"]:
-            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.gamma))
+            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.gamma))
         elif variable in scalarNames:
             scalarIndex= scalarNames.index(variable)
-            XTDiagram.variable.append(np.interp(XTDiagram.x,self.x, self.Y[:,scalarIndex]))
-        else: 
+            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, self.Y[:,scalarIndex]))
+        elif variable in ["mach","m"]:
+            M = np.abs(self.u) / self.soundSpeed(self.r, self.p, self.gamma)
+            XTDiagram.variable.append(np.interp(XTDiagram.x, self.x, M))
+        else:
             raise Exception("Invalid Variable Name")
         XTDiagram.t.append(self.t)
-        
+
 ##############################################################################
     def addXTDiagram(self,variable,skipSteps=0,x=None):
         '''
@@ -967,24 +972,26 @@ class stanScram(object):
         --------------------------------------------------------------------------
         This method initiates the XT diagram.
             inputs:
-                variable=string of the variable 
-                skipSteps=
-                
+                variable=string of the variable
+                skipSteps=polling frequency
+                x=interpolation grid
         '''
         newXTDiagram = self.XTDiagram()
         variable=variable.lower()
         newXTDiagram.skipSteps=skipSteps
         newXTDiagram.name=variable
         #check interpolation grid
-        if x is None: newXTDiagram.x = self.x
+        if x is None:
+            newXTDiagram.x = self.x
         elif (x[-1]>self.x[-1]) or (x[0]<self.x[0]):
             raise Exception("Invalid Interpolation Grid")
-        else: newXTDiagram.x = self.x
+        else:
+            newXTDiagram.x = self.x
         self.__updateXTDiagram(newXTDiagram)
         #store the XT Diagram
         self.XTDiagrams[variable]=newXTDiagram
 ##############################################################################
-    def plotXTDiagram(self,XTDiagram,limits=None):
+    def plotXTDiagram(self,diagram,limits=None,figdir=""):
         '''
         Method: plotXTDiagram
         --------------------------------------------------------------------------
@@ -992,33 +999,54 @@ class stanScram(object):
             inputs:
                 XTDiagram=XTDiagram object; obtained from the XTDiagrams dictionary
                 limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
-                
         '''
         plt.figure()
-        t = [t*1000.0 for t in XTDiagram.t]
-        X, T = np.meshgrid(XTDiagram.x,t)
+        t = [t*1000.0 for t in diagram.t]
+        X, T = np.meshgrid(diagram.x,t)
         variableMatrix = np.zeros(X.shape)
-        for k, variablek in enumerate(XTDiagram.variable): 
+        for k, variablek in enumerate(diagram.variable):
             variableMatrix[k,:]=variablek
-        variable=XTDiagram.name
+        variable=diagram.name
         if variable in ["density","r","rho"]:
-            plt.title(r"$\rho [\mathrm{kg/m^3}]$")
+            plt.title(r"$\rho~[\mathrm{kg/m^3}]$")
         elif variable in ["velocity","u"]:
-            plt.title(r"$u [\mathrm{m/s}]$")
+            plt.title(r"$u~[\mathrm{m/s}]$")
         elif variable in ["pressure","p"]:
             variableMatrix /= 1.0e5 #convert to bar
-            plt.title(r"$p [\mathrm{bar}]$")
+            plt.title(r"$p~[\mathrm{bar}]$")
         elif variable in ["temperature","t"]:
-            plt.title(r"$T [\mathrm{K}]$")
+            plt.title(r"$T~[\mathrm{K}]$")
         elif variable in ["gamma","g","specific heat ratio", "heat capacity ratio"]:
-            plt.title(r"$\gamma$")
-        else: plt.title(r"$\mathrm{"+variable+"}$")
-        if limits is None: plt.pcolormesh(X,T,variableMatrix,cmap='jet')
-        else: plt.pcolormesh(X,T,variableMatrix,cmap='jet',vmin=limits[0],vmax=limits[1])
-        plt.xlabel(r"$x [\mathrm{m}]$")
-        plt.ylabel(r"$t [\mathrm{ms}]$")
-        plt.axis([min(XTDiagram.x), max(XTDiagram.x), min(t), max(t)])
+            plt.title(r"$\gamma~[\mathrm{-}]$")
+        elif variable in ["mixture fraction"]:
+            plt.title(r"$Z~[\mathrm{-}]$")
+        elif variable in ["progress variable"]:
+            plt.title(r"$C~[\mathrm{-}]$")
+        elif variable in ["mach","m"]:
+            plt.title(r"$M~[\mathrm{-}]$")
+        else:
+            plt.title(r"$\mathrm{"+variable+"}$")
+        if limits is None:
+            plt.pcolormesh(X,T,variableMatrix,cmap='jet')
+        else:
+            plt.pcolormesh(X,T,variableMatrix,cmap='jet',vmin=limits[0],vmax=limits[1])
+        plt.xlabel(r"$x~[\mathrm{m}]$")
+        plt.ylabel(r"$t~[\mathrm{ms}]$")
+        plt.axis([min(diagram.x), max(diagram.x), min(t), max(t)])
         plt.colorbar()
+        plt.savefig(os.path.join(figdir, variable+".png"), bbox_inches='tight', dpi=300)
+##############################################################################
+    def plotXTDiagrams(self,limits=None,figdir=""):
+        '''
+        Method: plotXTDiagrams
+        --------------------------------------------------------------------------
+        This method creates a contour plot of the XTDiagram data
+            inputs:
+                limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
+
+        '''
+        for diagram in self.XTDiagrams.values():
+            self.plotXTDiagram(diagram,limits,figdir)
 ##############################################################################
     def add_h_plot(self, ax, scale=1.0):
         ax1 = ax.twinx()
@@ -1087,13 +1115,15 @@ class stanScram(object):
         else:
             ax[5].set_ymargin(0.1)
         ax[5].set_ylabel(r'$Y_k$ [-]')
-        ax[5].legend(loc='upper left')
+        ax[5].legend(loc='upper right')
         if self.h is not None:
             self.add_h_plot(ax[5], scale=xscale)
 
-        ax[6].scatter(self.injector.fluid_tips[:, 0]*xscale, self.injector.fluid_tips[:, 1], s=1)
+        ax[6].scatter(self.injector.fluid_tips[:, 0]*xscale,
+                      self.injector.fluid_tips[:, 1]*1e3*self.injector.n_inj,
+                      s=1)
         ax[6].set_ymargin(0.1)
-        ax[6].set_ylabel(r"$\dot{m}$ [kg/s]")
+        ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
         if self.h is not None:
             self.add_h_plot(ax[6], scale=xscale)
 
@@ -1229,17 +1259,17 @@ class stanScram(object):
         '''
         return np.sqrt(gamma*p/r)
 ##############################################################################
-    def waveSpeed(self): 
+    def waveSpeed(self):
         '''
         Method: waveSpeed
         ----------------------------------------------------------------------
-        This method determines the absolute maximum of the wave speed 
+        This method determines the absolute maximum of the wave speed
             outputs:
                 speed of acoustic wave
         '''
         return abs(self.u)+self.soundSpeed(self.r,self.p,self.gamma)
 ##############################################################################
-    def timeStep(self): 
+    def timeStep(self):
         '''
         Method: timeStep
         ----------------------------------------------------------------------
@@ -1275,9 +1305,9 @@ class stanScram(object):
         Method: applyBoundaryConditions
         ----------------------------------------------------------------------
         This method applies the prescribed BCs declared by the user.
-        Currently, only reflecting (adiabatic wall) and outflow (symmetry) 
-        boundary conditions are supported. The user may include Dirichlet 
-        condition as well. This method returns the updated primitives. 
+        Currently, only reflecting (adiabatic wall) and outflow (symmetry)
+        boundary conditions are supported. The user may include Dirichlet
+        condition as well. This method returns the updated primitives.
             inputs:
                 rLR=density on left and right face [2,n+1]
                 uLR=velocity on left and right face [2,n+1]
@@ -1301,15 +1331,15 @@ class stanScram(object):
                 if self.boundaryConditions[ibc].lower()=='reflecting' or \
                       self.boundaryConditions[ibc].lower()=='symmetry':
                     uLR[NAssign,iX]=0.0
-                elif self.verbose and self.boundaryConditions[ibc].lower()!='outflow':  
+                elif self.verbose and self.boundaryConditions[ibc].lower()!='outflow':
                     print('''Unrecognized Boundary Condition. Applying outflow by default.\n''')
             else:
                 #assign Dirichlet conditions to (r,u,p,Y)
-                if self.boundaryConditions[ibc][0] is not None: 
+                if self.boundaryConditions[ibc][0] is not None:
                     rLR[NAssign,iX]=self.boundaryConditions[ibc][0]
-                if self.boundaryConditions[ibc][1] is not None: 
+                if self.boundaryConditions[ibc][1] is not None:
                     uLR[NAssign,iX]=self.boundaryConditions[ibc][1]
-                if self.boundaryConditions[ibc][2] is not None: 
+                if self.boundaryConditions[ibc][2] is not None:
                     pLR[NAssign,iX]=self.boundaryConditions[ibc][2]
                 if self.boundaryConditions[ibc][3] is not None:
                     YLR[NAssign,iX,:]=self.boundaryConditions[ibc][3]
@@ -1402,7 +1432,7 @@ class stanScram(object):
         self.Z_offset = -(  2.0 * Yo_C / W_C
                           + 0.5 * Yo_H / W_H
                           - 1.0 * Yo_O / W_O)
-        
+
         self.Z_weights *= s
         self.Z_offset  *= s
 ##############################################################################
@@ -1444,7 +1474,7 @@ class stanScram(object):
                 progress variable
         '''
         return np.clip(np.dot(Y, self.prog_weights), 0.0, 1.0)
-############################################################################## 
+##############################################################################
     def flux(self,r,u,p,Y,gamma):
         '''
         Method: flux
@@ -1457,7 +1487,7 @@ class stanScram(object):
                 Y=scalar matrix [x,scalar]
                 gamma=specific heat ratio
             outputs:
-                rhs=the update due to the flux 
+                rhs=the update due to the flux
         '''
         #find the left and right WENO states from the WENO interpolation
         nx=len(r)
@@ -1474,7 +1504,7 @@ class stanScram(object):
         rhs = np.zeros((nx,mn+self.n_scalars))
         rhs[mt:-mt,:]=-(fR[1:]-fL[:-1])/self.dx
         return rhs
-############################################################################## 
+##############################################################################
     def viscousFlux(self,r,u,p,Y,gamma):
         '''
         Method: viscousFlux
@@ -1487,7 +1517,7 @@ class stanScram(object):
                 Y=scalar matrix [x,scalar]
                 gamma=specific heat ratio
             outputs:
-                rhs=the update due to the viscous flux 
+                rhs=the update due to the viscous flux
         '''
         ##############################################################################
         def viscousFluxFunction(self,rLR,uLR,pLR,YLR):
@@ -1511,10 +1541,10 @@ class stanScram(object):
                                         np.array([pLR[1,-1]]),
                                         np.array([YLR[1,-1,:]]).reshape((1,-1)))
             p, F, Y = np.zeros(nT), np.ones(nT), np.zeros((nT,self.n_scalars))
-            p[:-1], p[-1] = pLR[0,:], pLR[1,-1] 
-            F[1:-1] = self.F 
+            p[:-1], p[-1] = pLR[0,:], pLR[1,-1]
+            F[1:-1] = self.F
             F[0], F[-1] = self.F[0], self.F[-1] #no gradient in F at boundary
-            Y[:-1,:], Y[-1,:] = YLR[0,:,:], YLR[1,-1,:] 
+            Y[:-1,:], Y[-1,:] = YLR[0,:,:], YLR[1,-1,:]
             mu = self.getMu(T,Y)
             cp = self.getCp(T,Y)
             k = self.getLoc(T,Y) * cp * F
@@ -1531,7 +1561,7 @@ class stanScram(object):
             viscosity=(mu[1:]+mu[:-1])/2.0
             conductivity=(k[1:]+k[:-1])/2.0
             diffusivities=(diff[1:,:]+diff[:-1,:])/2.0
-            r = ((rLR[0,:]+rLR[1,:])/2.0).reshape(-1,1) 
+            r = ((rLR[0,:]+rLR[1,:])/2.0).reshape(-1,1)
             #get the central differences
             dudx=(uLR[1,:]-uLR[0,:])/self.dx
             dTdx=(T[1:]-T[:-1])/self.dx
@@ -1560,7 +1590,7 @@ class stanScram(object):
         Method: advanceAdvection
         ----------------------------------------------------------------------
         This method advances the advection terms by the prescribed timestep.
-        The advection terms are integrated using RK3. 
+        The advection terms are integrated using RK3.
             inputs
                 dt=time step
         '''
@@ -1605,7 +1635,7 @@ class stanScram(object):
         Method: advanceChemistry
         ----------------------------------------------------------------------
         This method advances the combustion chemistry of a reacting system. It
-        is only called if the "reacting" flag is set to True. 
+        is only called if the "reacting" flag is set to True.
             inputs
                 dt=time step
         '''
@@ -1622,7 +1652,7 @@ class stanScram(object):
         ----------------------------------------------------------------------
         This method advances the combustion chemistry of a reacting system using
         the flamelet progress variable approach. It is only called if the "reacting"
-        flag is set to True. 
+        flag is set to True.
             inputs
                 dt=time step
         '''
@@ -1639,7 +1669,7 @@ class stanScram(object):
         # rY1 = rY
         # rY1[:, 1] = r * C1
         # (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E1,rY1,self.gamma)
-        
+
         # Using FPV
         #initialize
         (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
@@ -1674,7 +1704,7 @@ class stanScram(object):
         Method: advanceChemistryFRC
         ----------------------------------------------------------------------
         This method advances the combustion chemistry of a reacting system using
-        finite rate chemistry. It is only called if the "reacting" flag is set to True. 
+        finite rate chemistry. It is only called if the "reacting" flag is set to True.
             inputs
                 dt=time step
         '''
@@ -1702,7 +1732,7 @@ class stanScram(object):
             eRT= self.gas.standard_int_energies_RT
             #compute the derivatives
             YDot = wDot/r
-            TDot = -np.sum(eRT*wHatDot)*ct.gas_constant*T/(r*cv) 
+            TDot = -np.sum(eRT*wHatDot)*ct.gas_constant*T/(r*cv)
             f = np.zeros(self.n_scalars+1)
             f[:-1]=YDot
             f[-1]=TDot
@@ -1742,7 +1772,7 @@ class stanScram(object):
         '''
         Method: advanceQuasi1D
         ----------------------------------------------------------------------
-        This method advances the quasi-1D terms used to model area changes in 
+        This method advances the quasi-1D terms used to model area changes in
         the shock tube. The client must supply the functions dlnAdt and dlnAdx
         to the StanScram object.
             inputs
@@ -1832,7 +1862,7 @@ class stanScram(object):
             '''
             Function: nusseltNumber
             ----------------------------------------------------------------------
-            This function defines the nusselt Number as a function of the 
+            This function defines the nusselt Number as a function of the
             Reynolds number. These functions are empirical correlations taken
             from Kayes. The selection of the correlations assumes that this solver
             will be used for gasses.
@@ -1861,7 +1891,7 @@ class stanScram(object):
             Nu[highTurublentIndices] = ReHT*PrHT*cfHT/2.0/(0.88+13.39*(PrHT**(2.0/3.0)-0.78)*np.sqrt(cfHT/2.0))
             return Nu
         #######################################################################
-        if self.h is None or self.w is None or self.Tw is None: 
+        if self.h is None or self.w is None or self.Tw is None:
             raise Exception("stanShock improperly initialized for boundary layer terms")
         nX=len(self.x)
         D = 2*self.h*self.w/(self.h+self.w)
@@ -1877,7 +1907,7 @@ class stanScram(object):
         if self.cf is None: self.cf = skinFriction() #initialize the functor
         cf = self.cf(Re)
         #shear stress on wall
-        shear=cf*(0.5*self.r*self.u**2.0)*(np.sign(self.u)) 
+        shear=cf*(0.5*self.r*self.u**2.0)*(np.sign(self.u))
         #Stanton number and heat transfer to wall
         Nu = nusseltNumber(Re,Pr,cf)
         qloss = Nu*k/D*(T-self.Tw)
@@ -1885,7 +1915,7 @@ class stanScram(object):
         (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
         ru -= shear*4.0/D*dt
         E -= qloss*4.0/D*dt
-        (self.r,self.u,self.p,_)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma) 
+        (self.r,self.u,self.p,_)=self.conservativeToPrimitive(r,ru,E,rY,self.gamma)
         T = self.getTemperature(self.r,self.p,self.Y)
         self.gamma=self.getGamma(T,self.Y)
 ##############################################################################
@@ -2025,15 +2055,15 @@ class stanScram(object):
         This method updates all the XT Diagrams to the current value.
         '''
         #update diagrams
-        for XTDiagram in self.XTDiagrams.values():
-            if iters%(XTDiagram.skipSteps+1)==0:
-                self.__updateXTDiagram(XTDiagram)
+        for diagram in self.XTDiagrams.values():
+            if iters%(diagram.skipSteps+1)==0:
+                self.__updateXTDiagram(diagram)
 ##############################################################################
     def advanceSimulation(self,tFinal,res_p_target=-1.0):
         '''
         Method: advanceSimulation
         ----------------------------------------------------------------------
-        This method advances the simulation until the prescribed time, tFinal 
+        This method advances the simulation until the prescribed time, tFinal
             inputs
                     tFinal=final time
         '''
@@ -2063,7 +2093,7 @@ class stanScram(object):
             self.updateXTDiagrams(iters)
             iters+=1
             res_p = np.linalg.norm(self.p-p_old)
-            if self.verbose and iters%self.outputEvery==0: 
+            if self.verbose and iters%self.outputEvery==0:
                 print("Iteration: %i. Current time: %f. Time step: %e. Max T[K]: %f. Residual(p): %e." \
                 % (iters,self.t,dt,self.getTemperature(self.r,self.p,self.Y).max(),res_p))
             if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):

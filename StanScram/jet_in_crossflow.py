@@ -4,8 +4,27 @@ import pickle
 import numpy as np
 from scipy import optimize, integrate, interpolate, special, stats
 import cantera as ct
+import matplotlib.pyplot as plt
 
 from  StanScram.fpv_table import FPVTable
+
+XSMALL_SIZE = 12
+SMALL_SIZE = 14
+MEDIUM_SIZE = 16
+BIGGER_SIZE = 18
+
+plt.rcParams.update({
+    "text.usetex": True,
+    "font.family": "serif",
+    "font.serif": ["Computer Modern Roman"],
+    "font.size": SMALL_SIZE,
+    "axes.titlesize": SMALL_SIZE,
+    "axes.labelsize": MEDIUM_SIZE,
+    "xtick.labelsize": SMALL_SIZE,
+    "ytick.labelsize": SMALL_SIZE,
+    "legend.fontsize": XSMALL_SIZE,
+    "figure.titlesize": BIGGER_SIZE,
+})
 
 datadir = "./data"
 
@@ -185,6 +204,15 @@ class JICModel():
                                                              self.Z_3D_data[i_m],
                                                              method='cubic')
                 self.Z_3D_interp.append(interp)
+            
+            #DEBUG
+            # import matplotlib.pyplot as plt
+            # fig, ax = plt.subplots()
+            # c = ax.contourf(self.x_3D_data, self.y_3D_data, self.Z_3D_data[1, :, :, 59].T, levels=50,
+            #                 vmin=0.0, vmax=0.1)
+            # ax.set_aspect('equal')
+            # # plt.colorbar(c)
+            # plt.show()
         else:
             self.calc_Z_3D_interp(write=True)
         
@@ -205,6 +233,16 @@ class JICModel():
         if load_chemical_sources:
             L_probe = np.load(os.path.join(datadir, "L_probe.npy"))
             omega_C = np.load(os.path.join(datadir, "omega_C.npy"))
+
+            #DEBUG
+            # fig, ax = plt.subplots()
+            # c = ax.contourf(self.x, L_probe, omega_C[:, 1, :].T, levels=50)
+            # ax.set_xlabel("$x$ [m]")
+            # ax.set_ylabel("$\Lambda$ [-]")
+            # plt.colorbar(c)
+            # fig.savefig("figures/omega_C_phi_035.png", bbox_inches='tight', dpi=300)
+            # breakpoint()
+
             self.omega_C_interpolators = []
             for i in range(len(self.x)):
                 omega_C_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
@@ -736,6 +774,17 @@ class JICModel():
         # Debugging way
         C = self.fpv_table.lookup('PROG', self.Z_3D_data, 0.0, 1.0)
         E_CHEM = self.fpv_table.lookup('E0_CHEM', self.Z_3D_data, 0.0, 1.0)
+
+        #DEBUG
+        # import matplotlib.pyplot as plt
+        # fig, ax = plt.subplots()
+        # c = ax.contourf(self.x_3D_data, self.y_3D_data, C[1, :, :, 59].T, levels=50,
+        #                 vmin=0.0, vmax=1.0)
+        # ax.set_aspect('equal')
+        # # plt.colorbar(c)
+        # plt.show()
+        # breakpoint()
+
         C_profile = np.mean(C, axis=(2, 3))
         E_CHEM_profile = np.mean(E_CHEM, axis=(2, 3))
         self.C_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])

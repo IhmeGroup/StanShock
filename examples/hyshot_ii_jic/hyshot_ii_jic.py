@@ -98,9 +98,7 @@ rho_in =    0.323551 # kg/m^3
 U_in   = 1791.05     # m/s
 T_in   = 1366.81     # K
 M_in   =    2.48942  # -
-mdot_a = rho_in * U_in * h_const * w
-T0_f   = 300.0    # K
-M_f    =   1.0    # -
+T0_f   = 300.0       # K
 
 # Time parameters
 tau = L / U_in
@@ -119,6 +117,7 @@ U_2 = U_in * rho_in / rho_2
 P_2 = P_in * (2 * gamma_in * M_in_comp**2 - (gamma_in - 1)) / (gamma_in + 1)
 
 # Stoichiometry
+mdot_a = rho_in * U_in * h_const * w
 mdot_O2 = 0.23291 * mdot_a
 mdot_N2 = mdot_a - mdot_O2
 gas.TP = 298.15, ct.one_atm
@@ -184,8 +183,9 @@ def fuel_props_from_phi(phi_gl):
 
     # Compute the estimated temperature of the mixture
     # (Pressure will change but this doesn't affect the temperature)
-    # gas.HPX = (mdot_a * H_in + mdot_f * H_f) / (mdot_a + mdot_f), P_in, X_mix
-    # T_mix = gas.T
+    gas.HPX = (mdot_a * H_in + mdot_f * H_f) / (mdot_a + mdot_f), P_in, X_mix
+    T_mix = gas.T
+    delta_T = T_mix - T_in
 
     return rho_f, U_f, T_f
 
@@ -247,26 +247,6 @@ BCs = (BC_inlet, BC_outlet)
 # Load the FPV table
 fpv_table = FPVTable(table_file)
 
-# ##############################################################
-
-# # TEST CASE (Torrez 2011)
-# x_inj = 0.358
-# w = 0.0381
-# h = 0.0254
-# N_f = 1
-# T_f = 248.0
-# p_f = 438.0e3
-# U_f = 1200.0
-# gas.TPX = T_f, p_f, "H2:1"
-# rho_f = gas.density
-# r_f = 2.49e-3 / 2
-
-# T_in = 1280
-# p_in = 261.0e3
-# U_in = 458.0
-# gas.TPY = T_in, p_in, "O2:0.251,N2:0.611,H2O:0.138"
-# rho_in = gas.density
-
 # #################################################################
 
 # Build the injector model
@@ -283,78 +263,52 @@ jic = JICModel(gas, "H2",
 
 ###################################################################
 
-# # ######
-# # # Test plot
-
-# x_plot = x_inj + np.linspace(-5.0e-3, 0.05, 100)
-# y_plot = np.linspace(0, h[0], 50)
-# # x_plot = x_inj + np.linspace(-1.0e-3, 5.0e-3, 100)
-# # y_plot = np.linspace(0, 3.0e-3, 50)
-# z_plot = jic.z_inj[0]
-
-# X_plot, Y_plot = np.meshgrid(x_plot, y_plot, indexing='ij')
-# Z_plot = np.zeros_like(X_plot)
-# Z_plot = np.tile(Z_plot, (len(t_f), 1, 1))
-# for i_x in range(len(x_plot)):
-#     for i_y in range(len(y_plot)):
-#         Z_plot[:, i_x, i_y] = jic.Z_3D_adjusted(X_plot[i_x, i_y], Y_plot[i_x, i_y], z_plot)
+# i_m = 1
+# z_plot = jic.z_inj[1]
+# i_z = np.argmin(np.abs(jic.z_3D_data - z_plot))
 
 # fig, ax = plt.subplots()
-# c = ax.contourf(X_plot*scale, Y_plot*scale, Z_plot[4], np.linspace(0, 1.0, 101))
-# x_plot_ycl = np.linspace(x_inj, x_plot[-1], 1000)
-# ax.plot(x_plot_ycl*scale, jic.y_cl(x_plot_ycl - x_inj)*scale, 'r')
+# c = ax.contourf(jic.x_3D_data*scale,
+#                 jic.y_3D_data*scale,
+#                 jic.Z_3D_data[i_m,:,:,i_z].T,
+#                 levels=np.linspace(0, 0.3, 100))
+# y_cl_max = jic.y_cl(L - x_inj)[i_m]
+# y_cl_arr = np.linspace(0, y_cl_max, 1000)
+# x_cl_arr = jic.x_cl_from_y_cl(y_cl_arr[:,np.newaxis])[:,i_m]
+# ax.plot((x_cl_arr + x_inj)*scale, y_cl_arr*scale, 'r')
 # ax.set_xlabel(r'$x$ [mm]')
 # ax.set_ylabel(r'$y$ [mm]')
-# cbar = plt.colorbar(c)
+# ax.set_xlim((50.0, 100.0))
+# cbar = plt.colorbar(c, ticks=[0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3])
 # cbar.set_label(r'$Z$')
 # ax.set_aspect('equal')
 # plt.savefig(os.path.join(figdir, "injector_xy.png"), bbox_inches='tight', dpi=300)
 
-# # # breakpoint()
-
-# # ######
-# # # Test plot
 
 # x_plot = x_inj + np.array([0.0e-3,
-#                            5.0e-3,
-#                            10.0e-3,
+#                            25.0e-3,
 #                            50.0e-3])
-# # x_plot = x_inj + np.linspace(-1.0e-3, 5.0e-3, 40)
-# y_plot = np.linspace(0, h[0], 100)
-# z_plot = np.linspace(-w/2, w/2, 200)
-
-# Z_plot, Y_plot = np.meshgrid(z_plot, y_plot, indexing='ij')
-# Z_avg_plot = np.zeros_like(x_plot)
+# i_plot = np.array([np.argmin(np.abs(x - x_i)) for x_i in x_plot])
 
 # fig, axs = plt.subplots(len(x_plot), 1, sharex=True, figsize=(6, 8))
-
-# for i_x, x_i in enumerate(tqdm(x_plot)):
-#     ZBilger_plot = np.zeros_like(Z_plot)
-#     for i_z in range(len(z_plot)):
-#         for i_y in range(len(y_plot)):
-#             ZBilger_plot[i_z, i_y] = jic.Z_3D_adjusted(x_i, Y_plot[i_z, i_y], Z_plot[i_z, i_y])
-    
-#     Z_avg_plot[i_x] = np.mean(ZBilger_plot)
-    
-#     c = axs[i_x].contourf(Z_plot*scale, Y_plot*scale, ZBilger_plot, levels=np.linspace(0, 0.3, 101))
+# for i in range(len(x_plot)):
+#     i_x = i_plot[i]
+#     c = axs[i].contourf(jic.z_3D_data*scale,
+#                         jic.y_3D_data*scale,
+#                         jic.Z_3D_data[i_m,i_x,:,:],
+#                         levels=np.linspace(0, 0.3, 100))
 #     for i_inj in range(N_f):
-#         axs[i_x].scatter(jic.z_inj[i_inj]*scale, jic.y_cl(x_i - x_inj)*scale, color='r', marker='x')
-#     axs[i_x].set_ylabel(r'$y$ [mm]')
-#     axs[i_x].set_aspect('equal')
+#         axs[i].scatter(jic.z_inj[i_inj]*scale,
+#                        jic.y_cl(jic.x_3D_data[i_x] - x_inj)[i_m]*scale,
+#                        color='r', marker='x')
+#     axs[i].set_ylabel(r'$y$ [mm]')
+#     axs[i].set_aspect('equal')
 #     # plt.colorbar(c, ax=axs[i_x])
-
-#     # breakpoint()
-
 # axs[-1].set_xlabel(r'$z$ [mm]')
 # plt.tight_layout()
 # plt.savefig(os.path.join(figdir, "injector_zy.png"), bbox_inches='tight', dpi=300)
 
-# fig, ax = plt.subplots()
-# ax.plot(x_plot * scale, Z_avg_plot)
-# ax.axhline(Z_gl, color='r', linestyle='--')
-# ax.set_xlabel(r'$x$ [mm]')
-# ax.set_ylabel(r'$\langle Z \rangle$')
-# plt.savefig(os.path.join(figdir, "injector_z_avg.png"), bbox_inches='tight', dpi=300)
+# breakpoint()
 
 ###################################################################
 
@@ -449,6 +403,14 @@ ss = stanScram(gas,
                includeDiffusion = False,
                outputEvery = 10,
                plotStateInterval = 10)
+ss.addXTDiagram("density", skipSteps=10)
+ss.addXTDiagram("velocity", skipSteps=10)
+ss.addXTDiagram("pressure", skipSteps=10)
+ss.addXTDiagram("temperature", skipSteps=10)
+ss.addXTDiagram("mixture fraction", skipSteps=10)
+ss.addXTDiagram("progress variable", skipSteps=10)
+ss.addXTDiagram("mach", skipSteps=10)
 ss.advanceSimulation(t_f[-1])
+ss.plotXTDiagrams(figdir=figdir)
 
 import code; code.interact(local=locals())
