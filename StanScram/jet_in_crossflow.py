@@ -928,34 +928,27 @@ class JICModel():
         alpha_C = ((Cbar_mesh * (1 - Cbar_mesh) / sigma2_mesh) - 1) * Cbar_mesh
         beta_C = alpha_C * (1 - Cbar_mesh) / Cbar_mesh
 
-        # Full shaped arrays with dimensions [n_tab, n_tab, n_tab, n_ZL, n_ZL]
-        Z_tiled       = np.tile(Z_mesh,     (n_tab, n_tab, n_tab, 1, 1))
-        C_tiled       = np.tile(C_mesh,     (n_tab, n_tab, n_tab, 1, 1))
-        A_tiled       = np.tile(A_mesh,     (n_tab, n_tab, n_tab, 1, 1))
-        omega_C_tiled = np.tile(omega_C_ZL, (n_tab, n_tab, n_tab, 1, 1))
-        alpha_Z_tiled = np.tile(alpha_Z.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
-        beta_Z_tiled  = np.tile( beta_Z.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
-        alpha_C_tiled = np.tile(alpha_C.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
-        beta_C_tiled  = np.tile( beta_C.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
+        print("Assembling table...")
+        self.omega_C_int = np.zeros((n_tab, n_tab, n_tab))
+        for i_Zbar in tqdm(range(n_tab)):
+            for i_Lbar in range(n_tab):
+                for i_S in range(n_tab):
+                    eps = 1e-6
+                    if ((Zbar_mesh[i_Zbar, i_Lbar, i_S] < eps) or
+                        (Zbar_mesh[i_Zbar, i_Lbar, i_S] > 1.0 - eps)):
+                        continue
 
-        # Compute PDFs for all entries in table
-        P_Z = stats.beta.pdf(Z_tiled, alpha_Z_tiled, beta_Z_tiled)
-        P_C = stats.beta.pdf(C_tiled, alpha_C_tiled, beta_C_tiled)
+                    P_Z = stats.beta.pdf(Z_mesh,
+                                         alpha_Z[i_Zbar, i_Lbar, i_S],
+                                         beta_Z[i_Zbar, i_Lbar, i_S])
+                    P_C = stats.beta.pdf(C_mesh,
+                                         alpha_C[i_Zbar, i_Lbar, i_S],
+                                         beta_C[i_Zbar, i_Lbar, i_S])
+                    integrand = omega_C_ZL * P_Z * P_C / A_mesh
+                    integrand[np.isnan(integrand)] = 0.0
+                    self.omega_C_int[i_Zbar, i_Lbar, i_S] = \
+                        integrate.simps(integrate.simps(integrand, L_vec, axis=-1), Z_vec, axis=-1)
 
-        # Compute integrand
-        integrand = omega_C_tiled * P_Z * P_C / A_tiled
-
-        # Sources are zero for Z = 0 and Z = 1, so treat these values
-        eps = 1.0e-6
-        integrand[Z_tiled < eps      ] = 0.0
-        integrand[Z_tiled > 1.0 - eps] = 0.0
-
-        # At this point, treat all NaNs as zero
-        integrand[np.isnan(integrand)] = 0.0
-
-        # Integrate over last 2 dimensions to yield table
-        # omega_C_int has shape [n_tab, n_tab, n_tab]
-        self.omega_C_int = integrate.simps(integrate.simps(integrand, L_vec, axis=-1), Z_vec, axis=-1)
         if write:
             np.save(os.path.join(datadir, "omega_C_int.npy"), self.omega_C_int)
 
