@@ -891,64 +891,80 @@ class JICModel():
         '''
         Method: calc_chemical_sources
         --------------------------------------------------------------------------
-        This method precomputes the chemical source terms as a function of x and L.
+        This method precomputes the chemical source terms as a function of x, mdot_f, and L.
         '''
         print("Precomputing chemical sources...")
-        self.omega_C_interpolators = []
 
-        Z_probe = np.linspace(0.0, 1.0, 1000)
-        # TODO ^ cluster these points around min and max Z
-        L_probe = np.linspace(0.0, 1.0, 200)
-        Z_mesh_ZL, L_mesh_ZL = np.meshgrid(Z_probe, L_probe, indexing='ij')
+        # Grid in Z, L dimensions (to be integrated over)
+        n_ZL = 100
+        Z_vec = np.linspace(0.0, 1.0, n_ZL)
+        L_vec = np.linspace(0.0, 1.0, n_ZL)
+        Z_mesh, L_mesh = np.meshgrid(Z_vec, L_vec, indexing='ij')
+        Cmin_mesh = self.fpv_table.lookup("PROG", Z_mesh, 0.0, 0.0)
+        Cmax_mesh = self.fpv_table.lookup("PROG", Z_mesh, 0.0, 1.0)
+        A_mesh = 1 / (Cmax_mesh - Cmin_mesh)
+        B_mesh = -Cmin_mesh / (Cmax_mesh - Cmin_mesh)
+        C_mesh = (L_mesh - B_mesh) / A_mesh
 
+        # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
+        n_tab = 100
+        Zbar_vec = np.linspace(0.0, 1.0, n_tab)
+        Lbar_vec = np.linspace(0.0, 1.0, n_tab)
+        logsigma2_vec = np.linspace(-10.0, -1.0, n_tab)
+        Zbar_mesh, Lbar_mesh, logsigma2_mesh = np.meshgrid(Zbar_vec, Lbar_vec, logsigma2_vec, indexing='ij')
+        sigma2_mesh = 10.0**logsigma2_mesh
+        Cmin_mesh = self.fpv_table.lookup("PROG", Zbar_mesh, 0.0, 0.0)
+        Cmax_mesh = self.fpv_table.lookup("PROG", Zbar_mesh, 0.0, 1.0)
+        Abar_mesh = 1 / (Cmax_mesh - Cmin_mesh)
+        Bbar_mesh = -Cmin_mesh / (Cmax_mesh - Cmin_mesh)
+        Cbar_mesh = (Lbar_mesh - Bbar_mesh) / Abar_mesh
+
+        # Sample omega_C on Z, L mesh
+        omega_C_ZL = self.fpv_table.lookup("SRC_PROG", Z_mesh, 0.0, L_mesh)
+
+        # Compute PDF shape parameters
+        alpha_Z = ((Zbar_mesh * (1 - Zbar_mesh) / sigma2_mesh) - 1) * Zbar_mesh
+        beta_Z = alpha_Z * (1 - Zbar_mesh) / Zbar_mesh
+        alpha_C = ((Cbar_mesh * (1 - Cbar_mesh) / sigma2_mesh) - 1) * Cbar_mesh
+        beta_C = alpha_C * (1 - Cbar_mesh) / Cbar_mesh
+
+        # Full shaped arrays with dimensions [n_tab, n_tab, n_tab, n_ZL, n_ZL]
+        Z_tiled       = np.tile(Z_mesh,     (n_tab, n_tab, n_tab, 1, 1))
+        C_tiled       = np.tile(C_mesh,     (n_tab, n_tab, n_tab, 1, 1))
+        A_tiled       = np.tile(A_mesh,     (n_tab, n_tab, n_tab, 1, 1))
+        omega_C_tiled = np.tile(omega_C_ZL, (n_tab, n_tab, n_tab, 1, 1))
+        alpha_Z_tiled = np.tile(alpha_Z.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
+        beta_Z_tiled  = np.tile( beta_Z.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
+        alpha_C_tiled = np.tile(alpha_C.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
+        beta_C_tiled  = np.tile( beta_C.reshape(n_tab, n_tab, n_tab, 1, 1), (1, 1, 1, n_ZL, n_ZL))
+
+        # Compute PDFs for all entries in table
+        P_Z = stats.beta.pdf(Z_tiled, alpha_Z_tiled, beta_Z_tiled)
+        P_C = stats.beta.pdf(C_tiled, alpha_C_tiled, beta_C_tiled)
+
+        # Compute integrand
+        integrand = omega_C_tiled * P_Z * P_C / A_tiled
+
+        # Sources are zero for Z = 0 and Z = 1, so treat these values
+        eps = 1.0e-6
+        integrand[Z_tiled < eps      ] = 0.0
+        integrand[Z_tiled > 1.0 - eps] = 0.0
+
+        # At this point, treat all NaNs as zero
+        integrand[np.isnan(integrand)] = 0.0
+
+        # Integrate over last 2 dimensions to yield table
+        # omega_C_int has shape [n_tab, n_tab, n_tab]
+        self.omega_C_int = integrate.simps(integrate.simps(integrand, L_vec, axis=-1), Z_vec, axis=-1)
         if write:
-            np.save(os.path.join(datadir, "L_probe.npy"), L_probe)
-            omega_C = np.zeros((len(self.x),
-                                len(self.mdot_inj_unique),
-                                len(L_probe)))
+            np.save(os.path.join(datadir, "omega_C_int.npy"), self.omega_C_int)
 
-        for i in tqdm(range(len(self.x))):
-            Z_avg = self.Z_avg_profile[:, i]
-            Z_var = self.Z_var_profile[:, i]
-            omega_C_i = []
-
-            if self.x[i] > self.x_noz:
-                # Freeze the chemistry in the nozzle
-                omega_C_i = lambda mdot, L : 0.0
-                if write:
-                    omega_C[i, :, :] = 0.0
-            elif np.all(Z_avg == 0.0):
-                # No fuel, don't bother calculating
-                omega_C_i = lambda mdot, L : 0.0
-                if write:
-                    omega_C[i, :, :] = 0.0
-            else:
-                a = ((Z_avg * (1 - Z_avg) / Z_var) - 1) * Z_avg
-                b = a * (1 - Z_avg) / Z_avg
-                p_Z = stats.beta.pdf(np.tile(Z_probe, (len(self.mdot_inj_unique), 1)),
-                                     np.tile(a, (len(Z_probe), 1)).T,
-                                     np.tile(b, (len(Z_probe), 1)).T)
-                omega_C_probe = self.fpv_table.lookup("SRC_PROG", Z_mesh_ZL, 0.0, L_mesh_ZL) # [1/s]
-                # PDF may have singularities at the boundaries, but the source term should be
-                # zero there anyway
-                p_Z[:,  0] = 0.0
-                p_Z[:, -1] = 0.0
-                omega_C_probe[ 0, :] = 0.0
-                omega_C_probe[-1, :] = 0.0
-                omega_C_probe_mdots = np.zeros((len(self.mdot_inj_unique), len(L_probe)))
-                for i_m in range(len(self.mdot_inj_unique)):
-                    omega_C_probe_mdots[i_m, :] = np.trapz(omega_C_probe * p_Z[i_m, :].reshape((-1, 1)),
-                                                           Z_probe, axis=0)
-                omega_C_probe_mdots[np.isnan(omega_C_probe_mdots)] = 0.0
-                omega_C_i = interpolate.RegularGridInterpolator((self.mdot_inj_unique, L_probe),
-                                                                omega_C_probe_mdots)
-                if write:
-                    omega_C[i, :, :] = omega_C_probe_mdots
-
-            self.omega_C_interpolators.append(omega_C_i)
+        # Build 3D table interpolator
+        self.omega_C_int_interp = interpolate.RegularGridInterpolator(
+            (Zbar_vec, Lbar_vec, logsigma2_vec),
+            self.omega_C_int)
         
-        if write:
-            np.save(os.path.join(datadir, "omega_C.npy"), omega_C)
+        breakpoint()
    
     def get_chemical_sources(self, Z, C):
         '''
