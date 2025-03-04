@@ -180,22 +180,26 @@ def fuel_props_from_phi(phi_gl):
         return np.nan, 0.0, 300.0
 
     gas.set_equivalence_ratio(phi_gl, X_f, X_ox)
+    # X_mix = gas.X
     Yf_gl = gas.Y[gas.species_index("H2")]
     mdot_f = (Yf_gl / gas.Y[gas.species_index("O2")]) * mdot_O2
+    # Z_gl = gas.mixture_fraction(X_f, X_ox)
 
     # Compute the fuel plenum (stagnation) pressure to achieve mdot_f
-    P0_f, M_f = P0_from_mdot(mdot_f, T0_f, A_f_tot)
+    _, M_f = P0_from_mdot(mdot_f, T0_f, A_f_tot)
     T_f = T0_f * (1 + (gamma_f - 1) / 2 * M_f**2) ** (-1)
     a_f = np.sqrt(gamma_f * R_f * T_f)
     U_f = M_f * a_f
     rho_f = mdot_f / (U_f * A_f_tot)
-    gas.TDX = T_f, rho_f, X_f
+    # gas.TDX = T_f, rho_f, X_f
+    # P_f = gas.P
+    # H_f = gas.enthalpy_mass
 
     # Compute the estimated temperature of the mixture
     # (Pressure will change but this doesn't affect the temperature)
-    gas.HPX = (mdot_a * H_in + mdot_f * H_f) / (mdot_a + mdot_f), P_in, X_mix
-    T_mix = gas.T
-    delta_T = T_mix - T_in
+    # gas.HPX = (mdot_a * H_in + mdot_f * H_f) / (mdot_a + mdot_f), P_in, X_mix
+    # T_mix = gas.T
+    # delta_T = T_mix - T_in
 
     return rho_f, U_f, T_f
 

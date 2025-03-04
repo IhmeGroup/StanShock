@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
-
-import numpy as np
-
-import matplotlib.pyplot as plt
-from joblib import Parallel, delayed
-from tqdm_joblib import tqdm_joblib
 import functools
 import warnings
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+from joblib import Parallel, delayed
 from scipy import integrate, interpolate, optimize, special, stats
 from tqdm import tqdm
+from tqdm_joblib import tqdm_joblib
 
 from stanscram.physics.flamelet import FPVTable
 
@@ -65,7 +64,6 @@ class JICModel:
         load_Z_3D=False,
         load_Z_avg_var_profiles=False,
         load_chemical_sources=False,
-        load_MIB_profile=False,
     ):
         """
         This method initializes the Jet-in-Crossflow model with the following
