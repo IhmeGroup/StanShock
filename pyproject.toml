@@ -38,6 +38,7 @@ dependencies = [
   "matplotlib",
   "numba",
   "cantera",
+  "joblib",
   "tqdm",
   "tqdm_joblib",
   "types-tqdm",
