@@ -55,8 +55,8 @@ def initialize_constant(domain, state, x):
     domain.p = np.ones(domain.n) * state[0].P
     domain.Y = np.zeros((domain.n, domain.n_scalars))
     if domain.physics == "FPV":
-        domain.Y[:, 0] = domain.ZBilger(state[0].Y)
-        domain.Y[:, 1] = domain.Prog(state[0].Y)
+        domain.Y[:, 0] = domain.get_bilger_mixture_fraction(state[0].Y)
+        domain.Y[:, 1] = domain.get_progress_variable(state[0].Y)
     elif domain.physics == "FRC":
         for k in range(domain.n_scalars):
             domain.Y[:, k] = state[0].Y[k]
@@ -94,8 +94,8 @@ def initialize_riemann_problem(domain, leftState, rightState, geometry):
     domain.p = np.ones(domain.n) * leftState[0].P
     domain.Y = np.zeros((domain.n, domain.n_scalars))
     if domain.physics == "FPV":
-        domain.Y[:, 0] = domain.ZBilger(leftState[0].Y)
-        domain.Y[:, 1] = domain.Prog(leftState[0].Y)
+        domain.Y[:, 0] = domain.get_bilger_mixture_fraction(leftState[0].Y)
+        domain.Y[:, 1] = domain.get_progress_variable(leftState[0].Y)
     elif domain.physics == "FRC":
         for kSp in range(domain.n_scalars):
             domain.Y[:, kSp] = leftState[0].Y[kSp]
@@ -106,8 +106,8 @@ def initialize_riemann_problem(domain, leftState, rightState, geometry):
     domain.u[index] = rightState[1]
     domain.p[index] = rightState[0].P
     if domain.physics == "FPV":
-        domain.Y[index, 0] = domain.ZBilger(rightState[0].Y)
-        domain.Y[index, 1] = domain.Prog(rightState[0].Y)
+        domain.Y[index, 0] = domain.get_bilger_mixture_fraction(rightState[0].Y)
+        domain.Y[index, 1] = domain.get_progress_variable(rightState[0].Y)
     elif domain.physics == "FRC":
         for kSp in range(domain.n_scalars):
             domain.Y[index, kSp] = rightState[0].Y[kSp]
@@ -158,11 +158,11 @@ def initialize_diffuse_interface(domain, leftState, rightState, geometry, Delta)
             domain.x,
             xShock,
             Delta,
-            domain.ZBilger(leftGas.Y),
-            domain.ZBilger(rightGas.Y),
+            domain.get_bilger_mixture_fraction(leftGas.Y),
+            domain.get_bilger_mixture_fraction(rightGas.Y),
         )
         domain.Y[:, 1] = smoothing_function(
-            domain.x, xShock, Delta, domain.Prog(leftGas.Y), domain.Prog(rightGas.Y)
+            domain.x, xShock, Delta, domain.get_progress_variable(leftGas.Y), domain.get_get_progress_variableress_variable(rightGas.Y)
         )
     elif domain.physics == "FRC":
         for kSp in range(domain.n_scalars):
