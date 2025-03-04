@@ -33,11 +33,10 @@ should thus be considered unstable until further notice.
 
 ## Installation
 
-StanShock has been tested using python 3.9 and 3.13.
-It is recommended to install the requirements into a virtual environment such
-as that provided by [conda](https://github.com/conda-forge/miniforge). With
-conda one can create and activate a new virtual environment named _stanshock_
-for Python 3.13 using:
+StanShock has been tested using python 3.9 and 3.13. It is recommended to
+install the requirements into a virtual environment such as that provided by
+[conda](https://github.com/conda-forge/miniforge). With conda one can create and
+activate a new virtual environment named _stanshock_ for Python 3.13 using:
 
 ```bash
 conda create --name stanshock python=3.13
