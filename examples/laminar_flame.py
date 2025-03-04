@@ -12,7 +12,9 @@ from stanshock.components.combustor import Combustor
 
 
 def main(
+    sim_time: float | None = None,
     mech_filename: str = "ohn.yaml",
+    plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
 ) -> None:
@@ -74,58 +76,64 @@ def main(
         ss.Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
     T = ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y)
     ss.gamma = ss.thermoTable.get_gamma(T, ss.Y)
-    # calculate the final time
-    tFinal = ntFlowThrough * (xUpper - xLower) / (uUnburned + uBurned) * 2.0
+
+    # calculate the final time if not specified
+    if sim_time is None:
+        sim_time = ntFlowThrough * (xUpper - xLower) / (uUnburned + uBurned) * 2.0
 
     # Solve
     t0 = time.perf_counter()
-    ss.advance_simulation(tFinal)
+    ss.advance_simulation(sim_time)
     t1 = time.perf_counter()
     print("The process took ", t1 - t0)
 
     # plot setup
-    plt.close("all")
-    font = {"family": "serif", "serif": ["computer modern roman"]}
-    plt.rc("font", **font)
-    mpl.rcParams["font.size"] = fontsize
-    plt.rc("text", usetex=True)
-    # plot
-    plt.plot(
-        (flame.grid - xCenter) / flameThickness,
-        flame.T / flame.T[-1],
-        "r",
-        label=r"$T/T_\mathrm{F}$",
-    )
-    T = ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y)
-    plt.plot((ss.x - xCenter) / flameThickness, T / flame.T[-1], "r--s")
-    iOH = gas.species_index("OH")
-    plt.plot(
-        (flame.grid - xCenter) / flameThickness,
-        flame.Y[iOH, :] * 10,
-        "k",
-        label=r"$Y_\mathrm{OH}\times 10$",
-    )
-    plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iOH] * 10, "k--s")
-    iO2 = gas.species_index("O2")
-    plt.plot(
-        (flame.grid - xCenter) / flameThickness,
-        flame.Y[iO2, :],
-        "g",
-        label=r"$Y_\mathrm{O_2}$",
-    )
-    plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iO2], "g--s")
-    iH2 = gas.species_index("H2")
-    plt.plot(
-        (flame.grid - xCenter) / flameThickness,
-        flame.Y[iH2, :],
-        "b",
-        label=r"$Y_\mathrm{H_2}$",
-    )
-    plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iH2], "b--s")
-    plt.xlabel(r"$x/\delta_\mathrm{F}$")
-    plt.legend(loc="best")
-    if show_results:
-        plt.show()
+    if plot_results:
+        plt.close("all")
+        font = {"family": "serif", "serif": ["computer modern roman"]}
+        plt.rc("font", **font)
+        mpl.rcParams["font.size"] = fontsize
+        plt.rc("text", usetex=True)
+        # plot
+        plt.plot(
+            (flame.grid - xCenter) / flameThickness,
+            flame.T / flame.T[-1],
+            "r",
+            label=r"$T/T_\mathrm{F}$",
+        )
+        T = ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y)
+        plt.plot((ss.x - xCenter) / flameThickness, T / flame.T[-1], "r--s")
+        iOH = gas.species_index("OH")
+        plt.plot(
+            (flame.grid - xCenter) / flameThickness,
+            flame.Y[iOH, :] * 10,
+            "k",
+            label=r"$Y_\mathrm{OH}\times 10$",
+        )
+        plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iOH] * 10, "k--s")
+        iO2 = gas.species_index("O2")
+        plt.plot(
+            (flame.grid - xCenter) / flameThickness,
+            flame.Y[iO2, :],
+            "g",
+            label=r"$Y_\mathrm{O_2}$",
+        )
+        plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iO2], "g--s")
+        iH2 = gas.species_index("H2")
+        plt.plot(
+            (flame.grid - xCenter) / flameThickness,
+            flame.Y[iH2, :],
+            "b",
+            label=r"$Y_\mathrm{H_2}$",
+        )
+        plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iH2], "b--s")
+        plt.xlabel(r"$x/\delta_\mathrm{F}$")
+        plt.legend(loc="best")
+        if show_results:
+            plt.show()
+
+        if results_location is not None:
+            plt.savefig(results_location / "laminarFlame.pdf")
 
     if results_location is not None:
         results_location = Path(results_location)
@@ -135,7 +143,6 @@ def main(
             position=ss.x,
             temperature=ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y),
         )
-        plt.savefig(results_location / "laminarFlame.pdf")
 
 
 def flameSpeed(gas, flameThickness, returnFlame=False):

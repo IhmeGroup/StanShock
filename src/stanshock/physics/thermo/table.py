@@ -59,7 +59,6 @@ def get_cp_compiled(T, Y, TTable, a, b):
     # determine the indices
     indices = np.zeros(nX, dtype=np.int64)
     for iX in range(nX):
-        print(f"{iX=}, {T[iX]=}, {TMin=}, {dT=}")
         indices[iX] = int((T[iX] - TMin) / dT)
     # determine cp
     cp = np.zeros((nX,))
