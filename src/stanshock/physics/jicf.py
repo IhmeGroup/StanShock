@@ -1067,7 +1067,7 @@ class JICModel:
             # ax.set_ylabel(r"$\overline{C}$ [-]")
             # fig.colorbar(c)
             # fig.savefig("figures/integrand.png", bbox_inches='tight', dpi=300)
-            
+
             # breakpoint()
             result = integrate.simps(
                 integrate.simps(integrand, L_vec, axis=-1), Z_vec, axis=-1
@@ -1206,7 +1206,9 @@ class JICModel:
             if self.x[i_x] < self.x_inj:
                 continue
             # Interpolate into fluid tip positions to get the mass flow rate
-            C[i_x] = np.interp(mdot_inj[i_x], self.mdot_inj_unique, self.C_profile[:, i_x])
+            C[i_x] = np.interp(
+                mdot_inj[i_x], self.mdot_inj_unique, self.C_profile[:, i_x]
+            )
             E_CHEM[i_x] = np.interp(
                 mdot_inj[i_x], self.mdot_inj_unique, self.E_CHEM_profile[:, i_x]
             )
