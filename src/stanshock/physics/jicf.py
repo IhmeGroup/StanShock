@@ -1069,8 +1069,8 @@ class JICModel:
             # fig.savefig("figures/integrand.png", bbox_inches='tight', dpi=300)
 
             # breakpoint()
-            result = integrate.simps(
-                integrate.simps(integrand, L_vec, axis=-1), Z_vec, axis=-1
+            result = integrate.simpson(
+                integrate.simpson(integrand, x=L_vec, axis=-1), x=Z_vec, axis=-1
             )
         return (i_Zbar, i_Lbar, i_S, result)
 
