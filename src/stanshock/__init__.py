@@ -1,7 +1,8 @@
 """
 Copyright (c) 2025 Stanford University. All rights reserved.
 
-StanScram: Quasi-1D gas dynamics solver designed to model scramjet engines.
+StanShock: Quasi-1D gas dynamics solver designed to model shock tube
+experiments and scramjet engines.
 """
 
 from __future__ import annotations

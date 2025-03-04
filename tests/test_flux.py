@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from stanscram.numerics.inviscid_flux import hllc_flux, lax_friedrichs_flux
+from stanshock.numerics.inviscid_flux import hllc_flux, lax_friedrichs_flux
 
 lax_friedrichs_flux = lax_friedrichs_flux.__wrapped__  # unwrap for coverage testing
 hllc_flux = hllc_flux.__wrapped__

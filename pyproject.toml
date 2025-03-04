@@ -4,12 +4,13 @@ build-backend = "hatchling.build"
 
 
 [project]
-name = "StanScram"
+name = "StanShock"
 authors = [
+  { name = "Kevin Grogan", email = "kevin.p.grogan@gmail.com" },
   { name = "Matthew Bonanni", email = "mbonanni@stanford.edu" },
   { name = "Tim Dawson", email = "tim.dawson@cfd-research.com" },
 ]
-description = "Quasi-1D gas dynamics solver designed to model scramjet engines."
+description = "Quasi-1D gas dynamics solver designed to model shock tube experiments and scramjet engines."
 readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [
@@ -38,6 +39,7 @@ dependencies = [
   "numba",
   "cantera",
   "tqdm",
+  "tqdm_joblib",
   "types-tqdm",
   "h5py",
 ]
@@ -60,15 +62,15 @@ docs = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/IhmeGroup/StanScram"
-"Bug Tracker" = "https://github.com/IhmeGroup/StanScram/issues"
-Discussions = "https://github.com/IhmeGroup/StanScram/discussions"
-Changelog = "https://github.com/IhmeGroup/StanScram/releases"
+Homepage = "https://github.com/IhmeGroup/StanShock"
+"Bug Tracker" = "https://github.com/IhmeGroup/StanShock/issues"
+Discussions = "https://github.com/IhmeGroup/StanShock/discussions"
+Changelog = "https://github.com/IhmeGroup/StanShock/releases"
 
 
 [tool.hatch]
 version.source = "vcs"
-build.hooks.vcs.version-file = "src/stanscram/_version.py"
+build.hooks.vcs.version-file = "src/stanshock/_version.py"
 
 [tool.hatch.envs.default]
 features = ["test"]
@@ -76,9 +78,9 @@ scripts.test = "pytest {args}"
 
 
 [tool.uv]
-reinstall-package = ["stanscram"]
+reinstall-package = ["stanshock"]
 dev-dependencies = [
-  "stanscram[test]",
+  "stanshock[test]",
 ]
 
 
@@ -96,7 +98,7 @@ testpaths = [
 
 
 [tool.coverage]
-run.source = ["stanscram"]
+run.source = ["stanshock"]
 report.exclude_also = [
   '\.\.\.',
   'if typing.TYPE_CHECKING:',
@@ -114,7 +116,7 @@ disallow_incomplete_defs = false
 mypy_path = "stubs"
 
 [[tool.mypy.overrides]]
-module = "stanscram.*"
+module = "stanshock.*"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
@@ -154,7 +156,7 @@ ignore = [
 ]
 isort.required-imports = ["from __future__ import annotations"]
 # Uncomment if using a _compat.typing backport
-# typing-modules = ["stanscram._compat.typing"]
+# typing-modules = ["stanshock._compat.typing"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["T20"]

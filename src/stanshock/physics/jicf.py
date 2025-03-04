@@ -11,7 +11,7 @@ from scipy import integrate, interpolate, optimize, special, stats
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 
-from stanscram.physics.flamelet import FPVTable
+from stanshock.physics.flamelet import FPVTable
 
 XSMALL_SIZE = 12
 SMALL_SIZE = 14

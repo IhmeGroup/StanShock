@@ -1,39 +1,19 @@
-"""
-Copyright 2017 Kevin Grogan
-Copyright 2024 Matthew Bonanni
-
-This file is part of StanScram.
-
-StanScram is free software: you can redistribute it and/or modify
-it under the terms of the GNU Lesser General Public License as published by
-the Free Software Foundation, either version 3 of the License.
-
-StanScram is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-GNU Lesser General Public License for more details.
-
-You should have received a copy of the GNU Lesser General Public License
-along with StanScram.  If not, see <https://www.gnu.org/licenses/>.
-"""
-
-# necessary modules
 from __future__ import annotations
 
 import cantera as ct
 import numpy as np
 
-from stanscram.numerics.face_extrapolation import weno5
-from stanscram.numerics.inviscid_flux import hllc_flux
-from stanscram.numerics.viscous_flux import viscous_flux
-from stanscram.physics.skinfriction import SkinFriction
-from stanscram.physics.thermo.table import ThermoTable
-from stanscram.processing.initialize import (
+from stanshock.numerics.face_extrapolation import weno5
+from stanshock.numerics.inviscid_flux import hllc_flux
+from stanshock.numerics.viscous_flux import viscous_flux
+from stanshock.physics.skinfriction import SkinFriction
+from stanshock.physics.thermo.table import ThermoTable
+from stanshock.processing.initialize import (
     initialize_constant,
     initialize_diffuse_interface,
     initialize_riemann_problem,
 )
-from stanscram.processing.plot import plot_state
+from stanshock.processing.plot import plot_state
 
 
 class Combustor:
@@ -738,7 +718,7 @@ class Combustor:
         """
         This method advances the quasi-1D terms used to model area changes in
         the shock tube. The client must supply the functions dlnAdt and dlnAdx
-        to the StanScram object.
+        to the Combustor object.
             inputs
                 dt=time step
         """

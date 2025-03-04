@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from stanscram.numerics.face_extrapolation import mt, weno5
+from stanshock.numerics.face_extrapolation import mt, weno5
 
 weno5 = weno5.__wrapped__  # unwrap for test coverage
 

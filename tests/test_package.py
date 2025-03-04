@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import importlib.metadata
 
-import stanscram as m
+import stanshock as m
 
 
 def test_version():
-    assert importlib.metadata.version("stanscram") == m.__version__
+    assert importlib.metadata.version("stanshock") == m.__version__

@@ -71,7 +71,7 @@ pytest
 Use pytest-cov to generate coverage reports:
 
 ```bash
-pytest --cov=StanScram
+pytest --cov=StanShock
 ```
 
 # Building docs
