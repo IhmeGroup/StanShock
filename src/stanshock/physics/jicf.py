@@ -64,6 +64,7 @@ class JICModel:
         load_Z_3D=False,
         load_Z_avg_var_profiles=False,
         load_chemical_sources=False,
+        load_MIB_profile=False,
     ):
         """
         This method initializes the Jet-in-Crossflow model with the following
@@ -270,16 +271,31 @@ class JICModel:
             self.omega_C_int_interp = interpolate.RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
+
+            # fig, ax = plt.subplots()
+            # c = ax.contourf(self.Zbar_vec, self.Lbar_vec, self.omega_C_int[:, :, 50].T, levels=50)
+            # ax.set_xlabel(r"$\overline{Z}$ [-]")
+            # ax.set_ylabel(r"$\overline{C}$ [-]")
+            # fig.colorbar(c)
+            # fig.savefig("figures/omega_C_low.png", bbox_inches='tight', dpi=300)
+
+            # fig, ax = plt.subplots()
+            # c = ax.contourf(self.Zbar_vec, self.Lbar_vec, self.omega_C_int[:, :, -45].T, levels=50)
+            # ax.set_xlabel(r"$\overline{Z}$ [-]")
+            # ax.set_ylabel(r"$\overline{C}$ [-]")
+            # fig.colorbar(c)
+            # fig.savefig("figures/omega_C_hi.png", bbox_inches='tight', dpi=300)
+            # breakpoint()
         else:
             self.calc_chemical_sources(write=True)
 
         # Calculate the progress variable and chemical energy profiles for the
         # mixed is burned (MIB) model
-        # if load_MIB_profile:
-        #     self.C_profile = np.load(datadir / "C_profile_MIB.npy")
-        #     self.E_CHEM_profile = np.load(datadir / "E_CHEM_profile_MIB.npy")
-        # else:
-        #     self.calc_MIB_profile(write=True)
+        if load_MIB_profile:
+            self.C_profile = np.load(datadir / "C_profile_MIB.npy")
+            self.E_CHEM_profile = np.load(datadir / "E_CHEM_profile_MIB.npy")
+        else:
+            self.calc_MIB_profile(write=True)
 
     def __prep_zbilger(self):
         #             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H - (Y_O - Yo_O)/W_O
@@ -1022,8 +1038,37 @@ class JICModel:
             P_C = stats.beta.pdf(
                 C_mesh, alpha_C[i_Zbar, i_Lbar, i_S], beta_C[i_Zbar, i_Lbar, i_S]
             )
+            P_C = np.ones_like(C_mesh)
+            P_C /= np.sum(P_C)
             integrand = omega_C_ZL * P_Z * P_C / A_mesh
             integrand[np.isnan(integrand)] = 0.0
+
+            # # DEBUG
+            # integrand[Z_mesh < eps] = 0.0
+            # integrand[Z_mesh > 1.0 - eps] = 0.0
+
+            # fig, ax = plt.subplots()
+            # c = ax.contourf(P_Z.T, levels=50)
+            # ax.set_xlabel(r"$\overline{Z}$ [-]")
+            # ax.set_ylabel(r"$\overline{C}$ [-]")
+            # fig.colorbar(c)
+            # fig.savefig("figures/P_Z.png", bbox_inches='tight', dpi=300)
+
+            # fig, ax = plt.subplots()
+            # c = ax.contourf(np.log10(P_C.T), levels=50)
+            # ax.set_xlabel(r"$\overline{Z}$ [-]")
+            # ax.set_ylabel(r"$\overline{C}$ [-]")
+            # fig.colorbar(c)
+            # fig.savefig("figures/P_C.png", bbox_inches='tight', dpi=300)
+
+            # fig, ax = plt.subplots()
+            # c = ax.contourf(np.log10(integrand.T), levels=50)
+            # ax.set_xlabel(r"$\overline{Z}$ [-]")
+            # ax.set_ylabel(r"$\overline{C}$ [-]")
+            # fig.colorbar(c)
+            # fig.savefig("figures/integrand.png", bbox_inches='tight', dpi=300)
+            
+            # breakpoint()
             result = integrate.simps(
                 integrate.simps(integrand, L_vec, axis=-1), Z_vec, axis=-1
             )
@@ -1047,10 +1092,10 @@ class JICModel:
         C_mesh = (L_mesh - B_mesh) / A_mesh
 
         # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
-        n_tab = 100
-        self.Zbar_vec = np.linspace(0.0, 1.0, n_tab)
-        self.Lbar_vec = np.linspace(0.0, 1.0, n_tab)
-        self.logsigma2_vec = np.linspace(-10.0, -1.0, n_tab)
+        n_tab = (100, 100, 100)
+        self.Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
+        self.Lbar_vec = np.linspace(0.0, 1.0, n_tab[1])
+        self.logsigma2_vec = np.linspace(-10.0, -1.0, n_tab[2])
         Zbar_mesh, Lbar_mesh, logsigma2_mesh = np.meshgrid(
             self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec, indexing="ij"
         )
@@ -1070,7 +1115,13 @@ class JICModel:
         alpha_C = ((Cbar_mesh * (1 - Cbar_mesh) / sigma2_mesh) - 1) * Cbar_mesh
         beta_C = alpha_C * (1 - Cbar_mesh) / Cbar_mesh
 
-        self.omega_C_int = np.zeros((n_tab, n_tab, n_tab))
+        eps = 1.0e-6
+        alpha_Z = np.maximum(alpha_Z, eps)
+        beta_Z = np.maximum(beta_Z, eps)
+        alpha_C = np.maximum(alpha_C, eps)
+        beta_C = np.maximum(beta_C, eps)
+
+        self.omega_C_int = np.zeros(n_tab)
         compute_func = functools.partial(
             self._compute_omega_C_int,
             Z_mesh=Z_mesh,
@@ -1087,10 +1138,18 @@ class JICModel:
         )
         tasks = [
             (i_Zbar, i_Lbar, i_S)
-            for i_Zbar in range(n_tab)
-            for i_Lbar in range(n_tab)
-            for i_S in range(n_tab)
+            for i_Zbar in range(n_tab[0])
+            for i_Lbar in range(n_tab[1])
+            for i_S in range(n_tab[2])
         ]
+
+        # Serial version (for debugging)
+        # results = []
+        # for i_Zbar, i_Lbar, i_S in tasks:
+        #     value = compute_func(i_Zbar, i_Lbar, i_S)
+        #     results.append((i_Zbar, i_Lbar, i_S, value))
+
+        # Parallel version
         with tqdm_joblib(tqdm(desc="Assembling table", total=len(tasks))):
             results = Parallel(n_jobs=-1)(
                 delayed(compute_func)(i_Zbar, i_Lbar, i_S)
@@ -1127,7 +1186,8 @@ class JICModel:
         )
         Zvar = self.Z_var_profile_interp((mdot_inj, self.x))
         Zvar = np.maximum(Zvar, 10 ** self.logsigma2_vec.min())
-        return self.omega_C_int_interp((Z, C, np.log10(Zvar)))
+        L = self.fpv_table.L_from_C(Z, C)
+        return self.omega_C_int_interp((Z, L, np.log10(Zvar)))
 
     def get_MIB_profiles(self):
         """
@@ -1136,17 +1196,19 @@ class JICModel:
         """
         C = np.zeros(len(self.x))
         E_CHEM = np.zeros(len(self.x))
+        mdot_inj = np.interp(
+            self.x,
+            np.flip(self.fluid_tips, axis=0)[:, 0],
+            np.flip(self.fluid_tips, axis=0)[:, 1],
+        )
 
         for i_x in range(len(self.x)):
             if self.x[i_x] < self.x_inj:
                 continue
             # Interpolate into fluid tip positions to get the mass flow rate
-            mdot_inj = np.interp(
-                self.x[i_x], self.fluid_tips[:, 0], self.fluid_tips[:, 1]
-            )
-            C[i_x] = np.interp(mdot_inj, self.mdot_inj_unique, self.C_profile[:, i_x])
+            C[i_x] = np.interp(mdot_inj[i_x], self.mdot_inj_unique, self.C_profile[:, i_x])
             E_CHEM[i_x] = np.interp(
-                mdot_inj, self.mdot_inj_unique, self.E_CHEM_profile[:, i_x]
+                mdot_inj[i_x], self.mdot_inj_unique, self.E_CHEM_profile[:, i_x]
             )
 
         return C, E_CHEM
