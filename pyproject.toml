@@ -34,14 +34,14 @@ dynamic = ["version"]
 dependencies = [
   "numpy",
   "scipy",
-  "scipy-stubs",
+  # "scipy-stubs",
   "matplotlib",
   "numba",
   "cantera",
   "joblib",
   "tqdm",
   "tqdm_joblib",
-  "types-tqdm",
+  # "types-tqdm",
   "h5py",
 ]
 
