@@ -11,6 +11,7 @@ from scipy import interpolate, optimize
 from stanshock.components.combustor import Combustor
 from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.jicf import JICModel
+from stanshock.processing.plot import XTDiagram
 
 plt.rcParams.update(
     {
@@ -274,7 +275,7 @@ jic = JICModel(
     fpv_table=fpv_table,
     load_Z_3D=(datadir / "Z_3D.npy").exists(),
     load_Z_avg_var_profiles=(datadir / "Z_var_profile.npy").exists(),
-    load_chemical_sources=(datadir / "L_probe.npy").exists(),
+    load_chemical_sources=(datadir / "omega_C_int.npy").exists(),
     load_MIB_profile=(datadir / "C_profile_MIB.npy").exists(),
 )
 
@@ -422,14 +423,19 @@ ss = Combustor(
     outputEvery=10,
     plotStateInterval=10,
 )
-ss.addXTDiagram("density", skipSteps=10)
-ss.addXTDiagram("velocity", skipSteps=10)
-ss.addXTDiagram("pressure", skipSteps=10)
-ss.addXTDiagram("temperature", skipSteps=10)
-ss.addXTDiagram("mixture fraction", skipSteps=10)
-ss.addXTDiagram("progress variable", skipSteps=10)
-ss.addXTDiagram("mach", skipSteps=10)
-ss.advanceSimulation(t_f[-1])
-ss.plotXTDiagrams(figdir=figdir)
+
+plot_variables = [
+    "density",
+    "velocity",
+    "pressure",
+    "temperature",
+    "mixture fraction",
+    "progress variable",
+    "mach",
+]
+ss.XTDiagrams = [XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables]
+ss.advance_simulation(t_f[-1])
+for diagram in ss.XTDiagrams:
+    diagram.plot(figdir=figdir)
 
 code.interact(local=locals())

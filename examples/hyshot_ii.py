@@ -166,7 +166,7 @@ def plot_sim(ss):
     u = ss.u
     p = ss.p
     Y = ss.Y
-    T = ss.thermoTable.getTemperature(rho, p, Y)
+    T = ss.thermoTable.get_temperature(rho, p, Y)
 
     M = np.zeros_like(x)
     for i in range(len(x)):

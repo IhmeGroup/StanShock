@@ -137,7 +137,7 @@ class Combustor:
             Z = Y[:, 0]
             C = Y[:, 1]
             Q = np.zeros_like(self.x)
-            L = self.fpv_table.L_from_C(Z, C)
+            L = self.fpv_table.get_normalized_progress_variable(Z, C)
             cp = self.fpv_table.get_cp(Z, Q, L, T)
         elif self.physics == "FRC":
             cp = self.thermoTable.get_cp(T, Y)
@@ -157,7 +157,7 @@ class Combustor:
             Z = Y[:, 0]
             C = Y[:, 1]
             Q = np.zeros_like(self.x)
-            L = self.fpv_table.L_from_C(Z, C)
+            L = self.fpv_table.get_normalized_progress_variable(Z, C)
             gamma = self.fpv_table.get_gamma(Z, Q, L, T)
         elif self.physics == "FRC":
             gamma = self.thermoTable.get_gamma(T, Y)
@@ -178,7 +178,7 @@ class Combustor:
             Z = Y[:, 0]
             C = Y[:, 1]
             Q = np.zeros_like(self.x)
-            L = self.fpv_table.L_from_C(Z, C)
+            L = self.fpv_table.get_normalized_progress_variable(Z, C)
             mu = self.fpv_table.get_mu(Z, Q, L, T)
         elif self.physics == "FRC":
             for i, Ti in enumerate(T):
@@ -203,8 +203,8 @@ class Combustor:
             Z = Y[:, 0]
             C = Y[:, 1]
             Q = np.zeros_like(self.x)
-            L = self.fpv_table.L_from_C(Z, C)
-            loc = self.fpv_table.get_loc(Z, Q, L, T)
+            L = self.fpv_table.get_normalized_progress_variable(Z, C)
+            loc = self.fpv_table.get_thermal_conductivity(Z, Q, L, T)
         elif self.physics == "FRC":
             for i, Ti in enumerate(T):
                 self.gas.TP = Ti, p[i]
@@ -228,8 +228,8 @@ class Combustor:
             Z = Y[:, 0]
             C = Y[:, 1]
             Q = np.zeros_like(self.x)
-            L = self.fpv_table.L_from_C(Z, C)
-            R = self.fpv_table.get_R(Z, Q, L)
+            L = self.fpv_table.get_normalized_progress_variable(Z, C)
+            R = self.fpv_table.get_specific_gas_constant(Z, Q, L)
             T = p / (r * R)
         elif self.physics == "FRC":
             T = self.thermoTable.get_temperature(r, p, Y)
@@ -603,7 +603,7 @@ class Combustor:
         # Z = rY[:, 0] / r
         # Q = np.zeros(self.n)
         # C = rY[:, 1] / r
-        # L = self.fpv_table.L_from_C(Z, C)
+        # L = self.fpv_table.get_normalized_progress_variable(Z, C)
         # e_chem0 = r * self.fpv_table.lookup('E0_CHEM', Z, Q, L)
         # C1, e_chem1 = self.injector.get_MIB_profiles()
         # e_chem1 *= r
@@ -618,14 +618,16 @@ class Combustor:
             self.r, self.u, self.p, self.Y, self.gamma
         )
         Q = np.zeros(self.n)
-        L = self.fpv_table.L_from_C(rY[:, 0] / r, rY[:, 1] / r)
+        L = self.fpv_table.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
         e_chem0 = r * self.fpv_table.lookup("E0_CHEM", self.Y[:, 0], Q, L)
         # 1st stage of RK2
         rhsY = np.zeros((self.n, self.n_scalars))
         omegaC = self.injector.get_chemical_sources(self.Y[:, 0], self.Y[:, 1])
         rhsY[:, 1] = omegaC * r
         rY1 = rY + dt * rhsY
-        L1 = self.fpv_table.L_from_C(rY1[:, 0] / r, rY1[:, 1] / r)
+        L1 = self.fpv_table.get_normalized_progress_variable(
+            rY1[:, 0] / r, rY1[:, 1] / r
+        )
         e_chem1 = r * self.fpv_table.lookup("E0_CHEM", rY1[:, 0] / r, Q, L1)
         E1 = E + e_chem0 - e_chem1
         (r1, u1, p1, Y1) = self.conservative_to_primitive(r, ru, E1, rY1, self.gamma)
@@ -633,7 +635,7 @@ class Combustor:
         omegaC1 = self.injector.get_chemical_sources(Y1[:, 0], Y1[:, 1])
         rhsY[:, 1] = omegaC1 * r1
         rY = 0.5 * (rY + rY1 + dt * rhsY)
-        L = self.fpv_table.L_from_C(rY[:, 0] / r, rY[:, 1] / r)
+        L = self.fpv_table.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
         e_chem2 = r * self.fpv_table.lookup("E0_CHEM", rY[:, 0] / r, Q, L)
         E = E + e_chem0 - e_chem2
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)

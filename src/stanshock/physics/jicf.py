@@ -1186,7 +1186,7 @@ class JICModel:
         )
         Zvar = self.Z_var_profile_interp((mdot_inj, self.x))
         Zvar = np.maximum(Zvar, 10 ** self.logsigma2_vec.min())
-        L = self.fpv_table.L_from_C(Z, C)
+        L = self.fpv_table.get_normalized_progress_variable(Z, C)
         return self.omega_C_int_interp((Z, L, np.log10(Zvar)))
 
     def get_MIB_profiles(self):

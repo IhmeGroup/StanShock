@@ -162,7 +162,11 @@ def initialize_diffuse_interface(domain, leftState, rightState, geometry, Delta)
             domain.get_bilger_mixture_fraction(rightGas.Y),
         )
         domain.Y[:, 1] = smoothing_function(
-            domain.x, xShock, Delta, domain.get_progress_variable(leftGas.Y), domain.get_get_progress_variableress_variable(rightGas.Y)
+            domain.x,
+            xShock,
+            Delta,
+            domain.get_progress_variable(leftGas.Y),
+            domain.get_get_progress_variableress_variable(rightGas.Y),
         )
     elif domain.physics == "FRC":
         for kSp in range(domain.n_scalars):

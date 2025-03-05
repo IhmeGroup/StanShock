@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -12,11 +14,13 @@ class XTDiagram:
             variable=string of the variable
             skipSteps=number of iterations between updates
             x=mesh for plotting
+            limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
     """
 
-    def __init__(self, domain, variable, skipSteps=0, x=None):
+    def __init__(self, domain, variable, skipSteps=0, x=None, limits=None):
         self.name = None
         self.skipSteps = 0
+        self.limits = limits
 
         self.name = variable.lower()
         self.skipSteps = skipSteps  # number of timesteps to skip
@@ -52,25 +56,28 @@ class XTDiagram:
         elif variable in ["pressure", "p"]:
             self.variable.append(np.interp(self.x, domain.x, domain.p))
         elif variable in ["temperature", "t"]:
-            T = domain.getTemperature(domain.r, domain.p, domain.Y)
+            T = domain.get_temperature(domain.r, domain.p, domain.Y)
             self.variable.append(np.interp(self.x, domain.x, T))
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
             self.variable.append(np.interp(self.x, domain.x, domain.gamma))
         elif variable in scalarNames:
             scalarIndex = scalarNames.index(variable)
             self.variable.append(np.interp(self.x, domain.x, domain.Y[:, scalarIndex]))
+        elif variable in ["mach", "m"]:
+            M = np.abs(domain.u) / domain.get_sound_speed(
+                domain.r, domain.p, domain.gamma
+            )
+            self.variable.append(np.interp(self.x, self.x, M))
         else:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
         self.t.append(domain.t)
 
-    def plot(self, limits=None):
+    def plot(self, figdir="."):
         """
         This method creates a contour plot of the XTDiagram data
             inputs:
-                XTDiagram=XTDiagram object; obtained from the XTDiagrams dictionary
-                limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
-
+                figdir = directory in which to save the plot
         """
         plt.figure()
         t = [t * 1000.0 for t in self.t]
@@ -80,28 +87,41 @@ class XTDiagram:
             variableMatrix[k, :] = variablek
         variable = self.name
         if variable in ["density", "r", "rho"]:
-            plt.title(r"$\rho [\mathrm{kg/m^3}]$")
+            plt.title(r"$\rho~[\mathrm{kg/m^3}]$")
         elif variable in ["velocity", "u"]:
-            plt.title(r"$u [\mathrm{m/s}]$")
+            plt.title(r"$u~[\mathrm{m/s}]$")
         elif variable in ["pressure", "p"]:
             variableMatrix /= 1.0e5  # convert to bar
-            plt.title(r"$p [\mathrm{bar}]$")
+            plt.title(r"$p~[\mathrm{bar}]$")
         elif variable in ["temperature", "t"]:
-            plt.title(r"$T [\mathrm{K}]$")
+            plt.title(r"$T~[\mathrm{K}]$")
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            plt.title(r"$\gamma$")
+            plt.title(r"$\gamma~[\mathrm{-}]$")
+        elif variable in ["mixture fraction"]:
+            plt.title(r"$Z~[\mathrm{-}]$")
+        elif variable in ["progress variable"]:
+            plt.title(r"$C~[\mathrm{-}]$")
+        elif variable in ["mach", "m"]:
+            plt.title(r"$M~[\mathrm{-}]$")
         else:
             plt.title(r"$\mathrm{" + variable + "}$")
-        if limits is None:
+
+        if self.limits is None:
             plt.pcolormesh(X, T, variableMatrix, cmap="jet")
         else:
             plt.pcolormesh(
-                X, T, variableMatrix, cmap="jet", vmin=limits[0], vmax=limits[1]
+                X,
+                T,
+                variableMatrix,
+                cmap="jet",
+                vmin=self.limits[0],
+                vmax=self.limits[1],
             )
-        plt.xlabel(r"$x [\mathrm{m}]$")
-        plt.ylabel(r"$t [\mathrm{ms}]$")
+        plt.xlabel(r"$x~[\mathrm{m}]$")
+        plt.ylabel(r"$t~[\mathrm{ms}]$")
         plt.axis([min(self.x), max(self.x), min(t), max(t)])
         plt.colorbar()
+        plt.savefig(Path(figdir) / f"{variable}.png", bbox_inches="tight", dpi=300)
 
 
 def add_h_plot(domain, ax, scale=1.0):
@@ -117,7 +137,7 @@ def add_h_plot(domain, ax, scale=1.0):
 
 def plot_state(domain, filename):
     xscale = 1.0e3
-    T = domain.getTemperature(domain.r, domain.p, domain.Y)
+    T = domain.get_temperature(domain.r, domain.p, domain.Y)
 
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
     ax[0].plot(domain.x * xscale, domain.r)
@@ -144,7 +164,7 @@ def plot_state(domain, filename):
     if domain.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
-    M = np.abs(domain.u) / domain.soundSpeed(domain.r, domain.p, domain.gamma)
+    M = np.abs(domain.u) / domain.get_sound_speed(domain.r, domain.p, domain.gamma)
     ax[4].plot(domain.x * xscale, M)
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
@@ -156,7 +176,7 @@ def plot_state(domain, filename):
         Z = domain.Y[:, 0]
         C = domain.Y[:, 1]
         Q = np.zeros_like(domain.x)
-        L = domain.fpv_table.L_from_C(Z, C)
+        L = domain.fpv_table.get_normalized_progress_variable(Z, C)
         Y_H2 = domain.fpv_table.lookup("H2", Z, Q, L)
         Y_OH = domain.fpv_table.lookup("OH", Z, Q, L)
         Y_H2O = domain.fpv_table.lookup("H2O", Z, Q, L)
@@ -172,15 +192,17 @@ def plot_state(domain, filename):
     else:
         ax[5].set_ymargin(0.1)
     ax[5].set_ylabel(r"$Y_k$ [-]")
-    ax[5].legend(loc="upper left")
+    ax[5].legend(loc="upper right")
     if domain.h is not None:
         add_h_plot(domain, ax[5], scale=xscale)
 
     ax[6].scatter(
-        domain.injector.fluid_tips[:, 0] * xscale, domain.injector.fluid_tips[:, 1], s=1
+        domain.injector.fluid_tips[:, 0] * xscale,
+        domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
+        s=1,
     )
     ax[6].set_ymargin(0.1)
-    ax[6].set_ylabel(r"$\dot{m}$ [kg/s]")
+    ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
     if domain.h is not None:
         add_h_plot(domain, ax[6], scale=xscale)
 
