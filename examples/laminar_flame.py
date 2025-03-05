@@ -87,9 +87,6 @@ def main(
     t1 = time.perf_counter()
     print("The process took ", t1 - t0)
 
-    # Convert directory to a Path
-    results_location = Path(results_location)
-
     # plot setup
     if plot_results:
         plt.close("all")
@@ -136,6 +133,7 @@ def main(
             plt.show()
 
         if results_location is not None:
+            results_location = Path(results_location)
             plt.savefig(results_location / "laminarFlame.pdf")
 
     if results_location is not None:
@@ -146,6 +144,8 @@ def main(
             position=ss.x,
             temperature=ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y),
         )
+
+    return ss
 
 
 def flameSpeed(gas, flameThickness, returnFlame=False):
