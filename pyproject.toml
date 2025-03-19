@@ -35,6 +35,7 @@ dependencies = [
   "numpy",
   "scipy",
   # "scipy-stubs",
+  "scikit-learn",
   "matplotlib",
   "numba",
   "cantera",
