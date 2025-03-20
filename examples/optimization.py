@@ -201,7 +201,9 @@ def main(
 
         plt.figure()
         plt.plot(tNoInsert / 1e-3, pNoInsert / 1e5, "k", label=r"$\mathrm{No\ Insert}$")
-        plt.plot(tInsert / 1e-3, pInsert / 1e5, "r", label=r"$\mathrm{Optimized\ Insert}$")
+        plt.plot(
+            tInsert / 1e-3, pInsert / 1e5, "r", label=r"$\mathrm{Optimized\ Insert}$"
+        )
         plt.xlabel(r"$t\ [\mathrm{ms}]$")
         plt.ylabel(r"$p\ [\mathrm{bar}]$")
         plt.legend(loc="best")

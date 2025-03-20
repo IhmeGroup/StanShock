@@ -54,7 +54,7 @@ def main(
     results_location: str | None = ".",
 ) -> dict[str, np.ndarray]:
     # =============================================================================
-    # provided condtions for Case4
+    # provided conditions for Case4
     T1 = T4 = 292.05
     p1 = 390.0 * 133.322
     p4 = 82.0 * 6894.76 * 0.9

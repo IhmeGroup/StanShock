@@ -738,7 +738,7 @@ class ShockTube:
 
     def pressure_rise(self, t, p, peakWidth=10):
         """
-        This method attemps to determine the pressure rise based on the separation
+        This method attempts to determine the pressure rise based on the separation
         of the first two peaks in the logarithmic derivative of the of the
         endwall pressure. This method is the most robust when only the incident
         shock provides the only peak in the logarithmic derivative of pressure.
@@ -746,10 +746,10 @@ class ShockTube:
                 t = time [s]
                 p = pressure [pa]
                 peakWidth (optional) =  # of samples to define a peak; this is
-                                        also the number of the number of points
-                                        used to defind the pressure rise region.
+                                        also the number of points used to define
+                                        the pressure rise region.
             output:
-                dlnpdt: mean logaritmic slope in the pressure rise region.
+                dlnpdt: mean logarithmic slope in the pressure rise region.
                 p5: the mean test pressure
         """
 
@@ -826,7 +826,7 @@ class ShockTube:
                         indicates that a correct test pressure is more valuable.
                     p5 = test pressure
                     eps = cutoff parameter for the global search. A higher value
-                        indicates a tighter tolerence.
+                        indicates a tighter tolerance.
                     maxIter = maximum number of iterations
         """
         from scipy.optimize import newton
@@ -844,7 +844,7 @@ class ShockTube:
 
         msg = None
         if self.DOuter is None or self.dlnAdx is None:
-            msg = "Driver optimization must have DOuter and dlnAdx definied"
+            msg = "Driver optimization must have DOuter and dlnAdx defined"
         if self.DInner is not None:
             msg = "Driver optimization cannot have an inner diameter"
         if self.p[0] < self.p[-1]:
@@ -1032,7 +1032,7 @@ class ShockTube:
         # initialize the Gaussian Random Process as a surrogate
         kernel = 1.0 * RBF(
             length_scale=1.0, length_scale_bounds=(1e-1, 10.0)
-        )  # iniitialize
+        )  # initialize
         gp = GaussianProcessRegressor(kernel=kernel)
         # determine the grid to search over with the surrogate model
         nHat = 30

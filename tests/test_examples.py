@@ -13,6 +13,7 @@ _directory_prefix = Path("tests/resources")
 
 IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 
+
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip validation tests.")
 def test_validation_case1():
     results = case1.main(plot_results=False, results_location=None)
@@ -43,7 +44,9 @@ def test_validation_case4():
 
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip examples.")
 def test_laminar_flame():
-    results = laminar_flame.main(sim_time=1e-5, plot_results=False, results_location=None)
+    results = laminar_flame.main(
+        sim_time=1e-5, plot_results=False, results_location=None
+    )
     baseline = np.load(_directory_prefix / "laminarFlame.npz")
     assert all(np.allclose(results[name], baseline[name]) for name in baseline)
 

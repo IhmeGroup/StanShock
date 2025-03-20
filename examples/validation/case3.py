@@ -25,7 +25,7 @@ def main(
     results_location: str | None = ".",
 ) -> dict[str, np.ndarray]:
     # =============================================================================
-    # provided condtions for case 3
+    # provided conditions for case 3
     Ms = 2.409616
     T1 = 292.25
     p1 = 1999.83552
