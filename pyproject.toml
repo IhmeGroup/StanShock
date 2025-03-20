@@ -44,6 +44,7 @@ dependencies = [
   "tqdm_joblib",
   # "types-tqdm",
   "h5py",
+  "imageio",
 ]
 
 [project.optional-dependencies]
