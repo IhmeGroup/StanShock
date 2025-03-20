@@ -969,7 +969,7 @@ class ShockTube:
                 )
 
             # initialize (may be at a previous state in the optimization)
-            self.dlnAdx = lambda x, t: dAdx(x) / A(x)
+            self.dlnAdx = lambda x, _t: dAdx(x) / A(x)
             self.DInner = DInner
             self.r = np.copy(rInitial)
             self.u = np.copy(uInitial)
