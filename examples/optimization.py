@@ -19,8 +19,9 @@ from stanshock.processing.probe import Probe
 
 
 def main(
-    mech_filename: str = "../tests/resources/HeliumArgon.yaml",
-    show_results: bool = True,
+    mech_filename: str = "data/mechanisms/HeliumArgon.yaml",
+    plot_results: bool = True,
+    show_results: bool = False,
     results_location: str | None = ".",
 ) -> None:
     # parameters
@@ -34,9 +35,12 @@ def main(
     nXCoarse, nXFine = 200, 1000  # mesh resolution
     LDriver, LDriven = 3.0, 5.0
     DDriver, DDriven = 7.5e-2, 5.0e-2
-    plt.close("all")
-    mpl.rcParams["font.size"] = fontsize
-    plt.rc("text", usetex=True)
+
+    plot_results = plot_results or show_results
+    if plot_results:
+        plt.close("all")
+        mpl.rcParams["font.size"] = fontsize
+        plt.rc("text", usetex=True)
 
     # set up geometry
     xLower = -LDriver
@@ -140,14 +144,15 @@ def main(
         dlnAdx=ss.dlnAdx,
     )
 
-    diagram_settings = [
-        ("pressure", [0.5, 25]),
-        ("temperature", [200.0, 1800.0]),
-    ]
-    ss.XTDiagrams += [
-        XTDiagram(ss, variable=variable, limits=limits)
-        for variable, limits in diagram_settings
-    ]
+    if plot_results:
+        diagram_settings = [
+            ("pressure", [0.5, 25]),
+            ("temperature", [200.0, 1800.0]),
+        ]
+        ss.XTDiagrams += [
+            XTDiagram(ss, variable=variable, limits=limits)
+            for variable, limits in diagram_settings
+        ]
     ss.probes.append(Probe(ss, max(ss.x)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
@@ -177,10 +182,11 @@ def main(
         DOuter=DOuter,
         dlnAdx=dlnAdx,
     )
-    ss.XTDiagrams += [
-        XTDiagram(ss, variable=variable, limits=limits)
-        for variable, limits in diagram_settings
-    ]
+    if plot_results:
+        ss.XTDiagrams += [
+            XTDiagram(ss, variable=variable, limits=limits)
+            for variable, limits in diagram_settings
+        ]
     ss.probes.append(Probe(ss, max(ss.x)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
@@ -188,40 +194,43 @@ def main(
     print("The process took ", t1 - t0)
     pNoInsert = np.array(ss.probes[0].p)
     tNoInsert = np.array(ss.probes[0].t)
-    for diagram in ss.XTDiagrams:
-        diagram.plot()
-
     # plot
-    plt.figure()
-    plt.plot(tNoInsert / 1e-3, pNoInsert / 1e5, "k", label=r"$\mathrm{No\ Insert}$")
-    plt.plot(tInsert / 1e-3, pInsert / 1e5, "r", label=r"$\mathrm{Optimized\ Insert}$")
-    plt.xlabel(r"$t\ [\mathrm{ms}]$")
-    plt.ylabel(r"$p\ [\mathrm{bar}]$")
-    plt.legend(loc="best")
-    plt.tight_layout()
+    if plot_results:
+        for diagram in ss.XTDiagrams:
+            diagram.plot()
 
-    plt.figure()
-    plt.plot(xInsert, DOuterInsert, "k", label=r"$D_\mathrm{o}$")
-    plt.plot(xInsert, DInnerInsert, "r", label=r"$D_\mathrm{i}$")
-    plt.xlabel(r"$x\ [\mathrm{m}]$")
-    plt.ylabel(r"$D\ [\mathrm{m}]$")
-    plt.legend(loc="best")
-    plt.tight_layout()
+        plt.figure()
+        plt.plot(tNoInsert / 1e-3, pNoInsert / 1e5, "k", label=r"$\mathrm{No\ Insert}$")
+        plt.plot(tInsert / 1e-3, pInsert / 1e5, "r", label=r"$\mathrm{Optimized\ Insert}$")
+        plt.xlabel(r"$t\ [\mathrm{ms}]$")
+        plt.ylabel(r"$p\ [\mathrm{bar}]$")
+        plt.legend(loc="best")
+        plt.tight_layout()
+
+        plt.figure()
+        plt.plot(xInsert, DOuterInsert, "k", label=r"$D_\mathrm{o}$")
+        plt.plot(xInsert, DInnerInsert, "r", label=r"$D_\mathrm{i}$")
+        plt.xlabel(r"$x\ [\mathrm{m}]$")
+        plt.ylabel(r"$D\ [\mathrm{m}]$")
+        plt.legend(loc="best")
+        plt.tight_layout()
     if show_results:
         plt.show()
 
+    results = {
+        "pressure_with_insert": pInsert,
+        "pressure_without_insert": pNoInsert,
+        "insert_diameter": DInnerInsert,
+        "shock_tube_diameter": DOuterInsert,
+        "position": xInsert,
+        "time_with_insert": tInsert,
+        "time_without_insert": tNoInsert,
+    }
     if results_location is not None:
-        np.savez(
-            Path(results_location) / "optimization.npz",
-            pressure_with_insert=pInsert,
-            pressure_without_insert=pNoInsert,
-            insert_diameter=DInnerInsert,
-            shock_tube_diameter=DOuterInsert,
-            position=xInsert,
-            time_with_insert=tInsert,
-            time_without_insert=tNoInsert,
-        )
+        np.savez(Path(results_location) / "optimization.npz", **results)
         plt.savefig(Path(results_location) / "optimization.png")
+
+    return results
 
 
 if __name__ == "__main__":

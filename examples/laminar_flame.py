@@ -17,7 +17,7 @@ def main(
     plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
-) -> None:
+) -> dict[str, np.ndarray]:
     # user parameters
     TU = 300.0
     p = 1e5
@@ -136,16 +136,16 @@ def main(
             results_location = Path(results_location)
             plt.savefig(results_location / "laminarFlame.pdf")
 
+    results = {
+        "position": ss.x,
+        "temperature": ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y),
+    }
     if results_location is not None:
         results_location = Path(results_location)
         results_location.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            results_location / "laminarFlame.npz",
-            position=ss.x,
-            temperature=ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y),
-        )
+        np.savez(results_location / "laminarFlame.npz", **results)
 
-    return ss
+    return results
 
 
 def flameSpeed(gas, flameThickness, returnFlame=False):

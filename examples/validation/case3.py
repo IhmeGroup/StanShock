@@ -18,11 +18,12 @@ from stanshock.utils.csv_loader import get_pressure_data
 
 
 def main(
-    data_filename: str = "../../data/validation/case3.csv",
-    mech_filename: str = "../../data/mechanisms/Nitrogen.yaml",
-    show_results: bool = True,
+    data_filename: str = "data/validation/case3.csv",
+    mech_filename: str = "data/mechanisms/Nitrogen.yaml",
+    plot_results: bool = True,
+    show_results: bool = False,
     results_location: str | None = ".",
-) -> None:
+) -> dict[str, np.ndarray]:
     # =============================================================================
     # provided condtions for case 3
     Ms = 2.409616
@@ -32,6 +33,7 @@ def main(
     tFinal = 60e-3
 
     # plotting parameters
+    plot_results = plot_results or show_results
     fontsize = 12
 
     # provided geometry
@@ -180,50 +182,54 @@ def main(
     t1 = time.perf_counter()
     print("The process took ", t1 - t0)
 
-    # import shock tube data
-    tExp, pExp = get_pressure_data(data_filename)
-    timeDifference = (
-        12.211 - 8.10
-    ) / 1000.0  # difference between the test data and simulation times
-    tExp += timeDifference
+    if plot_results:
+        # import shock tube data
+        tExp, pExp = get_pressure_data(data_filename)
+        timeDifference = (
+            12.211 - 8.10
+        ) / 1000.0  # difference between the test data and simulation times
+        tExp += timeDifference
 
-    # make plots of probe and XT diagrams
-    plt.close("all")
-    mpl.rcParams["font.size"] = fontsize
-    plt.rc("text", usetex=True)
-    plt.figure(figsize=(4, 4))
-    plt.plot(
-        np.array(ssnbl.probes[0].t) * 1000.0,
-        np.array(ssnbl.probes[0].p) / 1.0e5,
-        "k",
-        label=r"$\mathrm{Without\ BL\ Model}$",
-        linewidth=2.0,
-    )
-    plt.plot(
-        np.array(ssbl.probes[0].t) * 1000.0,
-        np.array(ssbl.probes[0].p) / 1.0e5,
-        "r",
-        label=r"$\mathrm{With\ BL\ Model}$",
-        linewidth=2.0,
-    )
-    plt.plot(tExp * 1000.0, pExp / 1.0e5, label=r"$\mathrm{Experiment}$", alpha=0.7)
-    plt.axis([0, 60, -0.5, 2])
-    plt.xlabel(r"$t\ [\mathrm{ms}]$")
-    plt.ylabel(r"$p\ [\mathrm{bar}]$")
-    plt.legend(loc="lower right")
-    plt.tight_layout()
+        # make plots of probe and XT diagrams
+        plt.close("all")
+        mpl.rcParams["font.size"] = fontsize
+        plt.rc("text", usetex=True)
+        plt.figure(figsize=(4, 4))
+        plt.plot(
+            np.array(ssnbl.probes[0].t) * 1000.0,
+            np.array(ssnbl.probes[0].p) / 1.0e5,
+            "k",
+            label=r"$\mathrm{Without\ BL\ Model}$",
+            linewidth=2.0,
+        )
+        plt.plot(
+            np.array(ssbl.probes[0].t) * 1000.0,
+            np.array(ssbl.probes[0].p) / 1.0e5,
+            "r",
+            label=r"$\mathrm{With\ BL\ Model}$",
+            linewidth=2.0,
+        )
+        plt.plot(tExp * 1000.0, pExp / 1.0e5, label=r"$\mathrm{Experiment}$", alpha=0.7)
+        plt.axis([0, 60, -0.5, 2])
+        plt.xlabel(r"$t\ [\mathrm{ms}]$")
+        plt.ylabel(r"$p\ [\mathrm{bar}]$")
+        plt.legend(loc="lower right")
+        plt.tight_layout()
+
     if show_results:
         plt.show()
 
+    results = {
+        "pressure_with_boundary_layer": ssbl.probes[0].p,
+        "pressure_without_boundary_layer": ssnbl.probes[0].p,
+        "time_with_boundary_layer": ssbl.probes[0].t,
+        "time_without_boundary_layer": ssnbl.probes[0].t,
+    }
     if results_location is not None:
-        np.savez(
-            Path(results_location) / "case3.npz",
-            pressure_with_boundary_layer=ssbl.probes[0].p,
-            pressure_without_boundary_layer=ssnbl.probes[0].p,
-            time_with_boundary_layer=ssbl.probes[0].t,
-            time_without_boundary_layer=ssnbl.probes[0].t,
-        )
+        np.savez(Path(results_location) / "case3.npz", **results)
         plt.savefig(Path(results_location) / "case3.png")
+
+    return results
 
 
 if __name__ == "__main__":
