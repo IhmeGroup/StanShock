@@ -3,13 +3,14 @@ cantera-version: 3.1.0
 git-commit: "6e00275"
 date: Mon Feb 24 13:23:55 2025
 phases:
-  - name: ""
+  - name: gas
     thermo: ideal-gas
+    transport: mixture-averaged
     elements: [Ar, He]
     species: [He, Ar]
     state:
-      T: 1.0e-03
-      density: 1.0e-03
+      T: 300 K
+      P: 101325.0 Pa
       Y: { Ar: 1.0 }
 species:
   - name: Ar
@@ -21,6 +22,11 @@ species:
         - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.37967491]
         - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 4.37967491]
       note: L 6/88
+    transport:
+      model: gas
+      geometry: atom
+      well-depth: 136.5
+      diameter: 3.33
   - name: He
     composition: { He: 1.0 }
     thermo:
@@ -30,3 +36,8 @@ species:
         - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 0.928724724]
         - [2.5, 0.0, 0.0, 0.0, 0.0, -745.375, 0.928724724]
       note: L10/90
+    transport:
+      model: gas
+      geometry: atom
+      well-depth: 10.2
+      diameter: 2.576
