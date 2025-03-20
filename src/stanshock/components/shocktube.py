@@ -48,8 +48,6 @@ class ShockTube:
         self.outputEvery = (
             1  # number of iterations of simulation advancement between logging updates
         )
-        self.h = None  # height of the channel
-        self.w = None  # width of the channel
         self.dlnAdt = (
             None  # area of the shock tube as a function of time (needed for quasi-1D)
         )
@@ -76,7 +74,9 @@ class ShockTube:
         )
         self.Tw = None  # temperature of the wall (needed for BL)
         self.thermoTable = ThermoTable(gas)  # thermodynamic table object
+        self.get_temperature = self.thermoTable.get_temperature
         self.optimizationIteration = 0  # counter to keep track of optimization
+        self.physics = "FRC"  # flag to determine the physics model
         self.reacting = False  # flag to solver about whether to solve source terms
         self.inReactingRegion = (
             lambda _x, _t: True
@@ -382,6 +382,8 @@ class ShockTube:
             inputs
                 dt=time step
         """
+        if not self.reacting:
+            return
 
         #######################################################################
         def dydt(t, y, args):
@@ -809,7 +811,7 @@ class ShockTube:
                     self, f"figures/anim/test_{iters // self.plotStateInterval:05d}.png"
                 )
 
-    def optimizeDriverInsert(
+    def optimize_driver_insert(
         self, tFinal, tradeoffParam=1.0, tTest=None, p5=None, eps=1e-4, maxIter=100
     ):
         """
@@ -916,10 +918,8 @@ class ShockTube:
 
         # calculate a smoothing length for numerical stability
         #######################################################################
-        def optimizationFunction(design):
+        def optimization_function(design):
             """
-            Function: optimizationFunction
-            ----------------------------------------------------------------------
             This function solves the shocktube problem and returns the absolute pressure rise. The insert geometry is assumed to
             vary linearly in area
                 inputs:
@@ -986,10 +986,10 @@ class ShockTube:
                     f"Solving Optimization. Iteration={self.optimizationIteration}, L={LInsert:.3f}, D={DInsert:.3f}, alpha={alpha:.3f}"
                 )
             self.t = 0.0
-            self.advanceSimulation(tFinal)
+            self.advance_simulation(tFinal)
             self.optimizationIteration += 1
             # return
-            dlnpdt, p5Act = self.pressureRise(
+            dlnpdt, p5Act = self.pressure_rise(
                 np.array(self.probes[0].t), np.array(self.probes[0].p)
             )
             if self.verbose:
@@ -999,10 +999,8 @@ class ShockTube:
             return (dlnpdt * tTest) ** 2.0 + tradeoffParam * (p5Act / p5 - 1.0) ** 2.0
 
         #######################################################################
-        def midpointVector(xMin, xMax, nMidpoints):
+        def midpoint_vector(xMin, xMax, nMidpoints):
             """
-            Function: midpointVector
-            -------------------------------------------------------------------
             This function returns a vector to sample from. The vector is
             uniformly space and is non-inclusive of the bounds
                 inputs:
@@ -1020,9 +1018,9 @@ class ShockTube:
         # develop initial grid of points
         nGrid = 3
         self.designs = []
-        for L in midpointVector(LMin, LMax, nGrid):
-            for D in midpointVector(DMin, DMax, nGrid):
-                for a in midpointVector(alphaMin, alphaMax(L), nGrid):
+        for L in midpoint_vector(LMin, LMax, nGrid):
+            for D in midpoint_vector(DMin, DMax, nGrid):
+                for a in midpoint_vector(alphaMin, alphaMax(L), nGrid):
                     self.designs.append((L, D, a))
         # solve for each grid point on the initial parameter space
         nDesigns = len(self.designs)
@@ -1030,7 +1028,7 @@ class ShockTube:
         if self.verbose:
             print(f"Solving initial grid of {nDesigns} points.")
         for _iDesign, design in enumerate(self.designs):
-            self.yOpt.append(optimizationFunction(design))
+            self.yOpt.append(optimization_function(design))
         # initialize the Gaussian Random Process as a surrogate
         kernel = 1.0 * RBF(
             length_scale=1.0, length_scale_bounds=(1e-1, 10.0)
@@ -1039,9 +1037,9 @@ class ShockTube:
         # determine the grid to search over with the surrogate model
         nHat = 30
         XHat = []
-        for L in midpointVector(LMin, LMax, nHat):
-            for D in midpointVector(DMin, DMax, nHat):
-                for a in midpointVector(alphaMin, alphaMax(L), nHat):
+        for L in midpoint_vector(LMin, LMax, nHat):
+            for D in midpoint_vector(DMin, DMax, nHat):
+                for a in midpoint_vector(alphaMin, alphaMax(L), nHat):
                     XHat.append((L, D, a))
         XHat = np.array(XHat)
         # iterate until optimum is found
@@ -1080,7 +1078,7 @@ class ShockTube:
             # find the maximum improvement and compute the new datum
             maxImprovement = np.max(ExpImprovements)
             self.designs.append(XHat[np.argmax(ExpImprovements), :])
-            self.yOpt.append(optimizationFunction(self.designs[-1]))
+            self.yOpt.append(optimization_function(self.designs[-1]))
             if self.verbose:
                 print(
                     f"Minimum of current iteration: {ymin:f}. Expected improvement of the next iteration: {maxImprovement:f}"
@@ -1093,4 +1091,4 @@ class ShockTube:
             )
         elif self.verbose:
             print("Minimum Found. Setting to minimum state.")
-        optimizationFunction(self.designs[np.argmin(self.yOpt)])
+        optimization_function(self.designs[np.argmin(self.yOpt)])
