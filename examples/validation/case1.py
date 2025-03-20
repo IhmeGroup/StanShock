@@ -1,0 +1,191 @@
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import cantera as ct
+import matplotlib as mpl
+import numpy as np
+from matplotlib import pyplot as plt
+
+from stanshock.components.shocktube import ShockTube
+from stanshock.processing.probe import Probe
+from stanshock.utils.csv_loader import get_pressure_data
+
+
+def main(
+    data_filename: str = "data/validation/case1.csv",
+    mech_filename: str = "data/mechanisms/Nitrogen.yaml",
+    plot_results: bool = True,
+    show_results: bool = False,
+    results_location: str | None = ".",
+) -> dict[str, np.ndarray]:
+    # =============================================================================
+    # provided conditions for Case 1
+    Ms = 2.4
+    T1 = 292.05
+    p1 = 2026.499994
+    p2 = 13340.21567
+    tFinal = 60e-3
+    # delta = 0.5  # distance to smear the initial conditions; models incomplete initial formation of shock.
+
+    # plotting parameters
+    plot_results = plot_results or show_results
+    fontsize = 12
+
+    # provided geometry
+    DDriven = 4.5 * 0.0254
+    DDriver = DDriven
+    LDriver = 142.0 * 0.0254
+    LDriven = 9.73
+
+    # Set up gasses and determine the initial pressures
+    u1 = 0.0
+    u4 = 0.0  # initially 0 velocity
+    gas1 = ct.Solution(mech_filename)
+    gas4 = ct.Solution(mech_filename)
+    T4 = T1  # assumed
+    gas1.TP = T1, p1
+    gas4.TP = T4, p1  # use p1 as a place holder
+    g1 = gas1.cp / gas1.cv
+    g4 = gas4.cp / gas4.cv
+    a4oa1 = np.sqrt(
+        g4 / g1 * T4 / T1 * gas1.mean_molecular_weight / gas4.mean_molecular_weight
+    )
+    p4 = p2 * (1.0 - (g4 - 1.0) / (g1 + 1.0) / a4oa1 * (Ms - 1.0 / Ms)) ** (
+        -2.0 * g4 / (g4 - 1.0)
+    )  # from handbook of shock waves
+    p4 *= 1.05  # account for diaphragm
+    gas4.TP = T4, p4
+
+    # set up geometry
+    nX = 1000  # mesh resolution
+    xLower = -LDriver
+    xUpper = LDriven
+    xShock = 0.0
+    geometry = (nX, xLower, xUpper, xShock)
+    DeltaD = DDriven - DDriver
+    DeltaX = (
+        (xUpper - xLower) / float(nX) * 10
+    )  # diffuse area change for numerical stability
+
+    def D(x):
+        diameter = DDriven + (DeltaD / DeltaX) * (x - xShock)
+        diameter[x < (xShock - DeltaX)] = DDriver
+        diameter[x > xShock] = DDriven
+        return diameter
+
+    def dDdx(x):
+        dDiameterdx = np.ones(len(x)) * (DeltaD / DeltaX)
+        dDiameterdx[x < (xShock - DeltaX)] = 0.0
+        dDiameterdx[x > xShock] = 0.0
+        return dDiameterdx
+
+    def A(x):
+        return np.pi / 4.0 * D(x) ** 2.0
+
+    def dAdx(x):
+        return np.pi / 2.0 * D(x) * dDdx(x)
+
+    def dlnAdx(x, t):
+        return dAdx(x) / A(x)
+
+    # set up solver parameters
+    print("Solving with boundary layer terms")
+    boundaryConditions = ["reflecting", "reflecting"]
+    state1 = (gas1, u1)
+    state4 = (gas4, u4)
+    ssbl = ShockTube(
+        gas1,
+        initialization=("riemann", state4, state1, geometry),
+        boundaryConditions=boundaryConditions,
+        cfl=0.9,
+        outputEvery=100,
+        includeBoundaryLayerTerms=True,
+        DOuter=D,
+        Tw=T1,  # assume wall temperature is in thermal eq. with gas
+        dlnAdx=dlnAdx,
+    )
+    ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe
+
+    # Solve
+    t0 = time.perf_counter()
+    ssbl.advance_simulation(tFinal)
+    t1 = time.perf_counter()
+    print("The process took ", t1 - t0)
+
+    # without  boundary layer model
+    print("Solving without boundary layer model")
+    boundaryConditions = ["reflecting", "reflecting"]
+    gas1.TP = T1, p1
+    gas4.TP = T4, p4
+    ssnbl = ShockTube(
+        gas1,
+        initialization=("riemann", state4, state1, geometry),
+        boundaryConditions=boundaryConditions,
+        cfl=0.9,
+        outputEvery=100,
+        includeBoundaryLayerTerms=False,
+        DOuter=D,
+        dlnAdx=dlnAdx,
+    )
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.x)))  # end wall probe
+
+    # Solve
+    t0 = time.perf_counter()
+    ssnbl.advance_simulation(tFinal)
+    t1 = time.perf_counter()
+    print("The process took ", t1 - t0)
+
+    if plot_results:
+        # import shock tube data
+        tExp, pExp = get_pressure_data(data_filename)
+        timeDifference = (
+            12.211 - 8.10
+        ) / 1000.0  # difference between the test data and simulation times
+
+        # make plots of probe and XT diagrams
+        tExp += timeDifference
+        plt.close("all")
+        mpl.rcParams["font.size"] = fontsize
+        plt.rc("text", usetex=True)
+        plt.figure(figsize=(4, 4))
+        plt.plot(
+            np.array(ssnbl.probes[0].t) * 1000.0,
+            np.array(ssnbl.probes[0].p) / 1.0e5,
+            "k",
+            label=r"$\mathrm{Without\ BL\ Model}$",
+            linewidth=2.0,
+        )
+        plt.plot(
+            np.array(ssbl.probes[0].t) * 1000.0,
+            np.array(ssbl.probes[0].p) / 1.0e5,
+            "r",
+            label=r"$\mathrm{With\ BL\ Model}$",
+            linewidth=2.0,
+        )
+        plt.plot(tExp * 1000.0, pExp / 1.0e5, label=r"$\mathrm{Experiment}$", alpha=0.7)
+        plt.axis([0, 60, -0.5, 2])
+        plt.xlabel(r"$t\ [\mathrm{ms}]$")
+        plt.ylabel(r"$p\ [\mathrm{bar}]$")
+        plt.legend(loc="lower right")
+        plt.tight_layout()
+
+    if show_results:
+        plt.show()
+
+    results = {
+        "pressure_with_boundary_layer": ssbl.probes[0].p,
+        "pressure_without_boundary_layer": ssnbl.probes[0].p,
+        "time_with_boundary_layer": ssbl.probes[0].t,
+        "time_without_boundary_layer": ssnbl.probes[0].t,
+    }
+    if results_location is not None:
+        np.savez(Path(results_location) / "case1.npz", **results)
+        plt.savefig(Path(results_location) / "case1.png")
+
+    return results
+
+
+if __name__ == "__main__":
+    main()

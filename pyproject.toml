@@ -35,6 +35,7 @@ dependencies = [
   "numpy",
   "scipy",
   # "scipy-stubs",
+  "scikit-learn",
   "matplotlib",
   "numba",
   "cantera",
@@ -43,6 +44,7 @@ dependencies = [
   "tqdm_joblib",
   # "types-tqdm",
   "h5py",
+  "imageio",
 ]
 
 [project.optional-dependencies]

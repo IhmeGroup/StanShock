@@ -1,0 +1,239 @@
+from __future__ import annotations
+
+import time
+from pathlib import Path
+
+import cantera as ct
+import matplotlib as mpl
+import numpy as np
+from matplotlib import pyplot as plt
+from scipy.optimize import newton
+
+from stanshock.components.shocktube import ShockTube
+from stanshock.processing.initialize import (
+    smoothing_function,
+    smoothing_function_gradient,
+)
+from stanshock.processing.plot import XTDiagram
+from stanshock.processing.probe import Probe
+
+
+def main(
+    mech_filename: str = "data/mechanisms/HeliumArgon.yaml",
+    plot_results: bool = True,
+    show_results: bool = False,
+    results_location: str | None = ".",
+) -> None:
+    # parameters
+    fontsize = 12
+    tFinal = 7.5e-3
+    p5, p1 = 18 * ct.one_atm, 0.48e5
+    T5 = 1698.0
+    g4 = g1 = 5.0 / 3.0  # monatomic gas in driver and driven sections
+    W4, W1 = 4.002602, 39.948  # Helium and argon
+    MachReduction = 0.985  # account for shock wave attenuation
+    nXCoarse, nXFine = 200, 1000  # mesh resolution
+    LDriver, LDriven = 3.0, 5.0
+    DDriver, DDriven = 7.5e-2, 5.0e-2
+
+    plot_results = plot_results or show_results
+    if plot_results:
+        plt.close("all")
+        mpl.rcParams["font.size"] = fontsize
+        plt.rc("text", usetex=True)
+
+    # set up geometry
+    xLower = -LDriver
+    xUpper = LDriven
+    xShock = 0.0
+    Delta = 10 * (xUpper - xLower) / float(nXFine)
+    geometry = (nXCoarse, xLower, xUpper, xShock)
+
+    def DInner(x):
+        return np.zeros_like(x)
+
+    def dDInnerdx(x):
+        return np.zeros_like(x)
+
+    def DOuter(x):
+        return smoothing_function(x, xShock, Delta, DDriver, DDriven)
+
+    def dDOuterdx(x):
+        return smoothing_function_gradient(x, xShock, Delta, DDriver, DDriven)
+
+    def A(x):
+        return np.pi / 4.0 * (DOuter(x) ** 2.0 - DInner(x) ** 2.0)
+
+    def dAdx(x):
+        return np.pi / 2.0 * (DOuter(x) * dDOuterdx(x) - DInner(x) * dDInnerdx(x))
+
+    def dlnAdx(x, t):
+        return dAdx(x) / A(x)
+
+    # compute the gas dynamics
+    def res(Ms1):
+        return p5 / p1 - ((2.0 * g1 * Ms1**2.0 - (g1 - 1.0)) / (g1 + 1.0)) * (
+            (-2.0 * (g1 - 1.0) + Ms1**2.0 * (3.0 * g1 - 1.0))
+            / (2.0 + Ms1**2.0 * (g1 - 1.0))
+        )
+
+    Ms1 = newton(res, 2.0)
+    Ms1 *= MachReduction
+    T5oT1 = (
+        (2.0 * (g1 - 1.0) * Ms1**2.0 + 3.0 - g1)
+        * ((3.0 * g1 - 1.0) * Ms1**2.0 - 2.0 * (g1 - 1.0))
+        / ((g1 + 1.0) ** 2.0 * Ms1**2.0)
+    )
+    T1 = T5 / T5oT1
+    a1oa4 = np.sqrt(W4 / W1)
+    p4op1 = (1.0 + 2.0 * g1 / (g1 + 1.0) * (Ms1**2.0 - 1.0)) * (
+        1.0 - (g4 - 1.0) / (g4 + 1.0) * a1oa4 * (Ms1 - 1.0 / Ms1)
+    ) ** (-2.0 * g4 / (g4 - 1.0))
+    p4 = p1 * p4op1
+
+    # set up the gasses
+    u1 = 0.0
+    u4 = 0.0  # initially 0 velocity
+    gas1 = ct.Solution(mech_filename)
+    gas4 = ct.Solution(mech_filename)
+    T4 = T1  # assumed
+    gas1.TPX = T1, p1, "AR:1"
+    gas4.TPX = T4, p4, "HE:1"
+
+    # set up solver parameters
+    boundaryConditions = ["reflecting", "reflecting"]
+    state1 = (gas1, u1)
+    state4 = (gas4, u4)
+    ss = ShockTube(
+        gas1,
+        initialization=("riemann", state4, state1, geometry),
+        boundaryConditions=boundaryConditions,
+        cfl=0.9,
+        outputEvery=100,
+        includeBoundaryLayerTerms=True,
+        Tw=T1,  # assume wall temperature is in thermal eq. with gas
+        DOuter=DOuter,
+        dlnAdx=dlnAdx,
+    )
+
+    # Solve
+    t0 = time.perf_counter()
+    tTest = 2e-3
+    tradeoffParam = 1.0
+    eps = 0.01**2.0 + tradeoffParam * 0.01**2.0
+    ss.optimize_driver_insert(
+        tFinal, p5=p5, tTest=tTest, tradeoffParam=tradeoffParam, eps=eps
+    )
+    t1 = time.perf_counter()
+    print("The process took ", t1 - t0)
+
+    # recalculate at higher resolution with the insert
+    geometry = (nXFine, xLower, xUpper, xShock)
+    gas1.TPX = T1, p1, "AR:1"
+    gas4.TPX = T4, p4, "HE:1"
+    ss = ShockTube(
+        gas1,
+        initialization=("riemann", state4, state1, geometry),
+        boundaryConditions=boundaryConditions,
+        cfl=0.9,
+        outputEvery=100,
+        includeBoundaryLayerTerms=True,
+        Tw=T1,  # assume wall temperature is in thermal eq. with gas
+        DOuter=DOuter,
+        DInner=ss.DInner,
+        dlnAdx=ss.dlnAdx,
+    )
+
+    if plot_results:
+        diagram_settings = [
+            ("pressure", [0.5, 25]),
+            ("temperature", [200.0, 1800.0]),
+        ]
+        ss.XTDiagrams += [
+            XTDiagram(ss, variable=variable, limits=limits)
+            for variable, limits in diagram_settings
+        ]
+    ss.probes.append(Probe(ss, max(ss.x)))  # end wall probe
+    t0 = time.perf_counter()
+    ss.advance_simulation(tFinal)
+    t1 = time.perf_counter()
+    print("The process took ", t1 - t0)
+    pInsert = np.array(ss.probes[0].p)
+    tInsert = np.array(ss.probes[0].t)
+
+    for diagram in ss.XTDiagrams:
+        diagram.plot()
+
+    xInsert = ss.x
+    DOuterInsert = ss.DOuter(ss.x)
+    DInnerInsert = ss.DInner(ss.x)
+
+    # recalculate at higher resolution without the insert
+    gas1.TPX = T1, p1, "AR:1"
+    gas4.TPX = T4, p4, "HE:1"
+    ss = ShockTube(
+        gas1,
+        initialization=("riemann", state4, state1, geometry),
+        boundaryConditions=boundaryConditions,
+        cfl=0.9,
+        outputEvery=100,
+        includeBoundaryLayerTerms=True,
+        Tw=T1,  # assume wall temperature is in thermal eq. with gas
+        DOuter=DOuter,
+        dlnAdx=dlnAdx,
+    )
+    if plot_results:
+        ss.XTDiagrams += [
+            XTDiagram(ss, variable=variable, limits=limits)
+            for variable, limits in diagram_settings
+        ]
+    ss.probes.append(Probe(ss, max(ss.x)))  # end wall probe
+    t0 = time.perf_counter()
+    ss.advance_simulation(tFinal)
+    t1 = time.perf_counter()
+    print("The process took ", t1 - t0)
+    pNoInsert = np.array(ss.probes[0].p)
+    tNoInsert = np.array(ss.probes[0].t)
+    # plot
+    if plot_results:
+        for diagram in ss.XTDiagrams:
+            diagram.plot()
+
+        plt.figure()
+        plt.plot(tNoInsert / 1e-3, pNoInsert / 1e5, "k", label=r"$\mathrm{No\ Insert}$")
+        plt.plot(
+            tInsert / 1e-3, pInsert / 1e5, "r", label=r"$\mathrm{Optimized\ Insert}$"
+        )
+        plt.xlabel(r"$t\ [\mathrm{ms}]$")
+        plt.ylabel(r"$p\ [\mathrm{bar}]$")
+        plt.legend(loc="best")
+        plt.tight_layout()
+
+        plt.figure()
+        plt.plot(xInsert, DOuterInsert, "k", label=r"$D_\mathrm{o}$")
+        plt.plot(xInsert, DInnerInsert, "r", label=r"$D_\mathrm{i}$")
+        plt.xlabel(r"$x\ [\mathrm{m}]$")
+        plt.ylabel(r"$D\ [\mathrm{m}]$")
+        plt.legend(loc="best")
+        plt.tight_layout()
+    if show_results:
+        plt.show()
+
+    results = {
+        "pressure_with_insert": pInsert,
+        "pressure_without_insert": pNoInsert,
+        "insert_diameter": DInnerInsert,
+        "shock_tube_diameter": DOuterInsert,
+        "position": xInsert,
+        "time_with_insert": tInsert,
+        "time_without_insert": tNoInsert,
+    }
+    if results_location is not None:
+        np.savez(Path(results_location) / "optimization.npz", **results)
+        plt.savefig(Path(results_location) / "optimization.png")
+
+    return results
+
+
+if __name__ == "__main__":
+    main()

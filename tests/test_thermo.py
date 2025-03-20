@@ -16,7 +16,7 @@ get_specific_gas_constants_compiled = (
 # get_cp_compiled = get_cp_compiled.__wrapped__
 
 
-mech = "tests/resources/HeliumArgon.yaml"
+mech = "data/mechanisms/HeliumArgon.yaml"
 
 
 def test_table_computes_correct_temperatures():
