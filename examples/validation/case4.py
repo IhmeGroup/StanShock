@@ -190,8 +190,9 @@ def main(
     t1 = time.perf_counter()
     print("The process took ", t1 - t0)
 
-    for diagram in ssbl.XTDiagrams:
-        diagram.plot()
+    if plot_results:
+        for diagram in ssbl.XTDiagrams:
+            diagram.plot()
 
     # Solve without boundary layer model
     boundaryConditions = ["reflecting", "reflecting"]
