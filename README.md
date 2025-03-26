@@ -1,80 +1,91 @@
 # StanShock
 
-StanShock is a quasi-1D gas dynamics solver designed model shock tube experiments. StanShock has the following capabilities:
+[![Actions Status][actions-badge]][actions-link]
+[![Documentation Status][rtd-badge]][rtd-link]
 
-	Variable cross-sectional area
-	Boundary layer modeling
-	Multicomponent gas interfaces
-	
-	Reaction Chemistry
-	Species and thermal diffusion
-	Geometric Optimization
-	
+[![PyPI version][pypi-version]][pypi-link]
+[![Conda-Forge][conda-badge]][conda-link]
+[![PyPI platforms][pypi-platforms]][pypi-link]
 
-StanShock is writen in object-oriented pure-python, which allows the client to flexibly script and run stanShock cases. 
+[![GitHub Discussion][github-discussions-badge]][github-discussions-link]
+
+<!-- SPHINX-START -->
+
+<!-- prettier-ignore-start -->
+[actions-badge]:            https://github.com/IhmeGroup/StanShock/workflows/CI/badge.svg
+[actions-link]:             https://github.com/IhmeGroup/StanShock/actions
+[conda-badge]:              https://img.shields.io/conda/vn/conda-forge/StanShock
+[conda-link]:               https://github.com/conda-forge/StanShock-feedstock
+[github-discussions-badge]: https://img.shields.io/static/v1?label=Discussions&message=Ask&color=blue&logo=github
+[github-discussions-link]:  https://github.com/IhmeGroup/StanShock/discussions
+[pypi-link]:                https://pypi.org/project/StanShock/
+[pypi-platforms]:           https://img.shields.io/pypi/pyversions/StanShock
+[pypi-version]:             https://img.shields.io/pypi/v/StanShock
+[rtd-badge]:                https://readthedocs.org/projects/StanShock/badge/?version=latest
+[rtd-link]:                 https://StanShock.readthedocs.io/en/latest/?badge=latest
+
+<!-- prettier-ignore-end -->
+
+StanShock is a quasi-1D gas dynamics solver designed to model shock tube
+experiments and, more recently, scramjet engines. It is currently under heavy
+development to bring in new capabilities and modernize the infrastructure, and
+should thus be considered unstable until further notice.
 
 ## Installation
 
-StanShock has been tested using python 3.9. 
-It is recommended to install the requirements into a virtual environment such as that provided by [conda](https://docs.conda.io/en/latest/).
-With conda one can create a new virtual environment named _stanshock_ for python 3.9 using
+StanShock has been tested using python 3.9 and 3.13. It is recommended to
+install the requirements into a virtual environment such as that provided by
+[conda](https://github.com/conda-forge/miniforge). With conda one can create and
+activate a new virtual environment named _stanshock_ for Python 3.13 using:
 
-`conda create --name stanshock python=3.9`
-
-The requirements are listed in the _requirements.txt_ file. One may install these requirements into the current python environment using
-
-`python -m pip install -r requirements.txt`
-
-## Usage
-Included are six examples in the _examples_ folder:
-```
-laminarFlame.py (laminar flame test case of stoichiometric H2/Air)
-optimization.py (driver insert optimization)
-validation (four validation test cases)
-│─── case1.py (baseline)
-│─── case2.py (step change in driver/driven area)
-│─── case3.py (driver insert case)
-│─── case4.py (disparate driver/driven mixtures)
+```bash
+conda create --name stanshock python=3.13
+conda activate stanshock
 ```
 
-These may be run from their containing directories. 
-Ensure that your _PYTHONPATH_ environment variable is set appropriately.
-For example, from the project directory
+Alternatively, you can create and activate a local virtual environment with:
 
-    export PYTHONPATH=.
-    python examples/validation/case1.py
+```bash
+python3 -m venv .venv
+source ./.venv/bin/activate
+```
 
-Note that the matplotlib plots in these examples use LaTeX to render the fonts. 
-See [here](https://matplotlib.org/stable/tutorials/text/usetex.html) for more information on the requirements.
-Alternatively, one may remove the LaTeX rendering of fonts in these examples (e.g., commenting out `plt.rc('text',usetex=True)`).
-## Structure
-Files include:
+Finally, install StanShock and its dependencies from source with:
 
-	stanShock.py (entirety of the StanShock solver code)
-	*.{xml,cti} (cantera files containing the thermodiffusive properties)
-	{laminarFlame,optimization,case{1..4}}.py (python driver scripts)
-	case{1..4}.csv (experimental shock tube data for the validation cases)
+```bash
+pip install .
+```
 
-## Test
-To run the test suite, first ensure that the test dependencies are installed: 
+## Documentation
 
-    python -m pip install -r requirements-test.txt
+To manually build the documentation locally using Sphinx, first install the
+optional dependencies with:
 
-The tests may be run from the project directory using
+```bash
+pip install .[docs]
+```
 
-    python -m unittest discover
+To build the documentation statically and view in Firefox, execute:
 
-For a breakdown of the test coverage, run from the project directory
+```bash
+sphinx-build --keep-going -n -T -b=html docs docs/_build/html
+firefox docs/_build/html/index.html
+```
 
-    coverage run -m unittest discover
-    coverage html
+Or to serve the documentation, pip install sphinx-autobuild and execute:
 
-This will create an HTML report, which can be explored by a browser.
+```bash
+sphinx-autobuild --open-browser -n -T -b=html docs docs/_build/html
+```
+
+Which will automatically rebuild the documentation when changes to documented
+files are detected.
 
 ## Citation
+
 To cite StanShock, please refer the following article:
 
-```
+```bibtex
 @article{stanshock2020,
     Author = {Grogan, K. and Ihme, M.},
     Title = {StanShock: a gas-dynamic model for shock tube simulations with non-ideal effects and chemical kinetics},
@@ -86,6 +97,9 @@ To cite StanShock, please refer the following article:
     Doi = {10.1007/s00193-019-00935-x},
 }
 ```
-## Contact
-Please report any issues to the GitHub [site](https://github.com/IhmeGroup/StanShock). 
-If you are interested in contributing or collaborating, please contact kevin.p.grogan@gmail.com.
+
+<!-- SPHINX-END -->
+
+## Development
+
+To contribute to StanShock, see [CONTRIBUTING.md](.github/CONTRIBUTING.md).
