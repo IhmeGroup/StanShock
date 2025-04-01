@@ -235,15 +235,6 @@ class JICModel:
                     method="cubic",
                 )
                 self.Z_3D_interp.append(interp)
-
-            # DEBUG
-            # import matplotlib.pyplot as plt
-            # fig, ax = plt.subplots()
-            # c = ax.contourf(self.x_3D_data, self.y_3D_data, self.Z_3D_data[1, :, :, 59].T, levels=50,
-            #                 vmin=0.0, vmax=0.1)
-            # ax.set_aspect('equal')
-            # # plt.colorbar(c)
-            # plt.show()
         else:
             self.calc_Z_3D_interp(write=True)
 
@@ -254,21 +245,6 @@ class JICModel:
         else:
             self.calc_Z_avg_var_profiles(write=True)
         
-        fig, ax = plt.subplots(2, 1, sharex=True, figsize=(4, 4))
-        for i in range(1, len(self.mdot_inj_unique)):
-            ax[0].plot(self.x, self.Z_avg_profile[i],
-                       label=r"$\dot{m}_f = $" + "{0:.2f} g/s".format(self.mdot_inj_unique[i] * 1e3))
-            ax[1].semilogy(self.x, self.Z_var_profile[i],
-                           label=r"$\dot{m}_f = $" + "{0:.2f} g/s".format(self.mdot_inj_unique[i] * 1e3))
-        ax[0].set_ymargin(0.1)
-        ax[1].set_ylim([10**(-4.5), 10**(-1.5)])
-        ax[1].set_xlabel(r"$x$ [m]")
-        ax[0].set_ylabel(r"$\overline{Z}$ [-]")
-        ax[1].set_ylabel(r"$\sigma_Z^2$ [-]")
-        ax[0].legend()
-        fig.savefig("figures/Z_avg_var_profiles.png", bbox_inches='tight', dpi=300)
-        plt.close(fig)
-
         # Precompute the mapping from mdot to Z mean and variance profiles
         self.Z_avg_profile_interp = interpolate.RegularGridInterpolator(
             (self.mdot_inj_unique, self.x), self.Z_avg_profile
@@ -302,7 +278,8 @@ class JICModel:
             plt.close(fig)
 
             fig, ax = plt.subplots()
-            c = ax.contourf(self.Zbar_vec, self.Lbar_vec, self.omega_C_int[:, :, 0].T, levels=50)
+            c = ax.contourf(self.Zbar_vec, self.Lbar_vec,
+                            np.maximum(self.omega_C_int[:, :, 0].T, 0.0), levels=50)
             plt.axvline(Z_probe, color='r', linestyle='--')
             ax.set_xlabel(r"$\overline{Z}$ [-]")
             ax.set_ylabel(r"$\overline{\Lambda}$ [-]")
@@ -312,7 +289,8 @@ class JICModel:
             plt.close(fig)
 
             fig, ax = plt.subplots()
-            c = ax.contourf(self.Zbar_vec, self.Lbar_vec, self.omega_C_int[:, :, -1].T, levels=50)
+            c = ax.contourf(self.Zbar_vec, self.Lbar_vec,
+                           np.maximum(self.omega_C_int[:, :, -1].T, 0.0), levels=50)
             plt.axvline(Z_probe, color='r', linestyle='--')
             ax.set_xlabel(r"$\overline{Z}$ [-]")
             ax.set_ylabel(r"$\overline{\Lambda}$ [-]")
@@ -344,6 +322,7 @@ class JICModel:
             fig.savefig("figures/omega_C_slices_zoom.png", bbox_inches='tight', dpi=300)
             plt.close(fig)
 
+            breakpoint()
             exit()
         else:
             self.calc_chemical_sources(write=True)
@@ -590,20 +569,6 @@ class JICModel:
                     - special.erf((-self.w / 2 - z_inj) / s2s)
                 )
             )
-
-        # max_xi_val = 0.01
-        # xi_lo = max(xi_lo, -max_xi_val)
-        # xi_hi = min(xi_hi, max_xi_val)
-        # def integrand(z, xi):
-        #     x = x_cl + xi * dn[0] + self.x_inj
-        #     y = y_cl + xi * dn[1]
-        #     # print("x = {0}, y = {1}, z = {2}".format(x, y, z))
-        #     return self.Z_3D(x, y, z)
-        # Z_int_bound = integrate.dblquad(
-        #     integrand,
-        #     xi_lo, xi_hi,
-        #     lambda xi: -self.w/2,
-        #     lambda xi: self.w/2)[0]
 
         return Z_int_nobound / Z_int_bound
 
@@ -1071,65 +1036,44 @@ class JICModel:
         i_Zbar,
         i_Lbar,
         i_S,
-        Zbar_mesh,
-        Cbar_mesh,
-        Lbar_mesh,
-        logsigma2_mesh,
-        Z_int_vec,
-        L_int_vec,
-        A_int_mesh,
-        Z_int_mesh,
-        C_int_mesh,
-        omega_C_ZL,
-        omega_C_ZL_interp,
+        Zbar_vec,
+        Lbar_vec,
+        logsigma2_vec,
+        uv_vec,
+        W_vec,
+        omega_C_interp,
     ):
-        Zbar = Zbar_mesh[i_Zbar, i_Lbar, i_S]
-        Cbar = Cbar_mesh[i_Zbar, i_Lbar, i_S]
-        Lbar = Lbar_mesh[i_Zbar, i_Lbar, i_S]
-        logsigma2 = logsigma2_mesh[i_Zbar, i_Lbar, i_S]
+        Zbar = Zbar_vec[i_Zbar]
+        Lbar = Lbar_vec[i_Lbar]
+        logsigma2 = logsigma2_vec[i_S]
         sigma2 = 10**logsigma2
 
+        eps = 1.0e-6
+        if (Zbar < eps) or (Zbar > 1 - eps) or (Lbar < eps) or (Lbar > 1 - eps):
+            result = omega_C_interp((Zbar, Lbar))
+            return (i_Zbar, i_Lbar, i_S, result)
+        
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
 
             # Compute the shape parameters
-            eps_ab = 1.0e-20
             alpha_Z = ((Zbar * (1 - Zbar) / sigma2) - 1) * Zbar
-            alpha_Z = max(alpha_Z, eps_ab)
             beta_Z = alpha_Z * (1 - Zbar) / Zbar
-            alpha_C = ((Cbar * (1 - Cbar) / sigma2) - 1) * Cbar
-            alpha_C = max(alpha_C, eps_ab)
-            beta_C = alpha_C * (1 - Cbar) / Cbar
+            alpha_L = ((Lbar * (1 - Lbar) / sigma2) - 1) * Lbar
+            beta_L = alpha_L * (1 - Lbar) / Lbar
 
-            # Compute the joint PDF
-            P_Z_vec = stats.beta.pdf(Z_int_vec, alpha_Z, beta_Z)
-            P_Z = np.tile(P_Z_vec, (Z_int_mesh.shape[1], 1)).T
-            P_C = stats.beta.pdf(C_int_mesh, alpha_C, beta_C)
-            P = P_Z * P_C / A_int_mesh
-            # P = P_Z
+            # Compute the quadrature points and weights
+            Z_int_vec = stats.beta.ppf(uv_vec, alpha_Z, beta_Z)
+            L_int_vec = stats.beta.ppf(uv_vec, alpha_L, beta_L)
 
-            # Integrate the PDF over Z and L
-            int_P = integrate.simpson(
-                integrate.simpson(P, x=L_int_vec, axis=-1), x=Z_int_vec, axis=-1
-            )
+            # Evaluate the integrand at the quadrature points
+            W_Z_mesh, W_L_mesh = np.meshgrid(W_vec, W_vec, indexing="ij")
+            W_mesh = W_Z_mesh * W_L_mesh
+            Z_int_mesh, L_int_mesh = np.meshgrid(Z_int_vec, L_int_vec, indexing="ij")
+            integrand = omega_C_interp((Z_int_mesh, L_int_mesh))
 
-            if (Zbar > 0.15) and (Lbar > 0.6) and (i_S == Zbar_mesh.shape[2] - 1):
-                breakpoint()
-
-            if abs(np.log10(int_P)) > 2.0:
-                # Substantial discretization error
-                # The PDF is too sharp to be reasonably resolved
-                # Assume a delta function and probe the interpolator
-                result = omega_C_ZL_interp((Zbar, Lbar))
-            else :
-                # Renormalize P so it's a proper PDF
-                P /= int_P
-
-                # Integrate the product of the PDF and the source term
-                integrand = omega_C_ZL * P
-                result = integrate.simpson(
-                    integrate.simpson(integrand, x=L_int_vec, axis=-1), x=Z_int_vec, axis=-1
-                )
+            # Perform the integration
+            result = np.sum(integrand * W_mesh)
 
         return (i_Zbar, i_Lbar, i_S, result)
 
@@ -1139,64 +1083,34 @@ class JICModel:
         """
         print("Precomputing chemical sources...")
 
-        # Grid in Z, L dimensions (to be integrated over)
-        n_ZL = (200, 200)
-        eps = 0.0
-        Z_int_vec = np.linspace(eps, 1.0 - eps, n_ZL[0])
-        L_int_vec = np.linspace(eps, 1.0 - eps, n_ZL[1])
-        Z_int_mesh, L_int_mesh = np.meshgrid(Z_int_vec, L_int_vec, indexing="ij")
-        Cmin = self.fpv_table.lookup("PROG", Z_int_mesh, 0.0, 0.0)
-        Cmax = self.fpv_table.lookup("PROG", Z_int_mesh, 0.0, 1.0)
-        A_int_mesh = 1 / (Cmax - Cmin)
-        B_int_mesh = -Cmin / (Cmax - Cmin)
-        C_int_mesh = (L_int_mesh - B_int_mesh) / A_int_mesh
-
+        # Build omega_C interpolator
+        Z_sample = np.linspace(0.0, 1.0, 100)
+        L_sample = np.linspace(0.0, 1.0, 100)
+        Z_sample_mesh, L_sample_mesh = np.meshgrid(Z_sample, L_sample, indexing="ij")
+        omega_C = self.fpv_table.lookup("SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh)
+        omega_C_interp = interpolate.RegularGridInterpolator(
+            (Z_sample, L_sample), omega_C, bounds_error=False, fill_value=0.0
+        )
+        
         # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
-        n_tab = (50, 100, 10)
-        Z_focus = 0.05
-        n_lowZ = 30
-        # self.Zbar_vec = np.concatenate(
-        #     (np.linspace(eps, Z_focus, n_lowZ),
-        #      np.linspace(Z_focus, 1.0 - eps, n_tab[0] - n_lowZ + 1)[1:])
-        # )
-        self.Zbar_vec = np.linspace(eps, 1.0 - eps, n_tab[0])
-        self.Lbar_vec = np.linspace(eps, 1.0 - eps, n_tab[1])
+        n_tab = (100, 100, 100)
+        self.Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
+        self.Lbar_vec = np.linspace(0.0, 1.0, n_tab[1])
         self.logsigma2_vec = np.linspace(-4.0, -1.5, n_tab[2])
-        Zbar_mesh, Lbar_mesh, logsigma2_mesh = np.meshgrid(
-            self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec, indexing="ij"
-        )
-        Cmin_mesh = self.fpv_table.lookup("PROG", Zbar_mesh, 0.0, 0.0)
-        Cmax_mesh = self.fpv_table.lookup("PROG", Zbar_mesh, 0.0, 1.0)
-        Abar_mesh = 1 / (Cmax_mesh - Cmin_mesh)
-        Bbar_mesh = -Cmin_mesh / (Cmax_mesh - Cmin_mesh)
-        Cbar_mesh = (Lbar_mesh - Bbar_mesh) / Abar_mesh
 
-        # Sample omega_C on Z, L mesh
-        omega_C_ZL = self.fpv_table.lookup("SRC_PROG", Z_int_mesh, 0.0, L_int_mesh)
-        omega_C_ZL_interp = interpolate.RegularGridInterpolator(
-            (Z_int_vec, L_int_vec), omega_C_ZL, bounds_error=False, fill_value=0.0
-        )
-
-        # Cmin = lambda Z: self.fpv_table.lookup("PROG", Z, 0.0, 0.0)
-        # Cmax = lambda Z: self.fpv_table.lookup("PROG", Z, 0.0, 1.0)
-        # A_Z = lambda Z: 1 / (Cmax(Z) - Cmin(Z))
-        # B_Z = lambda Z: -Cmin(Z) / (Cmax(Z) - Cmin(Z))
-        # omega_C_ZL = lambda Z, L: self.fpv_table.lookup("SRC_PROG", Z, 0.0, L)
+        uv_vec, W_vec = special.roots_legendre(200)
+        W_vec = W_vec / 2
+        uv_vec = uv_vec / 2 + 0.5
 
         self.omega_C_int = np.zeros(n_tab)
         compute_func = functools.partial(
             self._compute_omega_C_int,
-            Zbar_mesh=Zbar_mesh,
-            Cbar_mesh=Cbar_mesh,
-            Lbar_mesh=Lbar_mesh,
-            logsigma2_mesh=logsigma2_mesh,
-            Z_int_vec=Z_int_vec,
-            L_int_vec=L_int_vec,
-            A_int_mesh=A_int_mesh,
-            Z_int_mesh=Z_int_mesh,
-            C_int_mesh=C_int_mesh,
-            omega_C_ZL=omega_C_ZL,
-            omega_C_ZL_interp=omega_C_ZL_interp,
+            Zbar_vec=self.Zbar_vec,
+            Lbar_vec=self.Lbar_vec,
+            logsigma2_vec=self.logsigma2_vec,
+            uv_vec=uv_vec,
+            W_vec=W_vec,
+            omega_C_interp=omega_C_interp,
         )
         tasks = [
             (i_Zbar, i_Lbar, i_S)
@@ -1206,17 +1120,17 @@ class JICModel:
         ]
 
         # Serial version (for debugging)
-        results = []
-        for i_Zbar, i_Lbar, i_S in tasks:
-            value = compute_func(i_Zbar, i_Lbar, i_S)
-            results.append((i_Zbar, i_Lbar, i_S, value))
+        # results = []
+        # for i_Zbar, i_Lbar, i_S in tasks:
+        #     value = compute_func(i_Zbar, i_Lbar, i_S)
+        #     results.append((i_Zbar, i_Lbar, i_S, value))
 
         # Parallel version
-        # with tqdm_joblib(tqdm(desc="Assembling table", total=len(tasks))):
-        #     results = Parallel(n_jobs=-1)(
-        #         delayed(compute_func)(i_Zbar, i_Lbar, i_S)
-        #         for i_Zbar, i_Lbar, i_S in tasks
-        #     )
+        with tqdm_joblib(tqdm(desc="Assembling table", total=len(tasks))):
+            results = Parallel(n_jobs=-1)(
+                delayed(compute_func)(i_Zbar, i_Lbar, i_S)
+                for i_Zbar, i_Lbar, i_S in tasks
+            )
 
         for i_Zbar, i_Lbar, i_S, value in results:
             self.omega_C_int[i_Zbar, i_Lbar, i_S] = value
