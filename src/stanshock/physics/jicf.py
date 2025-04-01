@@ -858,16 +858,6 @@ class JICModel:
         C = self.fpv_table.lookup("PROG", self.Z_3D_data, 0.0, 1.0)
         E_CHEM = self.fpv_table.lookup("E0_CHEM", self.Z_3D_data, 0.0, 1.0)
 
-        # DEBUG
-        # import matplotlib.pyplot as plt
-        # fig, ax = plt.subplots()
-        # c = ax.contourf(self.x_3D_data, self.y_3D_data, C[1, :, :, 59].T, levels=50,
-        #                 vmin=0.0, vmax=1.0)
-        # ax.set_aspect('equal')
-        # # plt.colorbar(c)
-        # plt.show()
-        # breakpoint()
-
         C_profile = np.mean(C, axis=(2, 3))
         E_CHEM_profile = np.mean(E_CHEM, axis=(2, 3))
         self.C_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
@@ -1078,10 +1068,6 @@ class JICModel:
         self.omega_C_int_interp = interpolate.RegularGridInterpolator(
             (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
         )
-
-        breakpoint()
-        exit()
-
 
     def get_chemical_sources(self, Z, C):
         """
