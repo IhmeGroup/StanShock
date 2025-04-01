@@ -262,68 +262,6 @@ class JICModel:
             self.omega_C_int_interp = interpolate.RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
-
-            Z_probe = self.Z_avg_profile.max()
-            for var in self.fpv_table.variables:
-                if var.name == "SRC_PROG":
-                    break
-            fig, ax = plt.subplots()
-            c = ax.contourf(self.fpv_table.Z, self.fpv_table.L, var.data[:,0,:].T, levels=50)
-            plt.axvline(Z_probe, color='r', linestyle='--')
-            ax.set_xlabel(r"$\overline{Z}$ [-]")
-            ax.set_ylabel(r"$\overline{\Lambda}$ [-]")
-            cbar = fig.colorbar(c)
-            cbar.set_label(r"$\dot{\omega}_C$ [1/s]")
-            fig.savefig("figures/omega_C_zline_tab.png", bbox_inches='tight', dpi=300)
-            plt.close(fig)
-
-            fig, ax = plt.subplots()
-            c = ax.contourf(self.Zbar_vec, self.Lbar_vec,
-                            np.maximum(self.omega_C_int[:, :, 0].T, 0.0), levels=50)
-            plt.axvline(Z_probe, color='r', linestyle='--')
-            ax.set_xlabel(r"$\overline{Z}$ [-]")
-            ax.set_ylabel(r"$\overline{\Lambda}$ [-]")
-            cbar = fig.colorbar(c)
-            cbar.set_label(r"$\dot{\omega}_C$ [1/s]")
-            fig.savefig("figures/omega_C_zline_low.png", bbox_inches='tight', dpi=300)
-            plt.close(fig)
-
-            fig, ax = plt.subplots()
-            c = ax.contourf(self.Zbar_vec, self.Lbar_vec,
-                           np.maximum(self.omega_C_int[:, :, -1].T, 0.0), levels=50)
-            plt.axvline(Z_probe, color='r', linestyle='--')
-            ax.set_xlabel(r"$\overline{Z}$ [-]")
-            ax.set_ylabel(r"$\overline{\Lambda}$ [-]")
-            cbar =  fig.colorbar(c)
-            cbar.set_label(r"$\dot{\omega}_C$ [1/s]")
-            fig.savefig("figures/omega_C_zline_hi.png", bbox_inches='tight', dpi=300)
-            plt.close(fig)
-
-            eps = 1.0e-10
-            L_probe = np.linspace(eps, 1.0 - eps, 10000)
-            fig, ax = plt.subplots(figsize=(4,3.2))
-            ax.semilogy(L_probe,
-                        self.fpv_table.lookup("SRC_PROG", Z_probe, 0.0, L_probe),
-                        label=r"$\sigma^2=0$")
-            ax.semilogy(L_probe,
-                        self.omega_C_int_interp((Z_probe, L_probe, -4)),
-                        label=r"$\sigma^2=10^{-4}$")
-            ax.semilogy(L_probe,
-                        self.omega_C_int_interp((Z_probe, L_probe, -2)),
-                        label=r"$\sigma^2=10^{-1}$")
-            ax.set_xlim((-0.1, 1.1))
-            # ax.set_ylim((1e-3, 1e5))
-            ax.set_ymargin(0.1)
-            ax.set_xlabel(r"$\Lambda$ [-]")
-            ax.set_ylabel(r"$\dot{\omega}_C$ [1/s]")
-            ax.legend()
-            fig.savefig("figures/omega_C_slices.png", bbox_inches='tight', dpi=300)
-            ax.set_xlim((-0.0001, 0.005))
-            fig.savefig("figures/omega_C_slices_zoom.png", bbox_inches='tight', dpi=300)
-            plt.close(fig)
-
-            breakpoint()
-            exit()
         else:
             self.calc_chemical_sources(write=True)
 
@@ -1118,12 +1056,6 @@ class JICModel:
             for i_Lbar in range(n_tab[1])
             for i_S in range(n_tab[2])
         ]
-
-        # Serial version (for debugging)
-        # results = []
-        # for i_Zbar, i_Lbar, i_S in tasks:
-        #     value = compute_func(i_Zbar, i_Lbar, i_S)
-        #     results.append((i_Zbar, i_Lbar, i_S, value))
 
         # Parallel version
         with tqdm_joblib(tqdm(desc="Assembling table", total=len(tasks))):
