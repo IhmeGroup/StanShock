@@ -4,6 +4,9 @@ import cantera as ct
 import numpy as np
 from numba import double, njit
 
+from stanshock.physics.cantera_interface import CanteraInterface
+from stanshock.physics.fluid_base import FluidState
+
 # Type signatures for numba
 double1D = double[:]
 double2D = double[:, :]
@@ -76,7 +79,7 @@ def get_cp_compiled(T, Y, TTable, a, b):
     return cp
 
 
-class ThermoTable:
+class ThermoTable(CanteraInterface):
     """
     This is a class defined to encapsulate the temperature table with the
     relevant methods
@@ -89,6 +92,7 @@ class ThermoTable:
         coefficients. The coefficients are selected to retain the exact
         enthalpies at the table points.
         """
+        super().__init__(gas)
         nSp = gas.n_species
         self.TMin = 50.0
         self.dT = 100.0
@@ -120,7 +124,7 @@ class ThermoTable:
                 cpk = self.a[kT, kSp] * (Tkp1) + self.b[kT, kSp]
                 hk = hkp1
 
-    def get_specific_gas_constants(self, Y):
+    def get_specific_gas_constants(self, state: FluidState):
         """
         This method computes the mixture-specific gas constat
             inputs:
@@ -128,9 +132,10 @@ class ThermoTable:
             outputs:
                 R: vector of mixture-specific gas constants [n]
         """
-        return get_specific_gas_constants_compiled(Y, self.molecularWeights)
+        self.set_state(state)
+        return get_specific_gas_constants_compiled(state.mass_fractions, self.molecularWeights)
 
-    def get_cp(self, T, Y):
+    def get_cp(self, state: FluidState):
         """
         This method computes the constant pressure specific heat as determined
         by Billet and Abgrall (2003) for the double flux method.
@@ -140,7 +145,8 @@ class ThermoTable:
             outputs:
                 cp: vector of constant pressure specific heats
         """
-        return get_cp_compiled(T, Y, self.T, self.a, self.b)
+        self.set_state(state)
+        return get_cp_compiled(state.temperature, state.mass_fractions, self.T, self.a, self.b)
 
     def get_frozen_enthalpy(self, T, Y):
         """
@@ -150,7 +156,7 @@ class ThermoTable:
                 T: vector of temperatures [n]
                 Y: matrix of mass fractions [n,nSp]
             outputs:
-                cp: vector of constant pressure specific heats
+                h0: vector of frozen enthalpies for the mixture [n]
         """
         if any(np.logical_or(self.TMin > T, self.TMax < T)):
             msg = "Temperature not within table"
@@ -163,20 +169,20 @@ class ThermoTable:
             h0[k] = np.dot(Y[k, :], self.h[index] - bbar * self.T[index])
         return h0
 
-    def get_gamma(self, T, Y):
+    def get_gamma(self, state: FluidState):
         """
         This method computes the specific heat ratio, gamma.
             inputs:
                 T: vector of temperatures [n]
                 Y: matrix of mass fractions [n,nSp]
             outputs:
-                gamma: vector of specific heat ratios
+                gamma: vector of specific heat ratios [n]
         """
-        cp = self.get_cp(T, Y)
-        R = self.get_specific_gas_constants(Y)
+        cp = self.get_cp(state)
+        R = self.get_specific_gas_constants(state)
         return cp / (cp - R)
 
-    def get_temperature(self, r, p, Y):
+    def get_temperature(self, state: FluidState):
         """
         This method applies the ideal gas law to compute the temperature
             inputs:
@@ -186,5 +192,5 @@ class ThermoTable:
             outputs:
                 T: vector of temperatures
         """
-        R = self.get_specific_gas_constants(Y)
-        return p / (r * R)
+        R = self.get_specific_gas_constants(state)
+        return state.pressure / (state.density * R)

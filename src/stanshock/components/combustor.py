@@ -6,8 +6,9 @@ import numpy as np
 from stanshock.numerics.face_extrapolation import weno5
 from stanshock.numerics.inviscid_flux import hllc_flux
 from stanshock.numerics.viscous_flux import viscous_flux
+from stanshock.physics.flamelet import FPVTable
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.physics.skinfriction import SkinFriction
-from stanshock.physics.thermo.table import ThermoTable
 from stanshock.processing.initialize import (
     initialize_constant,
     initialize_diffuse_interface,
@@ -22,7 +23,12 @@ class Combustor:
     1D gasdynamics solver.
     """
 
-    def __init__(self, gas, **kwargs):
+    def __init__(
+        self,
+        physics: FluidPhysics,
+        n: int = 10,
+        **kwargs,
+    ):
         """
         initialization of the object with default values. The keyword arguments
         allow the user to initialize the state
@@ -33,14 +39,9 @@ class Combustor:
 
         self.cfl = 1.0  # stability condition
         self.dx = 1.0  # grid spacing
-        self.n = 10  # grid size
+        self.n = n  # grid size
         self.boundaryConditions = ["outflow", "outflow"]
         self.x = np.linspace(0.0, self.dx * (self.n - 1), self.n)
-        self.gas = gas  # cantera solution object for the gas
-        self.r = np.ones(self.n) * gas.density  # density
-        self.u = np.zeros(self.n)  # velocity
-        self.p = np.ones(self.n) * gas.P  # pressure
-        self.gamma = np.ones(self.n) * gas.cp / gas.cv  # specific heat ratio
         self.F = np.ones(self.n)  # thickening
         self.t = 0.0  # time
         self.verbose = True  # console output switch
@@ -67,10 +68,8 @@ class Combustor:
         self.probes = []  # list of probe objects
         self.XTDiagrams = []  # list of XT diagram objects
         self.cf = None  # skin friction functor
-        self.thermoTable = ThermoTable(gas)  # thermodynamic table object
         self.optimizationIteration = 0  # counter to keep track of optimization
-        self.physics = "FPV"  # flag to determine the physics model
-        self.fpv_table = None  # table for FPV model
+        self.physics = physics  # Model handling all fluid property evaluations
         self.reacting = False  # flag to solver about whether to solve source terms
         self.inReactingRegion = (
             lambda _x, _t: True
@@ -84,164 +83,21 @@ class Combustor:
                 self.__dict__[key] = item
 
         # set the number of scalars
-        if self.physics == "FPV":
-            if self.fpv_table is None:
-                msg = "FPV table must be defined"
-                raise Exception(msg)
-            self.n_scalars = 2
-            self.initialize_bilger_mixture_fraction()
-            self.initialize_progress_variable()
-        elif self.physics == "FRC":
-            if self.injector is not None:
-                msg = "JIC injector model not supported for FRC"
-                raise Exception(msg)
-            self.n_scalars = self.gas.n_species
-        else:
-            msg = "Invalid Physics Model"
+        self.n_scalars = self.physics.n_scalars
+        if not isinstance(self.physics, FPVTable) and self.injector is not None:
+            msg = "JIC injector model requires FPVTable physics."
             raise Exception(msg)
-        self.Y = np.zeros((self.n, self.n_scalars))  # scalars
 
         # initialize the state
         if self.initialization is None:
             msg = "No initialization method selected"
             raise Exception(msg)
         if self.initialization[0].lower() == "constant":
-            initialize_constant(self, *self.initialization[1:])
+            self.state = initialize_constant(self, *self.initialization[1:])
         elif self.initialization[0].lower() == "riemann":
-            initialize_riemann_problem(self, *self.initialization[1:])
+            self.state = initialize_riemann_problem(self, *self.initialization[1:])
         elif self.initialization[0].lower() == "diffuse_interface":
-            initialize_diffuse_interface(self, *self.initialization[1:])
-        if (
-            not self.n
-            == len(self.x)
-            == len(self.r)
-            == len(self.u)
-            == len(self.p)
-            == len(self.gamma)
-        ):
-            msg = "Initialization Error"
-            raise Exception(msg)
-
-    def get_cp(self, T, Y):
-        """
-        This method computes the constant pressure specific heat as determined
-        by Billet and Abgrall (2003) for the double flux method.
-            inputs:
-                T: vector of temperatures [n]
-                Y: matrix of mass fractions [n,nSc]
-            outputs:
-                cp: vector of constant pressure specific heats
-        """
-        cp = np.zeros_like(T)
-        if self.physics == "FPV":
-            Z = Y[:, 0]
-            C = Y[:, 1]
-            Q = np.zeros_like(self.x)
-            L = self.fpv_table.get_normalized_progress_variable(Z, C)
-            cp = self.fpv_table.get_cp(Z, Q, L, T)
-        elif self.physics == "FRC":
-            cp = self.thermoTable.get_cp(T, Y)
-        return cp
-
-    def get_gamma(self, T, Y):
-        """
-        This method computes the specific heat ratio, gamma.
-            inputs:
-                T: vector of temperatures [n]
-                Y: matrix of mass fractions [n,nSc]
-            outputs:
-                gamma: vector of specific heat ratios
-        """
-        gamma = np.zeros_like(T)
-        if self.physics == "FPV":
-            Z = Y[:, 0]
-            C = Y[:, 1]
-            Q = np.zeros_like(self.x)
-            L = self.fpv_table.get_normalized_progress_variable(Z, C)
-            gamma = self.fpv_table.get_gamma(Z, Q, L, T)
-        elif self.physics == "FRC":
-            gamma = self.thermoTable.get_gamma(T, Y)
-        return gamma
-
-    def get_mu(self, T, p, Y):
-        """
-        This method computes the dynamic viscosity of the gas at the current state
-            inputs:
-                T: vector of temperatures [n]
-                P: vector of pressures [n]
-                Y: scalar matrix [n,nSc]
-            outputs:
-                mu: vector of dynamic viscosities
-        """
-        mu = np.zeros_like(T)
-        if self.physics == "FPV":
-            Z = Y[:, 0]
-            C = Y[:, 1]
-            Q = np.zeros_like(self.x)
-            L = self.fpv_table.get_normalized_progress_variable(Z, C)
-            mu = self.fpv_table.get_mu(Z, Q, L, T)
-        elif self.physics == "FRC":
-            for i, Ti in enumerate(T):
-                self.gas.TP = Ti, p[i]
-                if self.gas.n_species > 1:
-                    self.gas.Y = Y[i, :]
-                mu[i] = self.gas.viscosity
-        return mu
-
-    def get_lambda_over_cv(self, T, p, Y):
-        """
-        This method computes lambda / cv, where lambda is the thermal conductivity
-        and cv is the specific heat at constant volume.
-            inputs:
-                T: vector of temperatures [n]
-                Y: scalar matrix [n,nSc]
-            outputs:
-                loc: vector of lambda / cv
-        """
-        loc = np.zeros_like(T)
-        if self.physics == "FPV":
-            Z = Y[:, 0]
-            C = Y[:, 1]
-            Q = np.zeros_like(self.x)
-            L = self.fpv_table.get_normalized_progress_variable(Z, C)
-            loc = self.fpv_table.get_thermal_conductivity(Z, Q, L, T)
-        elif self.physics == "FRC":
-            for i, Ti in enumerate(T):
-                self.gas.TP = Ti, p[i]
-                if self.gas.n_species > 1:
-                    self.gas.Y = Y[i, :]
-                loc[i] = self.gas.thermal_conductivity / self.gas.cv
-        return loc
-
-    def get_temperature(self, r, p, Y):
-        """
-        This method computes the temperature of the gas at the current state
-            inputs:
-                r=density
-                p=pressure
-                Y=scalar matrix [x,scalar]
-            outputs:
-                T=temperature
-        """
-        T = np.zeros_like(r)
-        if self.physics == "FPV":
-            Z = Y[:, 0]
-            C = Y[:, 1]
-            Q = np.zeros_like(self.x)
-            L = self.fpv_table.get_normalized_progress_variable(Z, C)
-            R = self.fpv_table.get_specific_gas_constant(Z, Q, L)
-            T = p / (r * R)
-        elif self.physics == "FRC":
-            T = self.thermoTable.get_temperature(r, p, Y)
-        return T
-
-    def get_sound_speed(self, r, p, gamma):
-        """
-        This method returns the speed of sound for the gas at its current state
-            outputs:
-                speed of sound
-        """
-        return np.sqrt(gamma * p / r)
+            self.state = initialize_diffuse_interface(self, *self.initialization[1:])
 
     def get_wave_speed(self):
         """
@@ -249,7 +105,7 @@ class Combustor:
             outputs:
                 speed of acoustic wave
         """
-        return abs(self.u) + self.get_sound_speed(self.r, self.p, self.gamma)
+        return abs(self.state.velocity) + self.physics.get_sound_speed(self.state)
 
     def get_time_step(self):
         """
@@ -258,30 +114,19 @@ class Combustor:
             outputs:
                 timestep
         """
-        localDts = self.dx / self.get_wave_speed()
+        local_timescale = self.dx / self.get_wave_speed()
         if self.includeDiffusion:
-            T = self.get_temperature(self.r, self.p, self.Y)
-            cp = self.get_cp(T, self.Y)
-            # cv = cp / self.gamma
-            mu = self.get_mu(T, self.p, self.Y)
-            nu = mu / self.r
-            k = self.get_lambda_over_cv(T, self.p, self.Y) * cp * self.F
-            alpha = k / (self.r * cp)
-            if self.physics == "FPV":
-                # unity Lewis number
-                diff = alpha
-            elif self.physics == "FRC":
-                diff = np.zeros_like(self.x)
-                for i, Ti in enumerate(T):
-                    self.gas.TP = Ti, self.p[i]
-                    if self.gas.n_species > 1:
-                        self.gas.Y = self.Y[i, :]
-                    diff[i] = np.max(self.gas.mix_diff_coeffs) * self.F[i]
-            viscousDts = (
+            mu = self.physics.get_mu(self.state)
+            nu = mu / self.state.density
+            alpha = self.physics.get_thermal_diffusivity(self.state) * self.F
+            diff = (
+                np.max(self.physics.get_mass_diffusivity(self.state), axis=1) * self.F
+            )
+            viscous_timescale = (
                 0.5 * self.dx**2.0 / np.maximum(4.0 / 3.0 * nu, np.maximum(alpha, diff))
             )
-            localDts = np.minimum(localDts, viscousDts)
-        return self.cfl * min(localDts)
+            local_timescale = np.minimum(local_timescale, viscous_timescale)
+        return self.cfl * min(local_timescale)
 
     def apply_boundary_conditions(self, rLR, uLR, pLR, YLR):
         """
@@ -372,83 +217,9 @@ class Combustor:
         Y[Y > 1.0] = 1.0
         Y[Y < 0.0] = 0.0
         # scale
-        if self.physics == "FRC":
+        if self.physics.normalize_scalars:
             Y = Y / np.sum(Y, axis=1).reshape((-1, 1))
         return (r, u, p, Y)
-
-    def initialize_bilger_mixture_fraction(self):
-        """
-        This method initializes the Bilger mixture fraction
-        """
-        self.Z_weights = np.zeros(self.gas.n_species)
-        self.Z_offset = 0.0
-        denom = 0.0
-
-        # Set the values for C, H, and O:
-        stoich = {
-            "C": 2.0,
-            "H": 0.5,
-            "O": -1.0,
-        }
-
-        for element in self.gas.element_names:
-            if element not in stoich:
-                continue
-            C = stoich[element]
-
-            idx_element = self.gas.element_index(element)
-            W = self.gas.atomic_weight(element)
-
-            self.gas.X = self.ox_def
-            Yo = self.gas.elemental_mass_fraction(element)
-
-            self.gas.X = self.fuel_def
-            Yf = self.gas.elemental_mass_fraction(element)
-
-            denom += C * (Yf - Yo) / W
-
-            for k in range(self.gas.n_species):
-                self.Z_weights[k] += C * self.gas.n_atoms(k, idx_element)
-
-            self.Z_offset -= C * Yo / W
-
-        self.Z_weights /= denom * self.gas.molecular_weights
-        self.Z_offset /= denom
-
-    def get_bilger_mixture_fraction(self, Y):
-        """
-        This method calculates the Bilger mixture fraction
-            inputs:
-                Y=species mass fraction
-            outputs:
-                Z=mixture fraction
-        """
-        return np.clip(np.dot(Y, self.Z_weights) + self.Z_offset, 0.0, 1.0)
-
-    def initialize_progress_variable(self):
-        """
-        This method initializes the progress variable
-        """
-        if self.prog_def is None:
-            msg = "Progress Variable Not Defined"
-            raise Exception(msg)
-        self.prog_weights = np.zeros(self.gas.n_species)
-        for sp, val in self.prog_def.items():
-            self.prog_weights[self.gas.species_index(sp)] = val
-        if np.sum(self.prog_weights) == 0.0:
-            msg = "Progress Variable Weights Sum to Zero"
-            raise Exception(msg)
-        self.prog_weights /= np.sum(self.prog_weights)
-
-    def get_progress_variable(self, Y):
-        """
-        This method computes the progress variable
-            inputs:
-                Y=species mass fraction
-            outputs:
-                progress variable
-        """
-        return np.clip(np.dot(Y, self.prog_weights), 0.0, 1.0)
 
     def get_inviscid_flux(self, r, u, p, Y, gamma):
         """
@@ -534,14 +305,14 @@ class Combustor:
         u = np.ones(self.n + 2 * mt)
         p = np.ones(self.n + 2 * mt)
         gamma = np.ones(self.n + 2 * mt)
-        gamma[:mt], gamma[-mt:] = self.gamma[0], self.gamma[-1]
+        gamma[:mt], gamma[-mt:] = self.state.gamma[0], self.state.gamma[-1]
         Y = np.ones((self.n + 2 * mt, self.n_scalars))
         (r[mt:-mt], u[mt:-mt], p[mt:-mt], Y[mt:-mt, :], gamma[mt:-mt]) = (
-            self.r,
-            self.u,
-            self.p,
-            self.Y,
-            self.gamma,
+            self.state.density,
+            self.state.velocity,
+            self.state.pressure,
+            self.state.composition,
+            self.state.gamma,
         )
         (r, ru, E, rY) = self.primitive_to_conservative(r, u, p, Y, gamma)
         # 1st stage of RK3
@@ -566,15 +337,15 @@ class Combustor:
         rY = (1.0 / 3.0) * rY + (2.0 / 3.0) * rY2 + (2.0 / 3.0) * dt * rhs[:, mn:]
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
         # update
-        T0 = self.get_temperature(r[mt:-mt], p[mt:-mt], Y[mt:-mt])
-        gamma[mt:-mt] = self.get_gamma(T0, Y[mt:-mt])
-        (self.r, self.u, self.p, self.Y, self.gamma) = (
-            r[mt:-mt],
-            u[mt:-mt],
-            p[mt:-mt],
-            Y[mt:-mt],
-            gamma[mt:-mt],
+        self.state = FluidState(
+            density=r[mt:-mt],
+            pressure=p[mt:-mt],
+            composition=Y[mt:-mt],
+            velocity=u[mt:-mt],
         )
+        self.state = self.physics.set_state(self.state)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_chemistry(self, dt):
         """
@@ -585,9 +356,9 @@ class Combustor:
         """
         if not self.reacting:
             return
-        if self.physics == "FPV":
+        if isinstance(self.physics, FPVTable):
             self.advance_chemistry_FPV(dt)
-        elif self.physics == "FRC":
+        else:
             self.advance_chemistry_FRC(dt)
 
     def advance_chemistry_FPV(self, dt):
@@ -599,51 +370,61 @@ class Combustor:
                 dt=time step
         """
         # Using mixed-is-burned (MIB)
-        # (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.gamma)
+        # (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.state.gamma)
         # Z = rY[:, 0] / r
         # Q = np.zeros(self.n)
         # C = rY[:, 1] / r
-        # L = self.fpv_table.get_normalized_progress_variable(Z, C)
-        # e_chem0 = r * self.fpv_table.lookup('E0_CHEM', Z, Q, L)
+        # L = self.physics.get_normalized_progress_variable(Z, C)
+        # e_chem0 = r * self.physics.lookup('E0_CHEM', Z, Q, L)
         # C1, e_chem1 = self.injector.get_MIB_profiles()
         # e_chem1 *= r
         # E1 = E + e_chem0 - e_chem1
         # rY1 = rY
         # rY1[:, 1] = r * C1
-        # (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E1,rY1,self.gamma)
+        # (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E1,rY1,self.state.gamma)
 
         # Using FPV
         # initialize
         (r, ru, E, rY) = self.primitive_to_conservative(
-            self.r, self.u, self.p, self.Y, self.gamma
+            self.state.density,
+            self.state.velocity,
+            self.state.pressure,
+            self.state.composition,
+            self.state.gamma,
         )
         Q = np.zeros(self.n)
-        L = self.fpv_table.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
-        e_chem0 = r * self.fpv_table.lookup("E0_CHEM", self.Y[:, 0], Q, L)
+        L = self.physics.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
+        e_chem0 = r * self.physics.lookup("E0_CHEM", self.Y[:, 0], Q, L)
         # 1st stage of RK2
         rhsY = np.zeros((self.n, self.n_scalars))
         omegaC = self.injector.get_chemical_sources(self.Y[:, 0], self.Y[:, 1])
         rhsY[:, 1] = omegaC * r
         rY1 = rY + dt * rhsY
-        L1 = self.fpv_table.get_normalized_progress_variable(
-            rY1[:, 0] / r, rY1[:, 1] / r
-        )
-        e_chem1 = r * self.fpv_table.lookup("E0_CHEM", rY1[:, 0] / r, Q, L1)
+        L1 = self.physics.get_normalized_progress_variable(rY1[:, 0] / r, rY1[:, 1] / r)
+        e_chem1 = r * self.physics.lookup("E0_CHEM", rY1[:, 0] / r, Q, L1)
         E1 = E + e_chem0 - e_chem1
-        (r1, u1, p1, Y1) = self.conservative_to_primitive(r, ru, E1, rY1, self.gamma)
+        (r1, u1, p1, Y1) = self.conservative_to_primitive(
+            r, ru, E1, rY1, self.state.gamma
+        )
         # 2nd stage of RK2
         omegaC1 = self.injector.get_chemical_sources(Y1[:, 0], Y1[:, 1])
         rhsY[:, 1] = omegaC1 * r1
         rY = 0.5 * (rY + rY1 + dt * rhsY)
-        L = self.fpv_table.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
-        e_chem2 = r * self.fpv_table.lookup("E0_CHEM", rY[:, 0] / r, Q, L)
+        L = self.physics.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
+        e_chem2 = r * self.physics.lookup("E0_CHEM", rY[:, 0] / r, Q, L)
         E = E + e_chem0 - e_chem2
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
 
         # update properties
-        T0 = self.get_temperature(r, p, Y)
-        self.gamma = self.get_gamma(T0, Y)
-        (self.r, self.u, self.p, self.Y) = (r, u, p, Y)
+        self.state = FluidState(
+            density=r,
+            pressure=p,
+            composition=Y,
+            velocity=u,
+        )
+        self.state = self.physics.set_state(self.state)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_chemistry_FRC(self, dt):
         """
@@ -669,13 +450,13 @@ class Combustor:
             Y = y[:-1]
             T = y[-1]
             # set the state for the gas object
-            self.gas.TDY = T, r, Y
+            self.physics.gas.TDY = T, r, Y
             # gas properties
-            cv = self.gas.cv_mass
-            W = self.gas.molecular_weights
-            wHatDot = self.gas.net_production_rates  # kmol/m^3.s
+            cv = self.physics.gas.cv_mass
+            W = self.physics.gas.molecular_weights
+            wHatDot = self.physics.gas.net_production_rates  # kmol/m^3.s
             wDot = wHatDot * W  # kg/m^3.s
-            eRT = self.gas.standard_int_energies_RT
+            eRT = self.physics.gas.standard_int_energies_RT
             # compute the derivatives
             YDot = wDot / r
             TDot = -np.sum(eRT * wHatDot) * ct.gas_constant * T / (r * cv)
@@ -689,15 +470,22 @@ class Combustor:
 
         # get indices
         indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k], self.t)]
-        Ts = self.get_temperature(self.r[indices], self.p[indices], self.Y[indices, :])
+        state_temp = FluidState(
+            shape=len(indices),
+            density=self.state.density[indices],
+            pressure=self.state.pressure[indices],
+            mass_fractions=self.state.mass_fractions[indices, :],
+        )
+        Ts = self.physics.get_temperature(state_temp)
+
         # initialize integrator
-        y0 = np.zeros(self.gas.n_species + 1)
+        y0 = np.zeros(self.physics.n_scalars + 1)
         integrator = integrate.ode(dydt).set_integrator("lsoda")
         for TIndex, k in enumerate(indices):
             # initialize
-            y0[:-1] = self.Y[k, :]
+            y0[:-1] = self.state.mass_fractions[k, :]
             y0[-1] = Ts[TIndex]
-            args = [self.r[k], self.F[k]]
+            args = [self.state.density[k], self.F[k]]
             integrator.set_initial_value(y0, 0.0)
             integrator.set_f_params(args)
             # solve
@@ -708,13 +496,13 @@ class Combustor:
             Y[Y < 0.0] = 0.0
             Y /= np.sum(Y)
             # update
-            self.Y[k, :] = Y
-            T = integrator.y[-1]
-            self.gas.TDY = T, self.r[k], Y
-            self.p[k] = self.gas.P
-        # update gamma
-        T = self.get_temperature(self.r, self.p, self.Y)
-        self.gamma = self.get_gamma(T, self.Y)
+            self.state.mass_fractions[k, :] = Y
+            self.state.temperature[k] = integrator.y[-1]
+
+        # update state
+        self.state.pressure = None
+        self.state = self.physics.set_state(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_quasi_1d(self, dt):
         """
@@ -760,20 +548,24 @@ class Combustor:
         y0 = np.zeros(3)
         integrator = integrate.ode(dydt).set_integrator("lsoda")
         (r, ru, E, _) = self.primitive_to_conservative(
-            self.r, self.u, self.p, self.Y, self.gamma
+            self.state.density,
+            self.state.velocity,
+            self.state.pressure,
+            self.state.composition,
+            self.state.gamma,
         )
         # determine the indices
         iIn = []
         eIn = np.arange(self.x.shape[0])
         if self.dlnAdt is not None:
             dlnAdt = self.dlnAdt(self.x, self.t)
-            iIn = np.arange(self.x.shape[0])[dlnAdt != 0.0]
-            eIn = np.arange(self.x.shape[0])[dlnAdt == 0.0]
+            iIn = np.where(dlnAdt != 0.0)
+            eIn = np.where(dlnAdt == 0.0)
         # integrate implicitly
         for i in iIn:
             # initialize
             y0[:] = r[i], ru[i], E[i]
-            args = np.array([self.x[i]]), self.gamma[i]
+            args = np.array([self.x[i]]), self.state.gamma[i]
             integrator.set_initial_value(y0, self.t)
             integrator.set_f_params(args)
             # solve
@@ -791,17 +583,25 @@ class Combustor:
             dlnAdx = self.dlnAdx(self.x, self.t)[eIn]
             rhs[0] -= ru[eIn] * dlnAdx
             rhs[1] -= (ru[eIn] ** 2.0 / r[eIn]) * dlnAdx
-            rhs[2] -= (self.u[eIn] * (E[eIn] + self.p[eIn])) * dlnAdx
+            rhs[2] -= (
+                self.state.velocity[eIn] * (E[eIn] + self.state.pressure[eIn])
+            ) * dlnAdx
         # update
         r[eIn] += dt * rhs[0]
         ru[eIn] += dt * rhs[1]
         E[eIn] += dt * rhs[2]
-        rY = r.reshape((r.shape[0], 1)) * self.Y
-        (self.r, self.u, self.p, _) = self.conservative_to_primitive(
-            r, ru, E, rY, self.gamma
+        rY = r.reshape((r.shape[0], 1)) * self.state.composition
+        (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
+        self.state = FluidState(
+            shape=self.n,
+            density=r,
+            pressure=p,
+            composition=self.state.composition,
+            velocity=u,
         )
-        T = self.get_temperature(self.r, self.p, self.Y)
-        self.gamma = self.get_gamma(T, self.Y)
+        self.state = self.physics.set_state(self.state)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_boundary_layer(self, dt):
         """
@@ -856,37 +656,51 @@ class Combustor:
 
         #######################################################################
         if self.h is None or self.w is None or self.Tw is None:
-            msg = "stanShock improperly initialized for boundary layer terms"
+            msg = "Combustor improperly initialized for boundary layer terms"
             raise Exception(msg)
         D = 2 * self.h * self.w / (self.h + self.w)
         # compute gas properties
-        T = self.get_temperature(self.r, self.p, self.Y)
-        cp = self.get_cp(T, self.Y)
-        mu = self.get_mu(T, self.p, self.Y)
-        k = self.get_lambda_over_cv(T, self.p, self.Y) * cp
+        T = self.state.temperature = self.physics.get_temperature(self.state)
+        cp = self.physics.get_cp(self.state)
+        mu = self.physics.get_mu(self.state)
+        k = self.physics.get_lambda_over_cv(self.state) * cp
         # compute non-dimensional numbers
-        Re = abs(self.r * self.u * D / mu)
+        Re = abs(self.state.density * self.state.velocity * D / mu)
         Pr = cp * mu / k
         # skin friction coefficient
         if self.cf is None:
             self.cf = SkinFriction()  # initialize the functor
         cf = self.cf(Re)
         # shear stress on wall
-        shear = cf * (0.5 * self.r * self.u**2.0) * (np.sign(self.u))
+        shear = (
+            cf
+            * (0.5 * self.state.density * self.state.velocity**2.0)
+            * np.sign(self.state.velocity)
+        )
         # Stanton number and heat transfer to wall
         Nu = get_nusselt_number(Re, Pr, cf)
         qloss = Nu * k / D * (T - self.Tw)
         # update
         (r, ru, E, rY) = self.primitive_to_conservative(
-            self.r, self.u, self.p, self.Y, self.gamma
+            self.state.density,
+            self.state.velocity,
+            self.state.pressure,
+            self.state.composition,
+            self.state.gamma,
         )
         ru -= shear * 4.0 / D * dt
         E -= qloss * 4.0 / D * dt
-        (self.r, self.u, self.p, _) = self.conservative_to_primitive(
-            r, ru, E, rY, self.gamma
+        (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
+        self.state = FluidState(
+            shape=self.n,
+            density=r,
+            pressure=p,
+            composition=self.state.composition,
+            velocity=u,
         )
-        T = self.get_temperature(self.r, self.p, self.Y)
-        self.gamma = self.get_gamma(T, self.Y)
+        self.state = self.physics.set_state(self.state)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_diffusion(self, dt):
         """
@@ -901,14 +715,14 @@ class Combustor:
         u = np.ones(self.n + 2 * mt)
         p = np.ones(self.n + 2 * mt)
         gamma = np.ones(self.n + 2 * mt)
-        gamma[:mt], gamma[-mt:] = self.gamma[0], self.gamma[-1]
+        gamma[:mt], gamma[-mt:] = self.state.gamma[0], self.state.gamma[-1]
         Y = np.ones((self.n + 2 * mt, self.n_scalars))
         (r[mt:-mt], u[mt:-mt], p[mt:-mt], Y[mt:-mt, :], gamma[mt:-mt]) = (
-            self.r,
-            self.u,
-            self.p,
-            self.Y,
-            self.gamma,
+            self.state.density,
+            self.state.velocity,
+            self.state.pressure,
+            self.state.composition,
+            self.state.gamma,
         )
         (r, ru, E, rY) = self.primitive_to_conservative(r, u, p, Y, gamma)
         if self.thickening is not None:
@@ -928,15 +742,16 @@ class Combustor:
         rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
         # update
-        T0 = self.get_temperature(r[mt:-mt], p[mt:-mt], Y[mt:-mt])
-        gamma[mt:-mt] = self.get_gamma(T0, Y[mt:-mt])
-        (self.r, self.u, self.p, self.Y, self.gamma) = (
-            r[mt:-mt],
-            u[mt:-mt],
-            p[mt:-mt],
-            Y[mt:-mt],
-            gamma[mt:-mt],
+        self.state = FluidState(
+            shape=self.n,
+            density=r[mt:-mt],
+            pressure=p[mt:-mt],
+            composition=Y[mt:-mt, :],
+            velocity=u[mt:-mt],
         )
+        self.state = self.physics.set_state(self.state)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_source_terms(self, dt):
         """
@@ -947,26 +762,39 @@ class Combustor:
         # initialize
         mn = self.mn
         (r, ru, E, rY) = self.primitive_to_conservative(
-            self.r, self.u, self.p, self.Y, self.gamma
+            self.state.density,
+            self.state.velocity,
+            self.state.pressure,
+            self.state.composition,
+            self.state.gamma,
         )
         # 1st stage of RK2
-        rhs = self.sourceTerms(r, ru, E, rY, self.gamma, self.x, self.t)
+        rhs = self.sourceTerms(r, ru, E, rY, self.state.gamma, self.x, self.t)
         r1 = r + dt * rhs[:, 0]
         ru1 = ru + dt * rhs[:, 1]
         E1 = E + dt * rhs[:, 2]
         rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservative_to_primitive(r1, ru1, E1, rY1, self.gamma)
+        (r1, u1, p1, Y1) = self.conservative_to_primitive(
+            r1, ru1, E1, rY1, self.state.gamma
+        )
         # 2nd stage of RK2
-        rhs = self.sourceTerms(r1, ru1, E1, rY1, self.gamma, self.x, self.t + dt)
+        rhs = self.sourceTerms(r1, ru1, E1, rY1, self.state.gamma, self.x, self.t + dt)
         r = 0.5 * (r + r1 + dt * rhs[:, 0])
         ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
         E = 0.5 * (E + E1 + dt * rhs[:, 2])
         rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         # update
-        T0 = self.get_temperature(r, p, Y)
-        self.gamma = self.get_gamma(T0, Y)
-        (self.r, self.u, self.p, self.Y) = (r, u, p, Y)
+        self.state = FluidState(
+            shape=self.n,
+            density=r,
+            pressure=p,
+            composition=Y,
+            velocity=u,
+        )
+        self.state = self.physics.set_state(self.state)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_injector(self, dt):
         """
@@ -978,31 +806,44 @@ class Combustor:
         # initialize
         mn = self.mn
         (r, ru, E, rY) = self.primitive_to_conservative(
-            self.r, self.u, self.p, self.Y, self.gamma
+            self.state.density,
+            self.state.velocity,
+            self.state.pressure,
+            self.state.composition,
+            self.state.gamma,
         )
-        self.injector.update_fluid_tip_positions(dt, self.t, self.u)
+        self.injector.update_fluid_tip_positions(dt, self.t, self.state.velocity)
         # 1st stage of RK2
         rhs = self.injector.get_injector_sources(
-            r, ru, E, rY[:, 0], rY[:, 1], self.gamma, self.t
+            r, ru, E, rY[:, 0], rY[:, 1], self.state.gamma, self.t
         )
         r1 = r + dt * rhs[:, 0]
         ru1 = ru + dt * rhs[:, 1]
         E1 = E + dt * rhs[:, 2]
         rY1 = rY + dt * rhs[:, mn:]
-        (r1, _, _, _) = self.conservative_to_primitive(r1, ru1, E1, rY1, self.gamma)
+        (r1, _, _, _) = self.conservative_to_primitive(
+            r1, ru1, E1, rY1, self.state.gamma
+        )
         # 2nd stage of RK2
         rhs = self.injector.get_injector_sources(
-            r1, ru1, E1, rY1[:, 0], rY1[:, 1], self.gamma, self.t + dt
+            r1, ru1, E1, rY1[:, 0], rY1[:, 1], self.state.gamma, self.t + dt
         )
         r = 0.5 * (r + r1 + dt * rhs[:, 0])
         ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
         E = 0.5 * (E + E1 + dt * rhs[:, 2])
         rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.gamma)
+        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         # update
-        T0 = self.get_temperature(r, p, Y)
-        self.gamma = self.get_gamma(T0, Y)
-        (self.r, self.u, self.p, self.Y) = (r, u, p, Y)
+        self.state = FluidState(
+            shape=self.n,
+            density=r,
+            pressure=p,
+            composition=Y,
+            velocity=u,
+        )
+        self.state = self.physics.set_state(self.state)
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
 
     def update_probes(self, iters):
         """
@@ -1032,13 +873,13 @@ class Combustor:
         iters = 0
         res_p = np.inf
         while self.t < tFinal and res_p > res_p_target:
-            p_old = self.p
+            p_old = self.state.pressure
             dt = min(tFinal - self.t, self.get_time_step())
             # advance advection and chemistry
-            if self.physics == "FPV":
+            if isinstance(self.physics, FPVTable):
                 self.advance_advection(dt)
                 self.advance_chemistry(dt)
-            elif self.physics == "FRC":
+            else:
                 # use Strang splitting
                 self.advance_chemistry(dt / 2.0)
                 self.advance_advection(dt)
@@ -1059,11 +900,11 @@ class Combustor:
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
             iters += 1
-            res_p = np.linalg.norm(self.p - p_old)
+            res_p = np.linalg.norm(self.state.pressure - p_old)
             if self.verbose and iters % self.outputEvery == 0:
                 print(
                     f"Iteration: {iters}. Current time: {self.t}. Time step: {dt:e}. "
-                    + f"Max T[K]: {self.get_temperature(self.r, self.p, self.Y).max()}. "
+                    + f"Max T[K]: {self.physics.get_temperature(self.state).max()}. "
                     + f"Residual(p): {res_p}."
                 )
             if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):

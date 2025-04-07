@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
-# Global variables (parameters) used by the solver
-mn = 3  # number of 1D Euler equations
+from stanshock.physics.fluid_base import FluidState
 
 
 def viscous_flux(domain, rLR, uLR, pLR, YLR):
@@ -20,31 +19,27 @@ def viscous_flux(domain, rLR, uLR, pLR, YLR):
     """
     # get the temperature, pressure, and composition for each cell (including the two ghosts)
     nT = domain.n + 2
-    T = np.zeros(nT)
-    T[:-1] = domain.get_temperature(rLR[0, :], pLR[0, :], YLR[0, :, :])
-    T[[-1]] = domain.get_temperature(
-        np.array([rLR[1, -1]]),
-        np.array([pLR[1, -1]]),
-        np.array([YLR[1, -1, :]]).reshape((1, -1)),
+    mn = domain.mn
+
+    physics = domain.physics
+    state = FluidState(
+        shape=nT,
+        density=np.concatenate((rLR[0, :], rLR[1, [-1]])),
+        pressure=np.concatenate((pLR[0, :], pLR[1, [-1]])),
+        velocity=np.concatenate((uLR[0, :], uLR[1, [-1]])),
+        composition=np.concatenate((YLR[0, :, :], YLR[1, [-1], :]), axis=0),
     )
-    p, F, Y = np.zeros(nT), np.ones(nT), np.zeros((nT, domain.n_scalars))
-    p[:-1], p[-1] = pLR[0, :], pLR[1, -1]
+    T = physics.get_temperature(state)
+
+    F = np.ones(nT)
     F[1:-1] = domain.F
     F[0], F[-1] = domain.F[0], domain.F[-1]  # no gradient in F at boundary
-    Y[:-1, :], Y[-1, :] = YLR[0, :, :], YLR[1, -1, :]
-    mu = domain.get_mu(T, p, Y)
-    cp = domain.get_cp(T, Y)
-    k = domain.get_lambda_over_cv(T, p, Y) * cp * F
-    diff = np.zeros((nT, domain.n_scalars))
-    if domain.physics == "FPV":
-        diff_ = k / (domain.r * cp)
-        diff = diff_.reshape(-1, 1)
-    elif domain.physics == "FRC":
-        for i, Ti in enumerate(T):
-            domain.gas.TP = Ti, p[i]
-            if domain.gas.n_species > 1:
-                domain.gas.Y = Y[i, :]
-            diff[i, :] = domain.gas.mix_diff_coeffs * F[i]
+
+    mu = physics.get_mu(state)
+    cp = physics.get_cp(state)
+    k = physics.get_lambda_over_cv(state) * cp * F
+    diff = physics.get_mass_diffusivity(state) * F[:, None]
+
     # compute the gas properties at the face
     viscosity = (mu[1:] + mu[:-1]) / 2.0
     conductivity = (k[1:] + k[:-1]) / 2.0

@@ -4,6 +4,8 @@ import h5py
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
+
 
 class TableVariable:
     """
@@ -27,15 +29,18 @@ class TableVariable:
         return self.interp((Z, Q, L))
 
 
-class FPVTable:
+class FPVTable(FluidPhysics):
     """
     Class to read an FPV table from an HDF5 file and perform lookups.
     """
 
-    def __init__(self, filename):
+    def __init__(self, filename, gas):
         """
         Initialize the FPVTable object by reading the HDF5 file.
         """
+        super().__init__(gas)
+        self.n_scalars = 2
+        self.normalize_scalars = False
         self.filename = filename
         with h5py.File(filename, "r") as f:
             self.P = f["Header"]["Doubles"]["Double_0"].attrs["Value"][0]
@@ -55,19 +60,39 @@ class FPVTable:
                 )
                 self.variables.append(TableVariable(var, data, self.Z, self.Q, self.L))
 
+    def set_state(self, state: FluidState) -> FluidState:
+        """Get the flamelet table coordinates from the composition."""
+        Z = state.mixture_fraction = state.composition[:, 0]
+        C = state.progress_variable = state.composition[:, 1]
+        state.normalized_progress_variable = self.get_normalized_progress_variable(Z, C)
+        return state
+
+    def get_composition(self, Y):
+        """Converts mass fractions to mixture fraction and progress variable."""
+        Z = self.get_bilger_mixture_fraction(Y)
+        C = self.get_progress_variable(Y)
+
+        return np.stack([Z, C], axis=1)
+
     def get_normalized_progress_variable(self, Z, C):
         """
         Compute the normalized progress variable value at the given Z and C values.
         """
         C_min = np.zeros_like(Z)
-        C_max = self.lookup("PROG", Z, 0, 1)
+        for v in self.variables:
+            if v.name == "PROG":
+                C_max = v.lookup(Z, 0, 1)
         L = (C - C_min) / (C_max - C_min)
         return np.clip(L, 0, 1)
 
-    def lookup(self, var, Z, Q, L):
+    def lookup(self, var, state: FluidState):
         """
         Perform a lookup of the variable with the given name at the given Z, Q, and L values.
         """
+        Z = state.mixture_fraction
+        Q = np.zeros_like(Z)
+        L = state.normalized_progress_variable
+
         for v in self.variables:
             if v.name == var:
                 return v.lookup(Z, Q, L)
@@ -75,57 +100,66 @@ class FPVTable:
         msg = f"Variable {var} not found in table {self.filename}."
         raise ValueError(msg)
 
-    def lookup_all(self, Z, Q, L):
+    def lookup_all(self, state: FluidState):
         """
         Perform a lookup of all variables at the given Z, Q, and L values.
         """
+        Z = state.mixture_fraction
+        Q = np.zeros_like(Z)
+        L = state.normalized_progress_variable
+
         return {v.name: v.lookup(Z, Q, L) for v in self.variables}
 
-    def get_gamma(self, Z, Q, L, T):
+    def get_gamma(self, state: FluidState):
         """
         Compute the specific heat ratio at the given Z, Q, L and T values.
         """
-        gamma0 = self.lookup("GAMMA0", Z, Q, L)
-        ag = self.lookup("AGAMMA", Z, Q, L)
-        T0 = self.lookup("T0", Z, Q, L)
-        return gamma0 + ag * (T - T0)
+        gamma0 = self.lookup("GAMMA0", state)
+        ag = self.lookup("AGAMMA", state)
+        T0 = self.lookup("T0", state)
+        return gamma0 + ag * (state.temperature - T0)
 
-    def get_specific_gas_constant(self, Z, Q, L):
+    def get_specific_gas_constant(self, state: FluidState):
         """
         Compute the gas constant at the given Z, Q, and L values.
         """
-        return self.lookup("ROM", Z, Q, L)
+        return self.lookup("ROM", state)
 
-    def get_cp(self, Z, Q, L, T):
+    def get_cp(self, state: FluidState):
         """
         Compute the specific heat at the given Z, Q, L and T values.
         """
-        R = self.get_specific_gas_constant(Z, Q, L)
-        gamma = self.get_gamma(Z, Q, L, T)
+        R = self.get_specific_gas_constant(state)
+        gamma = self.get_gamma(state)
         return R * gamma / (gamma - 1)
 
-    def get_cv(self, Z, Q, L):
+    def get_cv(self, state: FluidState):
         """
         Compute the specific heat at constant volume at the given Z, Q, and L values.
         """
-        R = self.get_specific_gas_constant(Z, Q, L)
-        gamma = self.get_gamma(Z, Q, L, 0)
+        R = self.get_specific_gas_constant(state)
+        gamma = self.get_gamma(state)
         return R / (gamma - 1)
 
-    def get_mu(self, Z, Q, L, T):
+    def get_mu(self, state: FluidState):
         """
         Compute the dynamic viscosity at the given Z, Q, and L values.
         """
-        mu0 = self.lookup("MU0", Z, Q, L)
-        T0 = self.lookup("T0", Z, Q, L)
-        amu = self.lookup("AMU", Z, Q, L)
-        return mu0 * (T / T0) ** amu
+        mu0 = self.lookup("MU0", state)
+        T0 = self.lookup("T0", state)
+        amu = self.lookup("AMU", state)
+        return mu0 * (state.temperature / T0) ** amu
 
-    def get_thermal_conductivity(self, Z, Q, L, T):
+    def get_thermal_conductivity(self, state: FluidState):
         """
         Compute the thermal conductivity at the given Z, Q, and L values.
         """
-        loc0 = self.lookup("LOC0", Z, Q, L)
-        T0 = self.lookup("T0", Z, Q, L)
-        aloc = self.lookup("ALOC", Z, Q, L)
-        return loc0 * (T / T0) ** aloc
+        loc0 = self.lookup("LOC0", state)
+        T0 = self.lookup("T0", state)
+        aloc = self.lookup("ALOC", state)
+        return loc0 * (state.temperature / T0) ** aloc
+
+    def get_temperature(self, state: FluidState):
+        R = self.get_specific_gas_constant(state)
+        state.temperature = state.pressure / (R * state.density)
+        return state.temperature
