@@ -9,6 +9,9 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.combustor import Combustor
+from stanshock.physics.cantera_interface import CanteraInterface
+from stanshock.physics.fluid_base import FluidState
+from stanshock.physics.thermo.table import ThermoTable
 
 
 def main(
@@ -17,6 +20,7 @@ def main(
     plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
+    physics_model: str = "ThermoTable",
 ) -> dict[str, np.ndarray]:
     # user parameters
     TU = 300.0
@@ -48,19 +52,24 @@ def main(
 
     # set up grid
     nX = flame.grid.shape[0]
-    xCenter = flame.grid[np.argmax(np.gradient(flame.T, flame.grid))]
+    flame_center = flame.grid[np.argmax(np.gradient(flame.T, flame.grid))]
     L = flame.grid[-1] - flame.grid[0]
-    xUpper, xLower = xCenter + L * f, xCenter - L * f
-
-    geometry = (nX, xLower, xUpper, (xUpper + xLower) / 2.0)
+    xUpper, xLower = flame_center + L * f, flame_center - L * f
     boundaryConditions = (
         (gasUnburned.density, uUnburned, None, gasUnburned.Y),
         (None, None, gasBurned.P, None),
     )
+    if physics_model == "ThermoTable":
+        physics = ThermoTable(gas)
+    else:
+        physics = CanteraInterface(gas)
+
     ss = Combustor(
-        gas,
-        initialization=("Riemann", unburnedState, burnedState, geometry),
-        physics="FRC",
+        n=nX,
+        x=np.linspace(xLower, xUpper, nX),
+        dx=(xUpper-xLower)/(nX-1),
+        initialization=("Riemann", unburnedState, burnedState, flame_center),
+        physics=physics,
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         reacting=True,
@@ -69,13 +78,19 @@ def main(
     )
 
     # interpolate flame solution
-    ss.r = np.interp(ss.x, flame.grid, flame.density)
-    ss.u = np.interp(ss.x, flame.grid, flame.velocity)
-    ss.p[:] = flame.P
+    Y = ss.state.composition
     for iSp in range(gas.n_species):
-        ss.Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
-    T = ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y)
-    ss.gamma = ss.thermoTable.get_gamma(T, ss.Y)
+        Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
+
+    ss.state = FluidState(
+        shape=nX,
+        density=np.interp(ss.x, flame.grid, flame.density),
+        velocity=np.interp(ss.x, flame.grid, flame.velocity),
+        pressure=flame.P * np.ones(ss.n),
+        composition=Y,
+    )
+    T = ss.state.temperature = ss.physics.get_temperature(ss.state)
+    ss.state.gamma = ss.physics.get_gamma(ss.state)
 
     # calculate the final time if not specified
     if sim_time is None:
@@ -96,37 +111,37 @@ def main(
         plt.rc("text", usetex=True)
         # plot
         plt.plot(
-            (flame.grid - xCenter) / flameThickness,
+            (flame.grid - flame_center) / flameThickness,
             flame.T / flame.T[-1],
             "r",
             label=r"$T/T_\mathrm{F}$",
         )
-        T = ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y)
-        plt.plot((ss.x - xCenter) / flameThickness, T / flame.T[-1], "r--s")
+        T = ss.physics.get_temperature(ss.state)
+        plt.plot((ss.x - flame_center) / flameThickness, T / flame.T[-1], "r--s")
         iOH = gas.species_index("OH")
         plt.plot(
-            (flame.grid - xCenter) / flameThickness,
+            (flame.grid - flame_center) / flameThickness,
             flame.Y[iOH, :] * 10,
             "k",
             label=r"$Y_\mathrm{OH}\times 10$",
         )
-        plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iOH] * 10, "k--s")
+        plt.plot((ss.x - flame_center) / flameThickness, ss.state.mass_fractions[:, iOH] * 10, "k--s")
         iO2 = gas.species_index("O2")
         plt.plot(
-            (flame.grid - xCenter) / flameThickness,
+            (flame.grid - flame_center) / flameThickness,
             flame.Y[iO2, :],
             "g",
             label=r"$Y_\mathrm{O_2}$",
         )
-        plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iO2], "g--s")
+        plt.plot((ss.x - flame_center) / flameThickness, ss.state.mass_fractions[:, iO2], "g--s")
         iH2 = gas.species_index("H2")
         plt.plot(
-            (flame.grid - xCenter) / flameThickness,
+            (flame.grid - flame_center) / flameThickness,
             flame.Y[iH2, :],
             "b",
             label=r"$Y_\mathrm{H_2}$",
         )
-        plt.plot((ss.x - xCenter) / flameThickness, ss.Y[:, iH2], "b--s")
+        plt.plot((ss.x - flame_center) / flameThickness, ss.state.mass_fractions[:, iH2], "b--s")
         plt.xlabel(r"$x/\delta_\mathrm{F}$")
         plt.legend(loc="best")
         if show_results:
@@ -138,7 +153,7 @@ def main(
 
     results = {
         "position": ss.x,
-        "temperature": ss.thermoTable.get_temperature(ss.r, ss.p, ss.Y),
+        "temperature": ss.physics.get_temperature(ss.state),
     }
     if results_location is not None:
         results_location = Path(results_location)
