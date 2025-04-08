@@ -34,7 +34,7 @@ class FluidPhysics(ABC):
     def __init__(self, gas: ct.Solution):
         self.gas = gas
 
-        self.normalize_scalars = True
+        self.is_flamelet = False
         self.Z_weights = None
         self.Z_offset = None
         self.prog_weights = None
@@ -42,6 +42,10 @@ class FluidPhysics(ABC):
     @property
     def n_scalars(self):
         return self.gas.n_species
+
+    @property
+    def scalar_names(self):
+        return [species.lower() for species in self.gas.species_names]
 
     @abstractmethod
     def get_cp(self, state: FluidState):
@@ -56,8 +60,8 @@ class FluidPhysics(ABC):
         """Compute dynamic viscosity."""
 
     @abstractmethod
-    def get_lambda_over_cv(self, state: FluidState):
-        """Compute thermal conductivity divided by specific heat at constant volume."""
+    def get_thermal_conductivity(self, state: FluidState):
+        """Compute thermal conductivity."""
 
     @abstractmethod
     def get_temperature(self, state: FluidState):
@@ -69,7 +73,7 @@ class FluidPhysics(ABC):
 
     def get_thermal_diffusivity(self, state: FluidState):
         """Compute thermal diffusivity, alpha = kappa / (rho * cp)."""
-        kappa = self.get_lambda_over_cv(state)
+        kappa = self.get_thermal_conductivity(state)
         density = state.density
         cp = self.get_cp(state)
         return kappa / (density * cp)

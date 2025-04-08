@@ -36,8 +36,7 @@ def viscous_flux(domain, rLR, uLR, pLR, YLR):
     F[0], F[-1] = domain.F[0], domain.F[-1]  # no gradient in F at boundary
 
     mu = physics.get_mu(state)
-    cp = physics.get_cp(state)
-    k = physics.get_lambda_over_cv(state) * cp * F
+    k = physics.get_thermal_conductivity(state) * F
     diff = physics.get_mass_diffusivity(state) * F[:, None]
 
     # compute the gas properties at the face

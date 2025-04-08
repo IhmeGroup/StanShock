@@ -62,11 +62,11 @@ class CanteraInterface(FluidPhysics):
         state.viscosity = self.sol.viscosity
         return state.viscosity
 
-    def get_lambda_over_cv(self, state: FluidState):
-        """Compute thermal conductivity divided by specific heat at constant volume."""
+    def get_thermal_conductivity(self, state: FluidState):
+        """Compute thermal conductivity."""
         self.set_state(state)
         state.thermal_conductivity = self.sol.thermal_conductivity
-        return state.thermal_conductivity / self.sol.cv_mass
+        return state.thermal_conductivity
 
     def get_temperature(self, state: FluidState):
         """Compute temperature of the gas."""
