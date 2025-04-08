@@ -89,7 +89,7 @@ class Combustor:
 
         # Ensure the mesh parameters are consistent
         self.n = len(self.x)
-        self.dx = (self.x[-1] - self.x[0]) / (self.n - 1)
+        self.dx = self.x[1] - self.x[0]
 
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
@@ -371,7 +371,6 @@ class Combustor:
             composition=Y[mt:-mt],
             velocity=u[mt:-mt],
         )
-        self.state = self.physics.set_state(self.state)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -451,7 +450,6 @@ class Combustor:
             composition=Y,
             velocity=u,
         )
-        self.state = self.physics.set_state(self.state)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -530,7 +528,6 @@ class Combustor:
 
         # update state
         self.state.pressure = None
-        self.state = self.physics.set_state(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_quasi_1d(self, dt):
@@ -628,7 +625,6 @@ class Combustor:
             composition=self.state.composition,
             velocity=u,
         )
-        self.state = self.physics.set_state(self.state)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -732,7 +728,6 @@ class Combustor:
             composition=self.state.composition,
             velocity=u,
         )
-        self.state = self.physics.set_state(self.state)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -783,7 +778,6 @@ class Combustor:
             composition=Y[mt:-mt, :],
             velocity=u[mt:-mt],
         )
-        self.state = self.physics.set_state(self.state)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -826,7 +820,6 @@ class Combustor:
             composition=Y,
             velocity=u,
         )
-        self.state = self.physics.set_state(self.state)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -875,7 +868,6 @@ class Combustor:
             composition=Y,
             velocity=u,
         )
-        self.state = self.physics.set_state(self.state)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
