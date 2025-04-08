@@ -4,7 +4,7 @@ import cantera as ct
 import numpy as np
 import pytest
 
-from stanshock.physics.thermo.table import (
+from stanshock.physics.thermotable import (
     ThermoTable,
     get_cp_compiled,
     get_specific_gas_constants_compiled,

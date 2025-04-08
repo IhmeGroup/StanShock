@@ -7,7 +7,7 @@ from stanshock.numerics.face_extrapolation import weno5
 from stanshock.numerics.inviscid_flux import hllc_flux
 from stanshock.numerics.viscous_flux import viscous_flux
 from stanshock.physics.skinfriction import SkinFriction
-from stanshock.physics.thermo.table import ThermoTable
+from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import (
     initialize_constant,
     initialize_diffuse_interface,

@@ -11,7 +11,7 @@ from matplotlib import pyplot as plt
 from stanshock.components.combustor import Combustor
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.fluid_base import FluidState
-from stanshock.physics.thermo.table import ThermoTable
+from stanshock.physics.thermotable import ThermoTable
 
 
 def main(
