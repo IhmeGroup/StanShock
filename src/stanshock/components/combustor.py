@@ -82,6 +82,10 @@ class Combustor:
             if key in self.__dict__:
                 self.__dict__[key] = item
 
+        # Ensure the mesh parameters are consistent
+        self.n = len(self.x)
+        self.dx = (self.x[-1] - self.x[0]) / (self.n - 1)
+
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
         if not isinstance(self.physics, FPVTable) and self.injector is not None:
