@@ -34,6 +34,7 @@ class FluidPhysics(ABC):
     def __init__(self, gas: ct.Solution):
         self.gas = gas
 
+        self.normalize_scalars = True
         self.is_flamelet = False
         self.Z_weights = None
         self.Z_offset = None

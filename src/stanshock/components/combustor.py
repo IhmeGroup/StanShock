@@ -6,7 +6,6 @@ import numpy as np
 from stanshock.numerics.face_extrapolation import weno5
 from stanshock.numerics.inviscid_flux import hllc_flux
 from stanshock.numerics.viscous_flux import viscous_flux
-from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.physics.skinfriction import SkinFriction
 from stanshock.processing.initialize import (
@@ -94,7 +93,7 @@ class Combustor:
 
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
-        if not isinstance(self.physics, FPVTable) and self.injector is not None:
+        if not self.physics.is_flamelet and self.injector is not None:
             msg = "JIC injector model requires FPVTable physics."
             raise Exception(msg)
 
@@ -383,7 +382,7 @@ class Combustor:
         """
         if not self.reacting:
             return
-        if isinstance(self.physics, FPVTable):
+        if self.physics.is_flamelet:
             self.advance_chemistry_FPV(dt)
         else:
             self.advance_chemistry_FRC(dt)
@@ -903,7 +902,7 @@ class Combustor:
             p_old = self.state.pressure
             dt = min(tFinal - self.t, self.get_time_step())
             # advance advection and chemistry
-            if isinstance(self.physics, FPVTable):
+            if self.physics.is_flamelet:
                 self.advance_advection(dt)
                 self.advance_chemistry(dt)
             else:

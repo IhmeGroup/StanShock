@@ -42,6 +42,7 @@ class FPVTable(FluidPhysics):
         self.n_scalars = 2
         self.scalar_names = ["mixture fraction", "progress variable"]
         self.normalize_scalars = False
+        self.is_flamelet = True
         self.filename = filename
         with h5py.File(filename, "r") as f:
             self.P = f["Header"]["Doubles"]["Double_0"].attrs["Value"][0]
