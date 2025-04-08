@@ -4,6 +4,7 @@ import cantera as ct
 import numpy as np
 import pytest
 
+from stanshock.physics.fluid_base import FluidState
 from stanshock.physics.thermotable import (
     ThermoTable,
     get_cp_compiled,
@@ -33,7 +34,14 @@ def test_table_computes_correct_temperatures():
     actual_temperatures = np.array(actual_temperatures)
 
     table = ThermoTable(gas)
-    predicted_temperatures = table.get_temperature(densities, pressures, mass_fractions)
+    predicted_temperatures = table.get_temperature(
+        FluidState(
+            shape=len(pressures),
+            density=densities,
+            pressure=pressures,
+            composition=mass_fractions,
+        )
+    )
     assert np.allclose(actual_temperatures, predicted_temperatures)
 
 
@@ -44,7 +52,13 @@ def test_monatomic_gas_has_constant_gamma():
         [np.ones_like(temperatures), np.zeros_like(temperatures)]
     )
     table = ThermoTable(gas)
-    gammas = table.get_gamma(temperatures[:, 0], mass_fractions)
+    gammas = table.get_gamma(
+        FluidState(
+            shape=temperatures.shape[0],
+            temperature=temperatures[:, 0],
+            composition=mass_fractions,
+        )
+    )
     gammas_are_constant = np.allclose(gammas, gammas[0])
     assert gammas_are_constant
 
