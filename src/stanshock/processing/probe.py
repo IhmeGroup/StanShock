@@ -39,13 +39,13 @@ class Probe:
 
     def update(self, domain):
         self.t.append(domain.t)
-        self.r.append(interpolate(domain.x, domain.r, self.probeLocation))
-        self.u.append(interpolate(domain.x, domain.u, self.probeLocation))
-        self.p.append(interpolate(domain.x, domain.p, self.probeLocation))
-        self.gamma.append(interpolate(domain.x, domain.gamma, self.probeLocation))
+        self.r.append(interpolate(domain.x, domain.state.density, self.probeLocation))
+        self.u.append(interpolate(domain.x, domain.state.velocity, self.probeLocation))
+        self.p.append(interpolate(domain.x, domain.state.pressure, self.probeLocation))
+        self.gamma.append(interpolate(domain.x, domain.state.gamma, self.probeLocation))
         YProbe = np.array(
             [
-                (interpolate(domain.x, domain.Y[:, kSp], self.probeLocation))
+                (interpolate(domain.x, domain.state.composition[:, kSp], self.probeLocation))
                 for kSp in range(domain.n_scalars)
             ]
         )
