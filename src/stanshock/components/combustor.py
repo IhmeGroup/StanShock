@@ -50,6 +50,12 @@ class Combustor:
         )
         self.h = None  # height of the channel
         self.w = None  # width of the channel
+        self.DInner = (
+            None  # Inner diameter of the shock tube as a function of x (needed for BL)
+        )
+        self.DOuter = (
+            None  # Outer diameter of the shock tube as a function of x (needed for BL)
+        )
         self.dlnAdt = (
             None  # area of the shock tube as a function of time (needed for quasi-1D)
         )
@@ -102,6 +108,22 @@ class Combustor:
             self.state = initialize_riemann_problem(self, *self.initialization[1:])
         elif self.initialization[0].lower() == "diffuse_interface":
             self.state = initialize_diffuse_interface(self, *self.initialization[1:])
+
+        # Compute the hydraulic diameter and characteristic length scale
+        if self.includeBoundaryLayerTerms:
+            if self.h is not None and self.w is not None:
+                self.hydraulic_diameter = 2 * self.h * self.w / (self.h + self.w)
+                self.characteristic_length = self.hydraulic_diameter.copy()
+            else:
+                self.hydraulic_diameter = self.DOuter(self.x)
+                self.characteristic_length = self.hydraulic_diameter.copy()
+
+                if self.DInner is not None:
+                    self.hydraulic_diameter -= self.DInner(self.x)
+                    self.characteristic_length = 0.5*self.hydraulic_diameter
+
+                    noInsert = self.DInner(self.x) == 0.0
+                    self.characteristic_length[noInsert] = self.hydraulic_diameter[noInsert]
 
     def get_wave_speed(self):
         """
@@ -502,7 +524,7 @@ class Combustor:
             Y[Y < 0.0] = 0.0
             Y /= np.sum(Y)
             # update
-            self.state.mass_fractions[k, :] = Y
+            self.state.composition[k, :] = Y
             self.state.temperature[k] = integrator.y[-1]
 
         # update state
@@ -661,17 +683,16 @@ class Combustor:
             return Nu
 
         #######################################################################
-        if self.h is None or self.w is None or self.Tw is None:
+        if self.hydraulic_diameter is None or self.characteristic_length is None or self.Tw is None:
             msg = "Combustor improperly initialized for boundary layer terms"
             raise Exception(msg)
-        D = 2 * self.h * self.w / (self.h + self.w)
         # compute gas properties
         T = self.state.temperature = self.physics.get_temperature(self.state)
         cp = self.physics.get_cp(self.state)
         mu = self.physics.get_mu(self.state)
-        k = self.physics.get_lambda_over_cv(self.state) * cp
+        k = self.physics.get_thermal_conductivity(self.state)
         # compute non-dimensional numbers
-        Re = abs(self.state.density * self.state.velocity * D / mu)
+        Re = abs(self.state.density * self.state.velocity * self.characteristic_length / mu)
         Pr = cp * mu / k
         # skin friction coefficient
         if self.cf is None:
@@ -685,7 +706,7 @@ class Combustor:
         )
         # Stanton number and heat transfer to wall
         Nu = get_nusselt_number(Re, Pr, cf)
-        qloss = Nu * k / D * (T - self.Tw)
+        qloss = Nu * k / self.characteristic_length * (T - self.Tw)
         # update
         (r, ru, E, rY) = self.primitive_to_conservative(
             self.state.density,
@@ -694,8 +715,8 @@ class Combustor:
             self.state.composition,
             self.state.gamma,
         )
-        ru -= shear * 4.0 / D * dt
-        E -= qloss * 4.0 / D * dt
+        ru -= shear * 4.0 / self.hydraulic_diameter * dt
+        E -= qloss * 4.0 / self.hydraulic_diameter * dt
         (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         self.state = FluidState(
             shape=self.n,
