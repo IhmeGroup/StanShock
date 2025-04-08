@@ -67,7 +67,7 @@ def main(
     ss = Combustor(
         n=nX,
         x=np.linspace(xLower, xUpper, nX),
-        dx=(xUpper-xLower)/(nX-1),
+        dx=(xUpper - xLower) / (nX - 1),
         initialization=("Riemann", unburnedState, burnedState, flame_center),
         physics=physics,
         boundaryConditions=boundaryConditions,
@@ -125,7 +125,11 @@ def main(
             "k",
             label=r"$Y_\mathrm{OH}\times 10$",
         )
-        plt.plot((ss.x - flame_center) / flameThickness, ss.state.mass_fractions[:, iOH] * 10, "k--s")
+        plt.plot(
+            (ss.x - flame_center) / flameThickness,
+            ss.state.mass_fractions[:, iOH] * 10,
+            "k--s",
+        )
         iO2 = gas.species_index("O2")
         plt.plot(
             (flame.grid - flame_center) / flameThickness,
@@ -133,7 +137,11 @@ def main(
             "g",
             label=r"$Y_\mathrm{O_2}$",
         )
-        plt.plot((ss.x - flame_center) / flameThickness, ss.state.mass_fractions[:, iO2], "g--s")
+        plt.plot(
+            (ss.x - flame_center) / flameThickness,
+            ss.state.mass_fractions[:, iO2],
+            "g--s",
+        )
         iH2 = gas.species_index("H2")
         plt.plot(
             (flame.grid - flame_center) / flameThickness,
@@ -141,7 +149,11 @@ def main(
             "b",
             label=r"$Y_\mathrm{H_2}$",
         )
-        plt.plot((ss.x - flame_center) / flameThickness, ss.state.mass_fractions[:, iH2], "b--s")
+        plt.plot(
+            (ss.x - flame_center) / flameThickness,
+            ss.state.mass_fractions[:, iH2],
+            "b--s",
+        )
         plt.xlabel(r"$x/\delta_\mathrm{F}$")
         plt.legend(loc="best")
         if show_results:

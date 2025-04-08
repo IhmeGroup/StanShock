@@ -22,19 +22,28 @@ class CanteraInterface(FluidPhysics):
         the state has been updated since the last call.
         """
         if state.shape not in self._cached_solutions:
-            self._cached_solutions[state.shape] = ct.SolutionArray(self.gas, shape=state.shape)
+            self._cached_solutions[state.shape] = ct.SolutionArray(
+                self.gas, shape=state.shape
+            )
 
         self.sol = self._cached_solutions[state.shape]
 
         # Update SolutionArray only if state has changed - crude check for now:
-        if state.pressure is not self.sol.P or state.density is not self.sol.density_mass:
+        if (
+            state.pressure is not self.sol.P
+            or state.density is not self.sol.density_mass
+        ):
             state.mass_fractions = state.composition
 
             if state.density is not None:
                 if state.pressure is not None:
                     self.sol.DPY = state.density, state.pressure, state.mass_fractions
                 elif state.temperature is not None:
-                    self.sol.TDY = state.temperature, state.density, state.mass_fractions
+                    self.sol.TDY = (
+                        state.temperature,
+                        state.density,
+                        state.mass_fractions,
+                    )
 
             # Update the state variables to point directly to the SolutionArray properties
             state.pressure = self.sol.P

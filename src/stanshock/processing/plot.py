@@ -59,9 +59,13 @@ class XTDiagram:
             self.variable.append(np.interp(self.x, domain.x, domain.state.gamma))
         elif variable in domain.physics.scalar_names:
             scalarIndex = domain.physics.scalar_names.index(variable)
-            self.variable.append(np.interp(self.x, domain.x, domain.state.composition[:, scalarIndex]))
+            self.variable.append(
+                np.interp(self.x, domain.x, domain.state.composition[:, scalarIndex])
+            )
         elif variable in ["mach", "m"]:
-            M = np.abs(domain.state.velocity) / domain.physics.get_sound_speed(domain.state)
+            M = np.abs(domain.state.velocity) / domain.physics.get_sound_speed(
+                domain.state
+            )
             self.variable.append(np.interp(self.x, self.x, M))
         else:
             msg = f"Invalid Variable Name: {variable}"

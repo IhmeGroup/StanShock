@@ -139,7 +139,7 @@ def main(
     boundaryConditions = ["reflecting", "reflecting"]
     state1 = (gas1, u1)
     state4 = (gas4, u4)
-    physics_model=ThermoTable(gas1)
+    physics_model = ThermoTable(gas1)
 
     ssbl = ShockTube(
         n=nX,

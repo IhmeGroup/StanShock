@@ -158,7 +158,9 @@ class FluidPhysics(ABC):
         raise NotImplementedError(msg)
 
     def lookup(self, var: str, state: FluidState):
-        msg = f"Looking up a variable by string is not implemented for {self.__class__}."
+        msg = (
+            f"Looking up a variable by string is not implemented for {self.__class__}."
+        )
         raise NotImplementedError(msg)
 
     @abstractmethod

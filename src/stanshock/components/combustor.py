@@ -119,10 +119,12 @@ class Combustor:
 
                 if self.DInner is not None:
                     self.hydraulic_diameter -= self.DInner(self.x)
-                    self.characteristic_length = 0.5*self.hydraulic_diameter
+                    self.characteristic_length = 0.5 * self.hydraulic_diameter
 
                     noInsert = self.DInner(self.x) == 0.0
-                    self.characteristic_length[noInsert] = self.hydraulic_diameter[noInsert]
+                    self.characteristic_length[noInsert] = self.hydraulic_diameter[
+                        noInsert
+                    ]
 
     def get_wave_speed(self):
         """
@@ -682,7 +684,11 @@ class Combustor:
             return Nu
 
         #######################################################################
-        if self.hydraulic_diameter is None or self.characteristic_length is None or self.Tw is None:
+        if (
+            self.hydraulic_diameter is None
+            or self.characteristic_length is None
+            or self.Tw is None
+        ):
             msg = "Combustor improperly initialized for boundary layer terms"
             raise Exception(msg)
         # compute gas properties
@@ -691,7 +697,9 @@ class Combustor:
         mu = self.physics.get_mu(self.state)
         k = self.physics.get_thermal_conductivity(self.state)
         # compute non-dimensional numbers
-        Re = abs(self.state.density * self.state.velocity * self.characteristic_length / mu)
+        Re = abs(
+            self.state.density * self.state.velocity * self.characteristic_length / mu
+        )
         Pr = cp * mu / k
         # skin friction coefficient
         if self.cf is None:

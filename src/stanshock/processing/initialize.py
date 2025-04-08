@@ -61,7 +61,9 @@ def initialize_constant(domain, gas, u) -> FluidState:
     )
 
 
-def initialize_riemann_problem(domain, left_state, right_state, shock_location) -> FluidState:
+def initialize_riemann_problem(
+    domain, left_state, right_state, shock_location
+) -> FluidState:
     """
     This helper function initializes a Riemann Problem
         inputs:
@@ -99,7 +101,9 @@ def initialize_riemann_problem(domain, left_state, right_state, shock_location) 
     return state
 
 
-def initialize_diffuse_interface(domain, left_state, right_state, shock_location, delta_smoothing) -> FluidState:
+def initialize_diffuse_interface(
+    domain, left_state, right_state, shock_location, delta_smoothing
+) -> FluidState:
     """
     This helper function initializes an interface smoothed over a distance
         inputs:
@@ -128,15 +132,27 @@ def initialize_diffuse_interface(domain, left_state, right_state, shock_location
     composition_right = domain.physics.get_composition(right_gas.Y)
 
     # Smooth transition between left and right states
-    r = smoothing_function(domain.x, shock_location, delta_smoothing, left_gas.density, right_gas.density)
-    domain.u = smoothing_function(domain.x, shock_location, delta_smoothing, u_left, u_right)
-    p = smoothing_function(domain.x, shock_location, delta_smoothing, left_gas.P, right_gas.P)
-    gamma = smoothing_function(domain.x, shock_location, delta_smoothing, gamma_left, gamma_right)
+    r = smoothing_function(
+        domain.x, shock_location, delta_smoothing, left_gas.density, right_gas.density
+    )
+    domain.u = smoothing_function(
+        domain.x, shock_location, delta_smoothing, u_left, u_right
+    )
+    p = smoothing_function(
+        domain.x, shock_location, delta_smoothing, left_gas.P, right_gas.P
+    )
+    gamma = smoothing_function(
+        domain.x, shock_location, delta_smoothing, gamma_left, gamma_right
+    )
 
     composition = np.zeros((domain.n, domain.n_scalars))
     for kSp in range(domain.n_scalars):
         composition[:, kSp] = smoothing_function(
-            domain.x, shock_location, delta_smoothing, composition_left[:, kSp], composition_right[:, kSp]
+            domain.x,
+            shock_location,
+            delta_smoothing,
+            composition_left[:, kSp],
+            composition_right[:, kSp],
         )
 
     return FluidState(

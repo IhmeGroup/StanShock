@@ -3,8 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from stanshock.components.combustor import Combustor
-from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.physics.skinfriction import SkinFriction
+from stanshock.physics.fluid_base import FluidState
 from stanshock.processing.probe import Probe
 
 
@@ -13,6 +12,7 @@ class ShockTube(Combustor):
     This is a class defined to encapsulate the data and methods used for the
     1D gasdynamics solver.
     """
+
     def pressure_rise(self, t, p, peakWidth=10):
         """
         This method attempts to determine the pressure rise based on the separation
@@ -213,7 +213,7 @@ class ShockTube(Combustor):
                 velocity=np.copy(uInitial),
                 pressure=np.copy(pInitial),
                 composition=np.copy(YInitial),
-                gamma = np.copy(gammaInitial),
+                gamma=np.copy(gammaInitial),
             )
             # delete previous probes and create an endwall probe
             self.probes = [

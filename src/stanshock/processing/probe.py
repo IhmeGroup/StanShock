@@ -45,7 +45,11 @@ class Probe:
         self.gamma.append(interpolate(domain.x, domain.state.gamma, self.probeLocation))
         YProbe = np.array(
             [
-                (interpolate(domain.x, domain.state.composition[:, kSp], self.probeLocation))
+                (
+                    interpolate(
+                        domain.x, domain.state.composition[:, kSp], self.probeLocation
+                    )
+                )
                 for kSp in range(domain.n_scalars)
             ]
         )
