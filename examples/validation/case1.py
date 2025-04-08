@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.probe import Probe
 from stanshock.utils.csv_loader import get_pressure_data
 
@@ -63,7 +64,7 @@ def main(
     xLower = -LDriver
     xUpper = LDriven
     xShock = 0.0
-    geometry = (nX, xLower, xUpper, xShock)
+    x = np.linspace(xLower, xUpper, nX)
     DeltaD = DDriven - DDriver
     DeltaX = (
         (xUpper - xLower) / float(nX) * 10
@@ -95,9 +96,13 @@ def main(
     boundaryConditions = ["reflecting", "reflecting"]
     state1 = (gas1, u1)
     state4 = (gas4, u4)
+    physics_model=ThermoTable(gas1)
+
     ssbl = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
+        n=nX,
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         outputEvery=100,
@@ -120,8 +125,10 @@ def main(
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
+        n=nX,
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         outputEvery=100,
