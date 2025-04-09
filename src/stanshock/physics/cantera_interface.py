@@ -31,19 +31,27 @@ class CanteraInterface(FluidPhysics):
         # Update SolutionArray only if state has changed - crude check for now:
         if (
             state.pressure is not self.sol.P
+            or state.temperature is not self.sol.T
             or state.density is not self.sol.density_mass
         ):
             state.mass_fractions = state.composition
 
-            if state.density is not None:
-                if state.pressure is not None:
-                    self.sol.DPY = state.density, state.pressure, state.mass_fractions
-                elif state.temperature is not None:
+            # Prioritize temperature-based updates
+            if state.temperature is not None:
+                if state.density is not None:
                     self.sol.TDY = (
                         state.temperature,
                         state.density,
                         state.mass_fractions,
                     )
+                else:
+                    self.sol.TPY = (
+                        state.temperature,
+                        state.pressure,
+                        state.mass_fractions,
+                    )
+            else:
+                self.sol.DPY = state.density, state.pressure, state.mass_fractions
 
             # Update the state variables to point directly to the SolutionArray properties
             state.pressure = self.sol.P
@@ -82,6 +90,12 @@ class CanteraInterface(FluidPhysics):
         self.set_state(state)
         state.temperature = self.sol.T
         return state.temperature
+
+    def get_pressure(self, state: FluidState):
+        """Compute pressure of the gas."""
+        self.set_state(state)
+        state.pressure = self.sol.P
+        return state.pressure
 
     def get_sound_speed(self, state: FluidState):
         """Compute speed of sound of the gas."""

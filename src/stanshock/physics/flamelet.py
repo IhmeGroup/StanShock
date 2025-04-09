@@ -165,3 +165,8 @@ class FPVTable(FluidPhysics):
         R = self.get_specific_gas_constant(state)
         state.temperature = state.pressure / (R * state.density)
         return state.temperature
+
+    def get_pressure(self, state: FluidState):
+        R = self.get_specific_gas_constant(state)
+        state.pressure = state.temperature * R * state.density
+        return state.pressure

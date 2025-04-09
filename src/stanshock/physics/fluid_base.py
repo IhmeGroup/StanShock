@@ -69,6 +69,10 @@ class FluidPhysics(ABC):
         """Compute temperature of the gas."""
 
     @abstractmethod
+    def get_pressure(self, state: FluidState):
+        """Compute pressure of the gas."""
+
+    @abstractmethod
     def get_sound_speed(self, state: FluidState):
         """Compute speed of sound of the gas."""
 

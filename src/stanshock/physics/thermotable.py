@@ -14,7 +14,7 @@ double3D = double[:, :, :]
 
 
 @njit(double1D(double2D, double1D))
-def get_specific_gas_constants_compiled(Y, molecularWeights):
+def get_specific_gas_constant_compiled(Y, molecularWeights):
     """
     Function used by the thermoTable class to find the gas constant. This
     function is compiled for speed-up.
@@ -124,7 +124,7 @@ class ThermoTable(CanteraInterface):
                 cpk = self.a[kT, kSp] * (Tkp1) + self.b[kT, kSp]
                 hk = hkp1
 
-    def get_specific_gas_constants(self, state: FluidState):
+    def get_specific_gas_constant(self, state: FluidState):
         """
         This method computes the mixture-specific gas constat
             inputs:
@@ -132,7 +132,7 @@ class ThermoTable(CanteraInterface):
             outputs:
                 R: vector of mixture-specific gas constants [n]
         """
-        return get_specific_gas_constants_compiled(
+        return get_specific_gas_constant_compiled(
             state.composition, self.molecularWeights
         )
 
@@ -183,7 +183,7 @@ class ThermoTable(CanteraInterface):
                 gamma: vector of specific heat ratios [n]
         """
         cp = self.get_cp(state)
-        R = self.get_specific_gas_constants(state)
+        R = self.get_specific_gas_constant(state)
         return cp / (cp - R)
 
     def get_temperature(self, state: FluidState):
@@ -196,8 +196,13 @@ class ThermoTable(CanteraInterface):
             outputs:
                 T: vector of temperatures
         """
-        R = self.get_specific_gas_constants(state)
+        R = self.get_specific_gas_constant(state)
         return state.pressure / (state.density * R)
+
+    def get_pressure(self, state: FluidState):
+        R = self.get_specific_gas_constant(state)
+        state.pressure = state.temperature * R * state.density
+        return state.pressure
 
     def get_sound_speed(self, state: FluidState):
         return np.sqrt(state.gamma * state.pressure / state.density)

@@ -501,7 +501,7 @@ class Combustor:
             shape=len(indices),
             density=self.state.density[indices],
             pressure=self.state.pressure[indices],
-            composition=self.state.mass_fractions[indices, :],
+            composition=self.state.composition[indices, :],
         )
         Ts = self.physics.get_temperature(state_temp)
 
@@ -510,7 +510,7 @@ class Combustor:
         integrator = integrate.ode(dydt).set_integrator("lsoda")
         for TIndex, k in enumerate(indices):
             # initialize
-            y0[:-1] = self.state.mass_fractions[k, :]
+            y0[:-1] = self.state.composition[k, :]
             y0[-1] = Ts[TIndex]
             args = [self.state.density[k], self.F[k]]
             integrator.set_initial_value(y0, 0.0)
@@ -528,6 +528,7 @@ class Combustor:
 
         # update state
         self.state.pressure = None
+        self.state.pressure = self.physics.get_pressure(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_quasi_1d(self, dt):

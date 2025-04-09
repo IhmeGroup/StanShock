@@ -8,11 +8,11 @@ from stanshock.physics.fluid_base import FluidState
 from stanshock.physics.thermotable import (
     ThermoTable,
     get_cp_compiled,
-    get_specific_gas_constants_compiled,
+    get_specific_gas_constant_compiled,
 )
 
-get_specific_gas_constants_compiled = (
-    get_specific_gas_constants_compiled.__wrapped__
+get_specific_gas_constant_compiled = (
+    get_specific_gas_constant_compiled.__wrapped__
 )  # unwrap for coverage
 # get_cp_compiled = get_cp_compiled.__wrapped__
 
@@ -67,7 +67,7 @@ def test_single_species_gas_has_correct_constant():
     molecular_weight = np.array([7.0, 3.0])
     mass_fraction = np.array([1, 0])[np.newaxis, :]
     actual_gas_constant = ct.gas_constant / molecular_weight[0]
-    predicted_gas_constant = get_specific_gas_constants_compiled(
+    predicted_gas_constant = get_specific_gas_constant_compiled(
         mass_fraction, molecular_weight
     )[0]
     assert actual_gas_constant == predicted_gas_constant
