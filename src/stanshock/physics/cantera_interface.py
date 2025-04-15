@@ -9,7 +9,8 @@ from stanshock.physics.fluid_base import FluidPhysics, FluidState
 class CanteraInterface(FluidPhysics):
     def __init__(self, gas: ct.Solution):
         super().__init__(gas)
-        self._cached_solutions = {}
+        self._cached_solutions: dict[int, ct.SolutionArray] = {}
+        self._cache_valid: dict[int, bool] = {}
 
     @property
     def n_scalars(self):
@@ -28,36 +29,26 @@ class CanteraInterface(FluidPhysics):
 
         self.sol = self._cached_solutions[state.shape]
 
-        # Update SolutionArray only if state has changed - crude check for now:
-        if (
-            state.pressure is not self.sol.P
-            or state.temperature is not self.sol.T
-            or state.density is not self.sol.density_mass
-        ):
+        # Update SolutionArray only if state has changed
+        if not state._cache_valid:
             state.mass_fractions = state.composition
 
-            # Prioritize temperature-based updates
-            if state.temperature is not None:
-                if state.density is not None:
+            # Prioritize density-based updates
+            if state.density is not None:
+                if state.pressure is not None:
+                    self.sol.DPY = state.density, state.pressure, state.mass_fractions
+                else:
                     self.sol.TDY = (
                         state.temperature,
                         state.density,
                         state.mass_fractions,
                     )
-                else:
-                    self.sol.TPY = (
-                        state.temperature,
-                        state.pressure,
-                        state.mass_fractions,
-                    )
+                state.density = self.sol.density_mass
             else:
-                self.sol.DPY = state.density, state.pressure, state.mass_fractions
+                self.sol.TPY = state.temperature, state.pressure, state.mass_fractions
+                state.temperature = self.sol.T
 
-            # Update the state variables to point directly to the SolutionArray properties
-            state.pressure = self.sol.P
-            state.temperature = self.sol.T
-            state.density = self.sol.density_mass
-            state.composition = state.mass_fractions = self.sol.Y
+        state._cache_valid = True
 
         return state
 

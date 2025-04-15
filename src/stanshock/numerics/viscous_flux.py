@@ -29,7 +29,8 @@ def viscous_flux(domain, rLR, uLR, pLR, YLR):
         velocity=np.concatenate((uLR[0, :], uLR[1, [-1]])),
         composition=np.concatenate((YLR[0, :, :], YLR[1, [-1], :]), axis=0),
     )
-    T = physics.get_temperature(state)
+    state.temperature = T = physics.get_temperature(state)
+    state.density = None
 
     F = np.ones(nT)
     F[1:-1] = domain.F

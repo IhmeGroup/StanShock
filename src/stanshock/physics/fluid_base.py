@@ -29,6 +29,8 @@ class FluidState:
 
     velocity: np.ndarray | None = None
 
+    _cache_valid: bool = False
+
 
 class FluidPhysics(ABC):
     def __init__(self, gas: ct.Solution):
@@ -151,6 +153,7 @@ class FluidPhysics(ABC):
 
     def set_state(self, state: FluidState) -> FluidState:
         """Updates internal representation of the fluid state if needed."""
+        self._cache_valid = True
         return state
 
     def get_composition(self, Y):

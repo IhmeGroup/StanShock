@@ -499,11 +499,13 @@ class Combustor:
         indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k], self.t)]
         state_temp = FluidState(
             shape=len(indices),
-            density=self.state.density[indices],
-            pressure=self.state.pressure[indices],
-            composition=self.state.composition[indices, :],
+            density=self.state.density[indices].copy(),
+            pressure=self.state.pressure[indices].copy(),
+            composition=self.state.composition[indices, :].copy(),
         )
-        Ts = self.physics.get_temperature(state_temp)
+        state_temp.temperature = Ts = self.physics.get_temperature(state_temp)
+        state_temp.pressure = None
+        state_temp._cache_valid = False
 
         # initialize integrator
         y0 = np.zeros(self.physics.n_scalars + 1)
@@ -523,12 +525,14 @@ class Combustor:
             Y[Y < 0.0] = 0.0
             Y /= np.sum(Y)
             # update
-            self.state.composition[k, :] = Y
-            self.state.temperature[k] = integrator.y[-1]
+            state_temp.composition[TIndex, :] = Y
+            state_temp.temperature[TIndex] = integrator.y[-1]
 
         # update state
-        self.state.pressure = None
-        self.state.pressure = self.physics.get_pressure(self.state)
+        self.state.pressure[indices] = self.physics.get_pressure(state_temp)
+        self.state.composition[indices, :] = state_temp.composition
+        self.state.temperature = None
+        self.state._cache_valid = False
         self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_quasi_1d(self, dt):
