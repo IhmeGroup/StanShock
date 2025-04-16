@@ -49,7 +49,7 @@ def initialize_constant(domain, gas, u) -> FluidState:
     ones = np.ones(n)
 
     # Initialize state
-    composition = domain.physics.get_composition(gas.Y)
+    composition = domain.physics.get_composition(gas.Y[None, :])
 
     return FluidState(
         shape=n,

@@ -33,7 +33,7 @@ class FluidState:
 
 
 class FluidPhysics(ABC):
-    def __init__(self, gas: ct.Solution):
+    def __init__(self, gas: ct.Solution, ox_def=None, fuel_def=None, prog_def=None):
         self.gas = gas
         self.n_scalars = self.gas.n_species
         self.scalar_names = [species.lower() for species in self.gas.species_names]
@@ -42,11 +42,18 @@ class FluidPhysics(ABC):
         self.is_flamelet = False
 
         # For mixture fraction and progress variable definitions (optional):
-        self.ox_def = None  # Oxidizer molar composition
-        self.fuel_def = None  # Fuel molar composition
+        self.ox_def = ox_def  # Oxidizer molar composition
+        self.fuel_def = fuel_def  # Fuel molar composition
+        self.prog_def = prog_def  # Progress variable molar composition
         self.Z_weights = None
         self.Z_offset = None
         self.prog_weights = None
+
+        if self.ox_def is not None and self.fuel_def is not None:
+            self.initialize_bilger_mixture_fraction()
+
+        if self.prog_def is not None:
+            self.initialize_progress_variable(self.prog_def)
 
     @abstractmethod
     def get_cp(self, state: FluidState):

@@ -34,7 +34,7 @@ class FPVTable(FluidPhysics):
     Class to read an FPV table from an HDF5 file and perform lookups.
     """
 
-    def __init__(self, filename, gas):
+    def __init__(self, filename, gas, ox_def=None, fuel_def=None, prog_def=None):
         """
         Initialize the FPVTable object by reading the HDF5 file.
         """
@@ -61,6 +61,38 @@ class FPVTable(FluidPhysics):
                     self.Z.size, self.Q.size, self.L.size, order="C"
                 )
                 self.variables.append(TableVariable(var, data, self.Z, self.Q, self.L))
+
+        self.ox_def = ox_def
+        self.fuel_def = fuel_def
+        self.prog_def = prog_def
+        if self.ox_def is None or self.fuel_def is None:
+            self.get_fuel_and_oxidizer_definitions()
+        self.initialize_bilger_mixture_fraction()
+
+        if self.prog_def is not None:
+            self.initialize_progress_variable(prog_def)
+
+    def get_fuel_and_oxidizer_definitions(self, cutoff=1e-6):
+        """Get the fuel and oxidizer composition from the table."""
+        self.ox_def = {}
+        self.fuel_def = {}
+        sum_ox = 0.0
+        sum_fuel = 0.0
+        Wk = self.gas.molecular_weights
+        for isp, sp_name in enumerate(self.gas.species_names):
+            Y = self.lookup_direct(sp_name, 0.0, 0.0, 0.0).item() / Wk[isp]
+            if cutoff < Y:
+                self.ox_def[sp_name] = Y
+                sum_ox += Y
+
+            Y = self.lookup_direct(sp_name, 1.0, 0.0, 0.0).item() / Wk[isp]
+            if cutoff < Y:
+                self.fuel_def[sp_name] = Y
+                sum_fuel += Y
+
+        # Convert the mass fractions to mole fractions
+        self.ox_def = {sp_name: Y / sum_ox for sp_name, Y in self.ox_def.items()}
+        self.fuel_def = {sp_name: Y / sum_fuel for sp_name, Y in self.fuel_def.items()}
 
     def set_state(self, state: FluidState) -> FluidState:
         """Get the flamelet table coordinates from the composition."""

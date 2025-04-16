@@ -65,9 +65,6 @@ class Combustor:
         self.Tw = None  # wall temperature (needed for BL)
         self.sourceTerms = None  # source term function
         self.injector = None  # injector model
-        self.ox_def = None  # oxidizer definition
-        self.fuel_def = None  # fuel definition
-        self.prog_def = None  # progress variable definition
         self.fluxFunction = hllc_flux
         self.initialization = None  # initialization options
         self.probes = []  # list of probe objects
