@@ -35,20 +35,18 @@ class FluidState:
 class FluidPhysics(ABC):
     def __init__(self, gas: ct.Solution):
         self.gas = gas
+        self.n_scalars = self.gas.n_species
+        self.scalar_names = [species.lower() for species in self.gas.species_names]
 
         self.normalize_scalars = True
         self.is_flamelet = False
+
+        # For mixture fraction and progress variable definitions (optional):
+        self.ox_def = None  # Oxidizer molar composition
+        self.fuel_def = None  # Fuel molar composition
         self.Z_weights = None
         self.Z_offset = None
         self.prog_weights = None
-
-    @property
-    def n_scalars(self):
-        return self.gas.n_species
-
-    @property
-    def scalar_names(self):
-        return [species.lower() for species in self.gas.species_names]
 
     @abstractmethod
     def get_cp(self, state: FluidState):

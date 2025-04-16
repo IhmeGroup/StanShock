@@ -38,7 +38,7 @@ class FPVTable(FluidPhysics):
         """
         Initialize the FPVTable object by reading the HDF5 file.
         """
-        super().__init__(gas)
+        self.gas = gas
         self.n_scalars = 2
         self.scalar_names = ["mixture fraction", "progress variable"]
         self.normalize_scalars = False
@@ -91,10 +91,19 @@ class FPVTable(FluidPhysics):
         """
         Perform a lookup of the variable with the given name at the given Z, Q, and L values.
         """
+        if state.normalized_progress_variable is None:
+            self.set_state(state)
+
         Z = state.mixture_fraction
         Q = np.zeros_like(Z)
         L = state.normalized_progress_variable
 
+        return self.lookup_direct(var, Z, Q, L)
+
+    def lookup_direct(self, var, Z, Q, L):
+        """
+        Perform a lookup of the variable with the given name at the given Z, Q, and L values.
+        """
         for v in self.variables:
             if v.name == var:
                 return v.lookup(Z, Q, L)
@@ -106,6 +115,9 @@ class FPVTable(FluidPhysics):
         """
         Perform a lookup of all variables at the given Z, Q, and L values.
         """
+        if state.normalized_progress_variable is None:
+            self.set_state(state)
+
         Z = state.mixture_fraction
         Q = np.zeros_like(Z)
         L = state.normalized_progress_variable
@@ -119,7 +131,8 @@ class FPVTable(FluidPhysics):
         gamma0 = self.lookup("GAMMA0", state)
         ag = self.lookup("AGAMMA", state)
         T0 = self.lookup("T0", state)
-        return gamma0 + ag * (state.temperature - T0)
+        state.gamma = gamma0 + ag * (state.temperature - T0)
+        return state.gamma
 
     def get_specific_gas_constant(self, state: FluidState):
         """
@@ -133,7 +146,8 @@ class FPVTable(FluidPhysics):
         """
         R = self.get_specific_gas_constant(state)
         gamma = self.get_gamma(state)
-        return R * gamma / (gamma - 1)
+        state.cp = R * gamma / (gamma - 1)
+        return state.cp
 
     def get_cv(self, state: FluidState):
         """
@@ -150,16 +164,21 @@ class FPVTable(FluidPhysics):
         mu0 = self.lookup("MU0", state)
         T0 = self.lookup("T0", state)
         amu = self.lookup("AMU", state)
-        return mu0 * (state.temperature / T0) ** amu
+        state.viscosity = mu0 * (state.temperature / T0) ** amu
+        return state.viscosity
 
     def get_thermal_conductivity(self, state: FluidState):
         """
         Compute the thermal conductivity at the given Z, Q, and L values.
         """
+        if state.cp is None:
+            self.get_cp(state)
+
         loc0 = self.lookup("LOC0", state)
         T0 = self.lookup("T0", state)
         aloc = self.lookup("ALOC", state)
-        return loc0 * (state.temperature / T0) ** aloc
+        state.thermal_conductivity = state.cp * loc0 * (state.temperature / T0) ** aloc
+        return state.thermal_conductivity
 
     def get_temperature(self, state: FluidState):
         R = self.get_specific_gas_constant(state)
@@ -170,3 +189,14 @@ class FPVTable(FluidPhysics):
         R = self.get_specific_gas_constant(state)
         state.pressure = state.temperature * R * state.density
         return state.pressure
+
+    def get_sound_speed(self, state):
+        if state.gamma is None:
+            self.get_gamma(state)
+        if state.pressure is None:
+            self.get_pressure(state)
+        state.sound_speed = np.sqrt(state.gamma * state.pressure / state.density)
+        return state.sound_speed
+
+    def get_source_terms(self, state):
+        return self.lookup("SRC_PROG", state)
