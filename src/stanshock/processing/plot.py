@@ -167,7 +167,7 @@ def plot_state(domain, filename):
     if domain.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
-    M = np.abs(domain.state.velocity) / domain.get_sound_speed(domain.state)
+    M = np.abs(domain.state.velocity) / domain.physics.get_sound_speed(domain.state)
     ax[4].plot(domain.x * xscale, M)
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
