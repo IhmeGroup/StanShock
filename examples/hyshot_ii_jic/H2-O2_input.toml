@@ -31,7 +31,6 @@ width_change_max = 0.1           # Maximum domain width change
 width_change_min = 0.05          # Minimum domain width change
 n_max = 5000                     # Maximum number of iterations
 initial_spacing = 0.9            # Initial control point spacing
-unstable_spacing = 0.95          # Control point spacing for unstable branch
 temperature_increment = 20.0     # Initial temperature increment
 max_increment = 100.0            # Maximum temperature increment
 target_delta_T_max = 20.0        # Target maximum temperature change

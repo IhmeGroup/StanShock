@@ -242,7 +242,6 @@ n_bins_Z_pdf = int(np.ceil(1.0 / dZ_pdf))
 # Initialize the state
 gas_init = ct.Solution(mech)
 gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
-initState = gas_init, U_in
 
 # Define the boundary conditions
 BC_inlet = Inflow(reference_state=(gas_init.density, U_in, gas_init.P, (1.0, 0.0, 0.0)))
@@ -250,13 +249,12 @@ BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
 # Load the FPV table
-fpv_table = FPVTable(table_file)
+fpv_table = FPVTable(table_file, gas, ox_def=X_ox, fuel_def=X_f, prog_def={"H2O": 1.0})
 
 # #################################################################
 
 # Build the injector model
 jic = JICModel(
-    gas,
     "H2",
     x,
     x_inj,
@@ -403,22 +401,18 @@ jic = JICModel(
 
 # Initialize and run the simulation
 ss = Combustor(
-    gas,
+    x=x,
     h=h,
     w=w,
     dlnA_dx=dlnA_dx,
     wall_temperature=300.0,
     include_boundary_layer=True,
-    initialization=("constant", initState, x),
+    initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,
     sourceTerms=None,
     injector=jic,
-    ox_def=X_ox,
-    fuel_def=X_f,
-    prog_def={"H2O": 1.0},
     cfl=0.5,
-    physics="FPV",
-    fpv_table=fpv_table,
+    physics=fpv_table,
     reacting=True,
     include_diffusion=False,
     output_every=10,

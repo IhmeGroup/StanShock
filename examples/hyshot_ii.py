@@ -9,6 +9,7 @@ from scipy import interpolate
 
 from stanshock.components.combustor import Combustor
 from stanshock.numerics.boundary_conditions import Inflow
+from stanshock.physics.thermotable import ThermoTable
 
 plt.rcParams.update(
     {
@@ -105,7 +106,6 @@ print(f"t_end = {t_end:.2e} s")
 # Initialize the state
 gas_init = ct.Solution(mech)
 gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
-initState = gas_init, U_in
 W_in = gas_init.mean_molecular_weight
 
 # Define the boundary conditions
@@ -147,16 +147,16 @@ def sourceTerms(rho, rhou, rhoE, rhoY, gamma, x, t):
 
 # Initialize and run the simulation
 ss = Combustor(
-    gas,
+    x=x,
     dlnA_dx=dlnA_dx,
-    initialization=("constant", initState, x),
+    initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,
     sourceTerms=sourceTerms,
     cfl=0.5,
     reacting=True,
     include_diffusion=False,
     output_every=10,
-    physics="FRC",
+    physics=ThermoTable(gas),
 )
 ss.advance_simulation(t_end)
 
