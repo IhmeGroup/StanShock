@@ -3,11 +3,11 @@ from __future__ import annotations
 import cantera as ct
 import numpy as np
 
+from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.numerics.face_extrapolation import weno5
 from stanshock.numerics.inviscid_flux import hllc_flux
 from stanshock.numerics.viscous_flux import viscous_flux
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.physics.skinfriction import SkinFriction
 from stanshock.processing.initialize import (
     initialize_constant,
     initialize_diffuse_interface,
@@ -62,14 +62,14 @@ class Combustor:
             None  # area of the shock tube as a function of x (needed for quasi-1D)
         )
         self.includeBoundaryLayerTerms = False  # flag to include boundary layer terms
-        self.Tw = None  # wall temperature (needed for BL)
+        self.wall_temperature = None  # wall temperature (needed for BL)
         self.sourceTerms = None  # source term function
         self.injector = None  # injector model
         self.fluxFunction = hllc_flux
         self.initialization = None  # initialization options
         self.probes = []  # list of probe objects
         self.XTDiagrams = []  # list of XT diagram objects
-        self.cf = None  # skin friction functor
+        self.skin_friction_coefficient = None  # skin friction functor
         self.optimizationIteration = 0  # counter to keep track of optimization
         self.physics = physics  # Model handling all fluid property evaluations
         self.reacting = False  # flag to solver about whether to solve source terms
@@ -122,6 +122,14 @@ class Combustor:
                     self.characteristic_length[noInsert] = self.hydraulic_diameter[
                         noInsert
                     ]
+
+            # Initialize the boundary layer source terms
+            self.boundary_layer_source = BoundaryLayer(
+                hydraulic_diameter=self.hydraulic_diameter,
+                characteristic_length=self.characteristic_length,
+                wall_temperature=self.wall_temperature,
+                skin_friction_coefficient=self.skin_friction_coefficient,
+            )
 
     def get_wave_speed(self):
         """
@@ -638,83 +646,6 @@ class Combustor:
             inputs
                 dt=time step
         """
-
-        #######################################################################
-        def get_nusselt_number(Re, Pr, cf):
-            """
-            This function defines the nusselt Number as a function of the
-            Reynolds number. These functions are empirical correlations taken
-            from Kayes. The selection of the correlations assumes that this solver
-            will be used for gasses.
-                inputs:
-                    Re=Reynolds number
-                    Pr=Prandtl number
-                    cf=skin friction
-                outputs:
-                    Nu=Nusselt number
-            """
-            # define the transitional Reynolds number
-            ReCrit = 2300
-            ReLowTurbulent = 2e5  # taken frkom figure 14-5 of Kayes for Pr=0.7
-            Nu = np.zeros_like(Re)
-            # laminar portion of the flow
-            laminarIndices = np.logical_and(Re > 0.0, Re <= ReCrit)
-            Nu[laminarIndices] = 3.657  # from the analytical solution
-            # low turbulent portion of the flow (accounts for isothermal wall)
-            lowTurublentIndices = np.logical_and(Re > ReCrit, Re <= ReLowTurbulent)
-            ReLT, PrLT = Re[lowTurublentIndices], Pr[lowTurublentIndices]
-            Nu[lowTurublentIndices] = (
-                0.021 * PrLT**0.5 * ReLT**0.8
-            )  # empircal correlation for isothermal case
-            # highly turbulent portion of the flow (data shows that boundary condition is less important)
-            # highTurublentIndices = Re > ReLowTurbulent
-            highTurublentIndices = Re > 2300.0
-            ReHT, PrHT, cfHT = (
-                Re[highTurublentIndices],
-                Pr[highTurublentIndices],
-                cf[highTurublentIndices],
-            )
-            Nu[highTurublentIndices] = (
-                ReHT
-                * PrHT
-                * cfHT
-                / 2.0
-                / (0.88 + 13.39 * (PrHT ** (2.0 / 3.0) - 0.78) * np.sqrt(cfHT / 2.0))
-            )
-            return Nu
-
-        #######################################################################
-        if (
-            self.hydraulic_diameter is None
-            or self.characteristic_length is None
-            or self.Tw is None
-        ):
-            msg = "Combustor improperly initialized for boundary layer terms"
-            raise Exception(msg)
-        # compute gas properties
-        T = self.state.temperature = self.physics.get_temperature(self.state)
-        cp = self.physics.get_cp(self.state)
-        mu = self.physics.get_mu(self.state)
-        k = self.physics.get_thermal_conductivity(self.state)
-        # compute non-dimensional numbers
-        Re = abs(
-            self.state.density * self.state.velocity * self.characteristic_length / mu
-        )
-        Pr = cp * mu / k
-        # skin friction coefficient
-        if self.cf is None:
-            self.cf = SkinFriction()  # initialize the functor
-        cf = self.cf(Re)
-        # shear stress on wall
-        shear = (
-            cf
-            * (0.5 * self.state.density * self.state.velocity**2.0)
-            * np.sign(self.state.velocity)
-        )
-        # Stanton number and heat transfer to wall
-        Nu = get_nusselt_number(Re, Pr, cf)
-        qloss = Nu * k / self.characteristic_length * (T - self.Tw)
-        # update
         (r, ru, E, rY) = self.primitive_to_conservative(
             self.state.density,
             self.state.velocity,
@@ -722,8 +653,14 @@ class Combustor:
             self.state.composition,
             self.state.gamma,
         )
-        ru -= shear * 4.0 / self.hydraulic_diameter * dt
-        E -= qloss * 4.0 / self.hydraulic_diameter * dt
+
+        # Get RHS
+        _, drudt, dEdt, _ = self.boundary_layer_source(self.state, self.physics)
+
+        # Single forward-Euler step
+        ru += drudt * dt
+        E += dEdt * dt
+
         (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         self.state = FluidState(
             shape=self.n,

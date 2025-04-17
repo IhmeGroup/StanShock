@@ -3,6 +3,9 @@ from __future__ import annotations
 import numpy as np
 from scipy.optimize import root
 
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.base import Array, RightHandSide
+
 
 class SkinFriction:
     """
@@ -48,3 +51,98 @@ class SkinFriction:
             msg = f"Error: Reynolds number exceeds the maximum value of {self.ReMax:f}: skinFriction Table bounds must be adjusted"
             raise Exception(msg)
         return cf
+
+
+class BoundaryLayer(RightHandSide):
+    def __init__(
+        self,
+        hydraulic_diameter,
+        characteristic_length,
+        wall_temperature=None,
+        skin_friction_coefficient=None,
+    ) -> None:
+        self.hydraulic_diameter = hydraulic_diameter
+        self.characteristic_length = characteristic_length
+        self.wall_temperature = wall_temperature
+        self.skin_friction_coefficient = skin_friction_coefficient
+
+        if self.skin_friction_coefficient is None:
+            self.skin_friction_coefficient = SkinFriction()  # initialize the functor
+
+    def get_nusselt_number(self, Re, Pr, cf):
+        """
+        This function defines the nusselt Number as a function of the
+        Reynolds number. These functions are empirical correlations taken
+        from Kayes. The selection of the correlations assumes that this solver
+        will be used for gasses.
+            inputs:
+                Re=Reynolds number
+                Pr=Prandtl number
+                cf=skin friction
+            outputs:
+                Nu=Nusselt number
+        """
+        # define the transitional Reynolds number
+        ReCrit = 2300
+        ReLowTurbulent = 2e5  # taken frkom figure 14-5 of Kayes for Pr=0.7
+        Nu = np.zeros_like(Re)
+
+        # laminar portion of the flow
+        laminarIndices = np.logical_and(Re > 0.0, Re <= ReCrit)
+        Nu[laminarIndices] = 3.657  # from the analytical solution
+
+        # low turbulent portion of the flow (accounts for isothermal wall)
+        lowTurublentIndices = np.logical_and(Re > ReCrit, Re <= ReLowTurbulent)
+        ReLT, PrLT = Re[lowTurublentIndices], Pr[lowTurublentIndices]
+        Nu[lowTurublentIndices] = (
+            0.021 * PrLT**0.5 * ReLT**0.8
+        )  # empircal correlation for isothermal case
+
+        # highly turbulent portion of the flow (data shows that boundary condition is less important)
+        # highTurublentIndices = Re > ReLowTurbulent
+        highTurublentIndices = Re > 2300.0
+        ReHT, PrHT, cfHT = (
+            Re[highTurublentIndices],
+            Pr[highTurublentIndices],
+            cf[highTurublentIndices],
+        )
+        Nu[highTurublentIndices] = (
+            ReHT
+            * PrHT
+            * cfHT
+            / 2.0
+            / (0.88 + 13.39 * (PrHT ** (2.0 / 3.0) - 0.78) * np.sqrt(cfHT / 2.0))
+        )
+        return Nu
+
+    def __call__(self, _time: float, state: FluidState, physics: FluidPhysics) -> Array:
+        """Boundary layer contribution to RHS."""
+        if self.hydraulic_diameter is None or self.characteristic_length is None:
+            msg = "Combustor improperly initialized for boundary layer terms"
+            raise Exception(msg)
+
+        rhs = np.zeros((state.shape, 3+physics.n_scalars))
+
+        # Compute gas properties
+        T = state.temperature = physics.get_temperature(state)
+        mu = physics.get_mu(state)
+
+        # Shear stress on wall
+        Re = abs(state.density * state.velocity * self.characteristic_length / mu)
+        cf = self.skin_friction_coefficient(Re)
+        shear = (
+            cf * (0.5 * state.density * state.velocity**2.0) * np.sign(state.velocity)
+        )
+        rhs[:, 1] = -4.0 / self.hydraulic_diameter * shear
+
+        # Stanton number and heat transfer to wall
+        if self.wall_temperature is not None:
+            cp = physics.get_cp(state)
+            k = physics.get_thermal_conductivity(state)
+            Pr = cp * mu / k
+            Nu = self.get_nusselt_number(Re, Pr, cf)
+            qloss = Nu * k / self.characteristic_length * (T - self.wall_temperature)
+
+            rhs[:, 2] = -4.0 / self.hydraulic_diameter * qloss
+
+        return rhs

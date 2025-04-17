@@ -108,7 +108,7 @@ def main(
         outputEvery=100,
         includeBoundaryLayerTerms=True,
         DOuter=D,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
         dlnAdx=dlnAdx,
     )
     ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe

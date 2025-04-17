@@ -151,7 +151,7 @@ def main(
         cfl=0.9,
         outputEvery=100,
         includeBoundaryLayerTerms=True,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
         DInner=DInner,
         DOuter=DOuter,
         dlnAdx=dlnAdx,
@@ -212,7 +212,7 @@ def main(
         cfl=0.9,
         outputEvery=100,
         includeBoundaryLayerTerms=False,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
         DInner=DInner,
         DOuter=DOuter,
         dlnAdx=dlnAdx,
