@@ -70,7 +70,7 @@ class FPVTable(FluidPhysics):
         self.initialize_bilger_mixture_fraction()
 
         if self.prog_def is not None:
-            self.initialize_progress_variable(prog_def)
+            self.initialize_progress_variable(self.prog_def)
 
     def get_fuel_and_oxidizer_definitions(self, cutoff=1e-6):
         """Get the fuel and oxidizer composition from the table."""

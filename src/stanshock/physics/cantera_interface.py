@@ -7,10 +7,9 @@ from stanshock.physics.fluid_base import FluidPhysics, FluidState
 
 
 class CanteraInterface(FluidPhysics):
-    def __init__(self, gas: ct.Solution):
-        super().__init__(gas)
+    def __init__(self, gas: ct.Solution, ox_def=None, fuel_def=None, prog_def=None):
+        super().__init__(gas, ox_def, fuel_def, prog_def)
         self._cached_solutions: dict[int, ct.SolutionArray] = {}
-        self._cache_valid: dict[int, bool] = {}
 
     def set_state(self, state: FluidState) -> FluidState:
         """Sets up a Cantera SolutionArray with the current fluid state.
