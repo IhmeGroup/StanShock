@@ -12,10 +12,6 @@ class CanteraInterface(FluidPhysics):
         self._cached_solutions: dict[int, ct.SolutionArray] = {}
         self._cache_valid: dict[int, bool] = {}
 
-    @property
-    def n_scalars(self):
-        return self.gas.n_species
-
     def set_state(self, state: FluidState) -> FluidState:
         """Sets up a Cantera SolutionArray with the current fluid state.
 
