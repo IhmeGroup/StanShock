@@ -416,16 +416,18 @@ class Combustor:
             self.state.composition,
             self.state.gamma,
         )
+        Z = rY[:, 0] / r
+        C = rY[:, 1] / r
         Q = np.zeros(self.n)
-        L = self.physics.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
-        e_chem0 = r * self.physics.lookup("E0_CHEM", self.Y[:, 0], Q, L)
+        L = self.physics.get_normalized_progress_variable(Z, C)
+        e_chem0 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
         # 1st stage of RK2
         rhsY = np.zeros((self.n, self.n_scalars))
-        omegaC = self.injector.get_chemical_sources(self.Y[:, 0], self.Y[:, 1])
+        omegaC = self.injector.get_chemical_sources(Z, C)
         rhsY[:, 1] = omegaC * r
         rY1 = rY + dt * rhsY
         L1 = self.physics.get_normalized_progress_variable(rY1[:, 0] / r, rY1[:, 1] / r)
-        e_chem1 = r * self.physics.lookup("E0_CHEM", rY1[:, 0] / r, Q, L1)
+        e_chem1 = r * self.physics.lookup_direct("E0_CHEM", rY1[:, 0] / r, Q, L1)
         E1 = E + e_chem0 - e_chem1
         (r1, u1, p1, Y1) = self.conservative_to_primitive(
             r, ru, E1, rY1, self.state.gamma
@@ -435,7 +437,7 @@ class Combustor:
         rhsY[:, 1] = omegaC1 * r1
         rY = 0.5 * (rY + rY1 + dt * rhsY)
         L = self.physics.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
-        e_chem2 = r * self.physics.lookup("E0_CHEM", rY[:, 0] / r, Q, L)
+        e_chem2 = r * self.physics.lookup_direct("E0_CHEM", rY[:, 0] / r, Q, L)
         E = E + e_chem0 - e_chem2
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
 
