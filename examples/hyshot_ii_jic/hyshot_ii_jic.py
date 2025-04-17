@@ -9,8 +9,8 @@ import numpy as np
 from scipy import interpolate, optimize
 
 from stanshock.components.combustor import Combustor
-from stanshock.physics.flamelet import FPVTable
 from stanshock.models.jicf import JICModel
+from stanshock.physics.flamelet import FPVTable
 from stanshock.processing.plot import XTDiagram
 
 XSMALL_SIZE = 12
@@ -407,9 +407,9 @@ jic = JICModel(
 
 # Initialize and run the simulation
 ss = Combustor(
+    x=x,
     h=h,
     w=w,
-    x=x,
     dlnA_dx=dlnA_dx,
     wall_temperature=300.0,
     include_boundary_layer=True,
