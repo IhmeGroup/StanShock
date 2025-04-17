@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 from scipy.optimize import newton
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import (
     smoothing_function,
     smoothing_function_gradient,
@@ -47,7 +48,7 @@ def main(
     xUpper = LDriven
     xShock = 0.0
     Delta = 10 * (xUpper - xLower) / float(nXFine)
-    geometry = (nXCoarse, xLower, xUpper, xShock)
+    x = np.linspace(xLower, xUpper, nXCoarse)
 
     def DInner(x):
         return np.zeros_like(x)
@@ -104,9 +105,12 @@ def main(
     boundaryConditions = ["reflecting", "reflecting"]
     state1 = (gas1, u1)
     state4 = (gas4, u4)
+    physics_model = ThermoTable(gas1)
+
     ss = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         outputEvery=100,
@@ -128,12 +132,13 @@ def main(
     print("The process took ", t1 - t0)
 
     # recalculate at higher resolution with the insert
-    geometry = (nXFine, xLower, xUpper, xShock)
+    x = np.linspace(xLower, xUpper, nXFine)
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         outputEvery=100,
@@ -172,8 +177,9 @@ def main(
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         outputEvery=100,

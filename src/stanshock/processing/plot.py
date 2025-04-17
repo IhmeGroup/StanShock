@@ -45,27 +45,26 @@ class XTDiagram:
                 XTDiagram: the XTDiagram object
         """
         variable = self.name
-        if domain.physics == "FPV":
-            scalarNames = ["mixture fraction", "progress variable"]
-        elif domain.physics == "FRC":
-            scalarNames = [species.lower() for species in domain.gas.species_names]
+
         if variable in ["density", "r", "rho"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.r))
+            self.variable.append(np.interp(self.x, domain.x, domain.state.density))
         elif variable in ["velocity", "u"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.u))
+            self.variable.append(np.interp(self.x, domain.x, domain.state.velocity))
         elif variable in ["pressure", "p"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.p))
+            self.variable.append(np.interp(self.x, domain.x, domain.state.pressure))
         elif variable in ["temperature", "t"]:
-            T = domain.get_temperature(domain.r, domain.p, domain.Y)
+            T = domain.physics.get_temperature(domain.state)
             self.variable.append(np.interp(self.x, domain.x, T))
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.gamma))
-        elif variable in scalarNames:
-            scalarIndex = scalarNames.index(variable)
-            self.variable.append(np.interp(self.x, domain.x, domain.Y[:, scalarIndex]))
+            self.variable.append(np.interp(self.x, domain.x, domain.state.gamma))
+        elif variable in domain.physics.scalar_names:
+            scalarIndex = domain.physics.scalar_names.index(variable)
+            self.variable.append(
+                np.interp(self.x, domain.x, domain.state.composition[:, scalarIndex])
+            )
         elif variable in ["mach", "m"]:
-            M = np.abs(domain.u) / domain.get_sound_speed(
-                domain.r, domain.p, domain.gamma
+            M = np.abs(domain.state.velocity) / domain.physics.get_sound_speed(
+                domain.state
             )
             self.variable.append(np.interp(self.x, self.x, M))
         else:
@@ -128,7 +127,10 @@ def add_h_plot(domain, ax, scale=1.0):
     ax1 = ax.twinx()
     ax1.set_zorder(-np.inf)
     ax.patch.set_visible(False)
-    ax1.plot(domain.x * scale, domain.h * scale, color="0.8", linestyle="--")
+
+    x = domain.x
+    h = domain.h if domain.h is not None else domain.Douter(x)
+    ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
     ax1.axhline(0, color="0.8", linestyle="--")
     ax1.set_aspect("equal")
     ax1.set_ylabel("h [mm]")
@@ -137,22 +139,23 @@ def add_h_plot(domain, ax, scale=1.0):
 
 def plot_state(domain, filename):
     xscale = 1.0e3
-    T = domain.get_temperature(domain.r, domain.p, domain.Y)
+    physics = domain.physics
+    T = physics.get_temperature(domain.state)
 
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
-    ax[0].plot(domain.x * xscale, domain.r)
+    ax[0].plot(domain.x * xscale, domain.state.density)
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
     if domain.h is not None:
         add_h_plot(domain, ax[0], scale=xscale)
 
-    ax[1].plot(domain.x * xscale, domain.u)
+    ax[1].plot(domain.x * xscale, domain.state.velocity)
     ax[1].set_ymargin(0.1)
     ax[1].set_ylabel(r"$u$ [m/s]")
     if domain.h is not None:
         add_h_plot(domain, ax[1], scale=xscale)
 
-    ax[2].plot(domain.x * xscale, domain.p)
+    ax[2].plot(domain.x * xscale, domain.state.pressure)
     ax[2].set_ymargin(0.1)
     ax[2].set_ylabel(r"$p$ [Pa]")
     if domain.h is not None:
@@ -164,7 +167,7 @@ def plot_state(domain, filename):
     if domain.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
-    M = np.abs(domain.u) / domain.get_sound_speed(domain.r, domain.p, domain.gamma)
+    M = np.abs(domain.state.velocity) / domain.physics.get_sound_speed(domain.state)
     ax[4].plot(domain.x * xscale, M)
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
@@ -172,18 +175,16 @@ def plot_state(domain, filename):
     if domain.h is not None:
         add_h_plot(domain, ax[4], scale=xscale)
 
-    if domain.physics == "FPV":
-        Z = domain.Y[:, 0]
-        C = domain.Y[:, 1]
-        Q = np.zeros_like(domain.x)
-        L = domain.fpv_table.get_normalized_progress_variable(Z, C)
-        Y_H2 = domain.fpv_table.lookup("H2", Z, Q, L)
-        Y_OH = domain.fpv_table.lookup("OH", Z, Q, L)
-        Y_H2O = domain.fpv_table.lookup("H2O", Z, Q, L)
-    elif domain.physics == "FRC":
-        Y_H2 = domain.Y[:, domain.gas.species_index("H2")]
-        Y_OH = domain.Y[:, domain.gas.species_index("OH")]
-        Y_H2O = domain.Y[:, domain.gas.species_index("H2O")]
+    if physics.is_flamelet:
+        state = physics.set_state(domain.state)
+        Y_H2 = physics.lookup("H2", state)
+        Y_OH = physics.lookup("OH", state)
+        Y_H2O = physics.lookup("H2O", state)
+    else:
+        Y = domain.state.mass_fractions
+        Y_H2 = Y[:, physics.gas.species_index("H2")]
+        Y_OH = Y[:, physics.gas.species_index("OH")]
+        Y_H2O = Y[:, physics.gas.species_index("H2O")]
     ax[5].plot(domain.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
     ax[5].plot(domain.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
     ax[5].plot(domain.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")

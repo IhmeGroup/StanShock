@@ -10,6 +10,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
 
@@ -84,7 +85,7 @@ def main(
     xLower = -LDriver
     xUpper = LDriven
     xShock = 0.0
-    geometry = (nX, xLower, xUpper, xShock)
+    x = np.linspace(xLower, xUpper, nX)
     # arrays from HTGL
     xInterp = -0.0254 * np.array(
         [142, 140, 130, 120, 110, 100, 90, 80, 70, 60, 50, 40, 36, 37, 30, 20, 10, 0]
@@ -139,9 +140,13 @@ def main(
     boundaryConditions = ["reflecting", "reflecting"]
     state1 = (gas1, u1)
     state4 = (gas4, u4)
+    physics_model = ThermoTable(gas1)
+
     ssbl = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
+        n=nX,
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         outputEvery=100,
@@ -180,9 +185,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssbl.r[iX] = gas4.density
-            ssbl.Y[iX, :] = gas4.Y
-            ssbl.gamma[iX] = gas4.cp / gas4.cv
+            ssbl.state.density[iX] = gas4.density
+            ssbl.state.composition[iX, :] = gas4.Y
+            ssbl.state.gamma[iX] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()
@@ -199,8 +204,10 @@ def main(
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
+        n=nX,
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
         boundaryConditions=boundaryConditions,
         cfl=0.9,
         outputEvery=100,
@@ -235,9 +242,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssnbl.r[iX] = gas4.density
-            ssnbl.Y[iX, :] = gas4.Y
-            ssnbl.gamma[iX] = gas4.cp / gas4.cv
+            ssnbl.state.density[iX] = gas4.density
+            ssnbl.state.composition[iX, :] = gas4.Y
+            ssnbl.state.gamma[iX] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()
