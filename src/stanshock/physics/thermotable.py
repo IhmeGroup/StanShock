@@ -149,7 +149,11 @@ class ThermoTable(CanteraInterface):
         if state.temperature is None:
             state.temperature = self.get_temperature(state)
         return get_cp_compiled(
-            state.temperature.flatten(), state.composition.reshape((-1, self.n_scalars)), self.T, self.a, self.b
+            state.temperature.flatten(),
+            state.composition.reshape((-1, self.n_scalars)),
+            self.T,
+            self.a,
+            self.b,
         ).reshape(state.shape)
 
     def get_frozen_enthalpy(self, T, Y):

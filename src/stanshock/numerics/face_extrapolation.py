@@ -51,7 +51,7 @@ class FirstOrder(FaceExtrapolator):
 
         index_face_left = np.s_[mt - 1 : -mt]
         right = state.shape[0] if mt == 1 else -mt + 1
-        index_face_right = np.s_[mt : right]
+        index_face_right = np.s_[mt:right]
 
         return FluidState(
             shape=(2, n),

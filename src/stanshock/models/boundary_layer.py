@@ -121,7 +121,7 @@ class BoundaryLayer(RightHandSide):
             msg = "Combustor improperly initialized for boundary layer terms"
             raise Exception(msg)
 
-        rhs = np.zeros((*state.shape, 3+physics.n_scalars))
+        rhs = np.zeros((*state.shape, 3 + physics.n_scalars))
 
         # Compute gas properties
         T = state.temperature = physics.get_temperature(state)
