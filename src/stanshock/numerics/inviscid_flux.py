@@ -3,6 +3,10 @@ from __future__ import annotations
 import numpy as np
 from numba import double, njit
 
+from stanshock.numerics.face_extrapolation import FaceExtrapolator
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.base import Array, RightHandSide
+
 # Global variables (parameters) used by the solver
 mn = 3  # number of 1D Euler equations
 
@@ -194,3 +198,32 @@ def hllc_flux(rLR, uLR, pLR, YLR, gamma):
                 F[iFace, iDim] = FLR[K, iFace, iDim] + SFace * (UStar[iDim] - U[iDim])
 
     return F
+
+
+class InviscidFlux(RightHandSide):
+    def __init__(self, face_extrapolator: FaceExtrapolator, riemann_solver, dx) -> None:
+        self.face_extrapolator = face_extrapolator
+        self.riemann_solver = riemann_solver
+        self.dx = dx
+
+    def __call__(
+        self, _time: float, face_states: FluidState, _physics: FluidPhysics
+    ) -> Array:
+        left_face_flux = self.riemann_solver(
+            face_states.density,
+            face_states.velocity,
+            face_states.pressure,
+            face_states.composition,
+            face_states.gamma[1, :],
+        )
+        right_face_flux = self.riemann_solver(
+            face_states.density,
+            face_states.velocity,
+            face_states.pressure,
+            face_states.composition,
+            face_states.gamma[0, :],
+        )
+
+        return (
+            left_face_flux[:-1, :] - right_face_flux[1:, :]
+        ) / self.dx  # Central difference

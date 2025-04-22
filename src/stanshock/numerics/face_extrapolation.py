@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+
 import numpy as np
 from numba import double, njit
+
+from stanshock.physics.fluid_base import FluidState
 
 # Global variables (parameters) used by the solver
 mt = 3  # number of ghost nodes
@@ -11,6 +15,70 @@ mn = 3  # number of 1D Euler equations
 double1D = double[:]
 double2D = double[:, :]
 double3D = double[:, :, :]
+
+
+class FaceExtrapolator(ABC):
+    mt = 1  # Number of ghost nodes
+
+    @abstractmethod
+    def __call__(self, state: FluidState) -> FluidState:
+        """Extrapolate fluid state from the cells to left and right faces."""
+
+    def add_ghost_layers(self, state: FluidState) -> FluidState:
+        """Add ghost layers to the primitive variables."""
+        mt = self.mt
+
+        return FluidState(
+            shape=(state.shape[0] + 2 * mt,),
+            density=np.pad(state.density, mt, mode="constant", constant_values=1.0),
+            velocity=np.pad(state.velocity, mt, mode="constant", constant_values=1.0),
+            pressure=np.pad(state.pressure, mt, mode="constant", constant_values=1.0),
+            composition=np.pad(
+                state.composition,
+                ((mt, mt), (0, 0)),
+                mode="constant",
+                constant_values=1.0,
+            ),
+            gamma=np.pad(state.gamma, mt, mode="edge"),
+        )
+
+
+class FirstOrder(FaceExtrapolator):
+    def __call__(self, state: FluidState) -> FluidState:
+        """First order interpolation of primitive variables to the edge states."""
+        mt = self.mt
+        n = state.shape[0] - 2 * mt + 1
+
+        index_face_left = np.s_[mt - 1 : -mt]
+        right = state.shape[0] if mt == 1 else -mt + 1
+        index_face_right = np.s_[mt : right]
+
+        return FluidState(
+            shape=(2, n),
+            density=np.stack(
+                (state.density[index_face_left], state.density[index_face_right]),
+                axis=0,
+            ),
+            velocity=np.stack(
+                (state.velocity[index_face_left], state.velocity[index_face_right]),
+                axis=0,
+            ),
+            pressure=np.stack(
+                (state.pressure[index_face_left], state.pressure[index_face_right]),
+                axis=0,
+            ),
+            composition=np.stack(
+                (
+                    state.composition[index_face_left],
+                    state.composition[index_face_right],
+                ),
+                axis=0,
+            ),
+            gamma=np.stack(
+                (state.gamma[index_face_left], state.gamma[index_face_right]),
+                axis=0,
+            ),
+        )
 
 
 @njit(double3D(double1D, double1D, double1D, double2D, double1D))
@@ -319,3 +387,34 @@ def weno5(r, u, p, Y, gamma):
                 )
 
     return PLR
+
+
+class FifthOrderWeno(FaceExtrapolator):
+    mt = 3  # Number of ghost layers
+
+    def __call__(self, state: FluidState) -> FluidState:
+        """First order interpolation to the edge states."""
+        face_states_array = weno5(
+            state.density,
+            state.velocity,
+            state.pressure,
+            state.composition,
+            state.gamma,
+        )
+
+        mt = self.mt
+        n = state.shape[0] - 2 * mt + 1
+        index_face_left = np.s_[mt - 1 : -mt]
+        index_face_right = np.s_[mt : -mt + 1]
+
+        return FluidState(
+            shape=(2, n),
+            density=face_states_array[:, :, 0],
+            velocity=face_states_array[:, :, 1],
+            pressure=face_states_array[:, :, 2],
+            composition=face_states_array[:, :, 3:],
+            gamma=np.stack(
+                (state.gamma[index_face_left], state.gamma[index_face_right]),
+                axis=0,
+            ),
+        )

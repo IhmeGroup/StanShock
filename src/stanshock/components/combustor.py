@@ -4,9 +4,9 @@ import cantera as ct
 import numpy as np
 
 from stanshock.models.boundary_layer import BoundaryLayer
-from stanshock.numerics.face_extrapolation import weno5
-from stanshock.numerics.inviscid_flux import hllc_flux
-from stanshock.numerics.viscous_flux import viscous_flux
+from stanshock.numerics.face_extrapolation import FifthOrderWeno, FirstOrder
+from stanshock.numerics.inviscid_flux import InviscidFlux, hllc_flux
+from stanshock.numerics.viscous_flux import ViscousFlux
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.processing.initialize import (
     initialize_constant,
@@ -105,6 +105,19 @@ class Combustor:
         elif self.initialization[0].lower() == "diffuse_interface":
             self.state = initialize_diffuse_interface(self, *self.initialization[1:])
 
+        # Initialize the key physics
+        self.inviscid_flux_source = InviscidFlux(
+            face_extrapolator=FifthOrderWeno(),
+            riemann_solver=self.fluxFunction,
+            dx=self.dx,
+        )
+
+        if self.includeDiffusion:
+            self.viscous_flux_source = ViscousFlux(
+                face_extrapolator=FirstOrder(),
+                dx=self.dx,
+            )
+
         # Compute the hydraulic diameter and characteristic length scale
         if self.includeBoundaryLayerTerms:
             if self.h is not None and self.w is not None:
@@ -160,7 +173,7 @@ class Combustor:
             local_timescale = np.minimum(local_timescale, viscous_timescale)
         return self.cfl * min(local_timescale)
 
-    def apply_boundary_conditions(self, rLR, uLR, pLR, YLR):
+    def apply_boundary_conditions(self, face_states: FluidState):
         """
         This method applies the prescribed BCs declared by the user.
         Currently, only reflecting (adiabatic wall) and outflow (symmetry)
@@ -177,6 +190,11 @@ class Combustor:
                 pLR=pressure on left and right face [2,n+1]
                 YLR=scalar on left and right face [2,n+1,nsp]
         """
+        rLR = face_states.density
+        uLR = face_states.velocity
+        pLR = face_states.pressure
+        YLR = face_states.composition
+
         for ibc in [0, 1]:
             NAssign = ibc
             NUse = 1 - ibc
@@ -205,9 +223,9 @@ class Combustor:
                     pLR[NAssign, iX] = self.boundaryConditions[ibc][2]
                 if self.boundaryConditions[ibc][3] is not None:
                     YLR[NAssign, iX, :] = self.boundaryConditions[ibc][3]
-        return (rLR, uLR, pLR, YLR)
+        return face_states
 
-    def primitive_to_conservative(self, r, u, p, Y, gamma):
+    def primitive_to_conservative(self, state: FluidState):
         """
         This method transforms the primitive variables to conservative
             inputs:
@@ -222,12 +240,20 @@ class Combustor:
                 E=total non-chemical energy
                 rY=scalar density matrix
         """
-        ru = r * u
-        E = p / (gamma - 1.0) + 0.5 * r * u**2.0
-        rY = Y * r.reshape((-1, 1))
-        return (r, ru, E, rY)
+        return np.concatenate(
+            (
+                state.density[:, None],
+                (state.density * state.velocity)[:, None],
+                (
+                    state.pressure / (state.gamma - 1.0)
+                    + 0.5 * state.density * state.velocity**2
+                )[:, None],
+                state.density[:, None] * state.composition,
+            ),
+            axis=1,
+        )
 
-    def conservative_to_primitive(self, r, ru, E, rY, gamma):
+    def conservative_to_primitive(self, state_array, gamma) -> FluidState:
         """
         This method transforms the conservative variables to the primitives
             inputs:
@@ -242,86 +268,28 @@ class Combustor:
                 p=pressure
                 Y=scalar matrix [x,scalar]
         """
+        r = state_array[:, 0]
+        ru = state_array[:, 1]
+        E = state_array[:, 2]
+        rY = state_array[:, 3:]
+
         u = ru / r
         p = (gamma - 1.0) * (E - 0.5 * r * u**2.0)
-        Y = rY / r.reshape((-1, 1))
+        Y = rY / r[:, None]
         # bound
         Y[Y > 1.0] = 1.0
         Y[Y < 0.0] = 0.0
         # scale
         if self.physics.normalize_scalars:
-            Y = Y / np.sum(Y, axis=1).reshape((-1, 1))
-        return (r, u, p, Y)
+            Y = Y / np.sum(Y, axis=1, keepdims=True)
 
-    def get_inviscid_flux(self, r, u, p, Y, gamma):
-        """
-        This method calculates the advective flux
-            inputs:
-                r=density
-                u=velocity
-                p=pressure
-                Y=scalar matrix [x,scalar]
-                gamma=specific heat ratio
-            outputs:
-                rhs=the update due to the flux
-        """
-        mt = self.mt
-        mn = self.mn
-        # find the left and right WENO states from the WENO interpolation
-        nx = len(r)
-        PLR = weno5(r, u, p, Y, gamma)
-        # extract and apply boundary conditions
-        rLR = PLR[:, :, 0]
-        uLR = PLR[:, :, 1]
-        pLR = PLR[:, :, 2]
-        YLR = PLR[:, :, mt:]
-        rLR, uLR, pLR, YLR = self.apply_boundary_conditions(rLR, uLR, pLR, YLR)
-        # calculate the flux
-        fL = self.fluxFunction(rLR, uLR, pLR, YLR, gamma[mt : -mt + 1])
-        fR = self.fluxFunction(rLR, uLR, pLR, YLR, gamma[mt - 1 : -mt])
-        rhs = np.zeros((nx, mn + self.n_scalars))
-        rhs[mt:-mt, :] = -(fR[1:] - fL[:-1]) / self.dx
-        return rhs
-
-    def get_viscous_flux(self, r, u, p, Y, gamma):
-        """
-        This method calculates the viscous flux
-            inputs:
-                r=density
-                u=velocity
-                p=pressure
-                Y=scalar matrix [x,scalar]
-                gamma=specific heat ratio
-            outputs:
-                rhs=the update due to the viscous flux
-        """
-        mt = self.mt
-        mn = self.mn
-        _ = gamma  # Hack to silence linter
-
-        # first order interpolation to the edge states and apply boundary conditions
-        rLR = np.concatenate(
-            (r[mt - 1 : -mt].reshape(1, -1), r[mt : -mt + 1].reshape(1, -1)), axis=0
+        return FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            pressure=p,
+            composition=Y,
         )
-        uLR = np.concatenate(
-            (u[mt - 1 : -mt].reshape(1, -1), u[mt : -mt + 1].reshape(1, -1)), axis=0
-        )
-        pLR = np.concatenate(
-            (p[mt - 1 : -mt].reshape(1, -1), p[mt : -mt + 1].reshape(1, -1)), axis=0
-        )
-        YLR = np.concatenate(
-            (
-                Y[mt - 1 : -mt, :].reshape(1, -1, self.n_scalars),
-                Y[mt : -mt + 1, :].reshape(1, -1, self.n_scalars),
-            ),
-            axis=0,
-        )
-        rLR, uLR, pLR, YLR = self.apply_boundary_conditions(rLR, uLR, pLR, YLR)
-        # calculate the flux
-        f = viscous_flux(self, rLR, uLR, pLR, YLR)
-        rhs = np.zeros((self.n + 2 * mt, mn + self.n_scalars))
-        rhs[mt:-mt, :] = (f[1:, :] - f[:-1, :]) / self.dx  # central difference
-        return rhs
 
     def advance_advection(self, dt):
         """
@@ -330,52 +298,78 @@ class Combustor:
             inputs
                 dt=time step
         """
-        # initialize
-        mt = self.mt
-        mn = self.mn
-        r = np.ones(self.n + 2 * mt)
-        u = np.ones(self.n + 2 * mt)
-        p = np.ones(self.n + 2 * mt)
-        gamma = np.ones(self.n + 2 * mt)
-        gamma[:mt], gamma[-mt:] = self.state.gamma[0], self.state.gamma[-1]
-        Y = np.ones((self.n + 2 * mt, self.n_scalars))
-        (r[mt:-mt], u[mt:-mt], p[mt:-mt], Y[mt:-mt, :], gamma[mt:-mt]) = (
-            self.state.density,
-            self.state.velocity,
-            self.state.pressure,
-            self.state.composition,
-            self.state.gamma,
-        )
-        (r, ru, E, rY) = self.primitive_to_conservative(r, u, p, Y, gamma)
+        # Add ghost layers to the fluid state
+        face_extrapolator = self.inviscid_flux_source.face_extrapolator
+        mt = face_extrapolator.mt
+        state = face_extrapolator.add_ghost_layers(self.state)
+        y = self.primitive_to_conservative(state)
+        gamma_star = state.gamma  # Double-flux gamma* held constant over time step
+
         # 1st stage of RK3
-        rhs = self.get_inviscid_flux(r, u, p, Y, gamma)
-        r1 = r + dt * rhs[:, 0]
-        ru1 = ru + dt * rhs[:, 1]
-        E1 = E + dt * rhs[:, 2]
-        rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservative_to_primitive(r1, ru1, E1, rY1, gamma)
+        face_states = face_extrapolator(state)
+        face_states = self.apply_boundary_conditions(face_states)
+        dydt = self.inviscid_flux_source(self.t, face_states, self.physics)
+        y1 = y.copy()
+        y1[mt:-mt] += dt * dydt
+        state1 = self.conservative_to_primitive(y1, gamma_star)
+        state1.gamma = gamma_star
+
         # 2nd stage of RK3
-        rhs = self.get_inviscid_flux(r1, u1, p1, Y1, gamma)
-        r2 = 0.75 * r + 0.25 * r1 + 0.25 * dt * rhs[:, 0]
-        ru2 = 0.75 * ru + 0.25 * ru1 + 0.25 * dt * rhs[:, 1]
-        E2 = 0.75 * E + 0.25 * E1 + 0.25 * dt * rhs[:, 2]
-        rY2 = 0.75 * rY + 0.25 * rY1 + 0.25 * dt * rhs[:, mn:]
-        (r2, u2, p2, Y2) = self.conservative_to_primitive(r2, ru2, E2, rY2, gamma)
+        face_states = face_extrapolator(state1)
+        face_states = self.apply_boundary_conditions(face_states)
+        dydt = self.inviscid_flux_source(self.t, face_states, self.physics)
+        y2 = 0.75 * y + 0.25 * y1
+        y2[mt:-mt] += 0.25 * dt * dydt
+        state2 = self.conservative_to_primitive(y2, gamma_star)
+        state2.gamma = gamma_star
+
         # 3rd stage of RK3
-        rhs = self.get_inviscid_flux(r2, u2, p2, Y2, gamma)
-        r = (1.0 / 3.0) * r + (2.0 / 3.0) * r2 + (2.0 / 3.0) * dt * rhs[:, 0]
-        ru = (1.0 / 3.0) * ru + (2.0 / 3.0) * ru2 + (2.0 / 3.0) * dt * rhs[:, 1]
-        E = (1.0 / 3.0) * E + (2.0 / 3.0) * E2 + (2.0 / 3.0) * dt * rhs[:, 2]
-        rY = (1.0 / 3.0) * rY + (2.0 / 3.0) * rY2 + (2.0 / 3.0) * dt * rhs[:, mn:]
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
-        # update
-        self.state = FluidState(
-            shape=(self.n,),
-            density=r[mt:-mt],
-            pressure=p[mt:-mt],
-            composition=Y[mt:-mt],
-            velocity=u[mt:-mt],
-        )
+        face_states = face_extrapolator(state2)
+        face_states = self.apply_boundary_conditions(face_states)
+        dydt = self.inviscid_flux_source(self.t, face_states, gamma_star)
+        y = (1.0 / 3.0) * y[mt:-mt] + (2.0 / 3.0) * y2[mt:-mt] + (2.0 / 3.0) * dt * dydt
+
+        # Remove ghost layers and update gamma
+        self.state = self.conservative_to_primitive(y, gamma_star[mt:-mt])
+        self.state.temperature = self.physics.get_temperature(self.state)
+        self.state.gamma = self.physics.get_gamma(self.state)
+
+    def advance_diffusion(self, dt):
+        """
+        This method advances the diffusion terms in the axial direction
+            inputs
+                dt=time step
+        """
+        # Add ghost layers to the fluid state
+        face_extrapolator = self.viscous_flux_source.face_extrapolator
+        mt = face_extrapolator.mt
+        state = face_extrapolator.add_ghost_layers(self.state)
+        y = self.primitive_to_conservative(state)
+        gamma_star = state.gamma  # Double-flux gamma* held constant over time step
+
+        if self.thickening is not None:
+            self.F = self.thickening(self)
+
+            # No gradient in F at boundary
+            self.viscous_flux_source.F = np.pad(self.F, mt, mode="edge")
+
+        # 1st stage of RK2
+        face_states = face_extrapolator(state)
+        face_states = self.apply_boundary_conditions(face_states)
+        dydt = self.viscous_flux_source(self.t, face_states, self.physics)
+        y1 = y.copy()
+        y1[mt:-mt] += dt * dydt
+        state1 = self.conservative_to_primitive(y1, gamma_star)
+        state1.gamma = gamma_star
+
+        # 2nd stage of RK2
+        face_states = face_extrapolator(state1)
+        face_states = self.apply_boundary_conditions(face_states)
+        dydt = self.viscous_flux_source(self.t, face_states, self.physics)
+        y = 0.5 * (y[mt:-mt] + y1[mt:-mt] + dt * dydt)
+
+        # Remove ghost layers and update gamma
+        self.state = self.conservative_to_primitive(y, gamma_star[mt:-mt])
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -417,46 +411,37 @@ class Combustor:
 
         # Using FPV
         # initialize
-        (r, ru, E, rY) = self.primitive_to_conservative(
-            self.state.density,
-            self.state.velocity,
-            self.state.pressure,
-            self.state.composition,
-            self.state.gamma,
-        )
-        Z = rY[:, 0] / r
-        C = rY[:, 1] / r
+        y = self.primitive_to_conservative(self.state)
+        (r, rZ, rC) = y[:, 0], y[:, 3], y[:, 4]
+        Z = rZ / r
+        C = rC / r
         Q = np.zeros(self.n)
         L = self.physics.get_normalized_progress_variable(Z, C)
         e_chem0 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
+
         # 1st stage of RK2
-        rhsY = np.zeros((self.n, self.n_scalars))
-        omegaC = self.injector.get_chemical_sources(Z, C)
-        rhsY[:, 1] = omegaC * r
-        rY1 = rY + dt * rhsY
-        L1 = self.physics.get_normalized_progress_variable(rY1[:, 0] / r, rY1[:, 1] / r)
-        e_chem1 = r * self.physics.lookup_direct("E0_CHEM", rY1[:, 0] / r, Q, L1)
-        E1 = E + e_chem0 - e_chem1
-        (r1, u1, p1, Y1) = self.conservative_to_primitive(
-            r, ru, E1, rY1, self.state.gamma
-        )
+        omegaC = r * self.injector.get_chemical_sources(Z, C)
+        y1 = y.copy()
+        y1[:, 4] += dt * omegaC
+        C1 = y1[:, 4] / r
+        L1 = self.physics.get_normalized_progress_variable(Z, C1)
+        e_chem1 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L1)
+        y1[:, 2] += e_chem0 - e_chem1
+        state1 = self.conservative_to_primitive(y1, self.state.gamma)
+        state1.gamma = self.state.gamma
+
         # 2nd stage of RK2
-        omegaC1 = self.injector.get_chemical_sources(Y1[:, 0], Y1[:, 1])
-        rhsY[:, 1] = omegaC1 * r1
-        rY = 0.5 * (rY + rY1 + dt * rhsY)
-        L = self.physics.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
-        e_chem2 = r * self.physics.lookup_direct("E0_CHEM", rY[:, 0] / r, Q, L)
-        E = E + e_chem0 - e_chem2
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
+        self.physics.set_state(state1)
+        omegaC1 = state1.density * self.injector.get_chemical_sources(
+            state1.Z, state1.C
+        )
+        rC = y[:, 4] = 0.5 * (y[:, 4] + y1[:, 4] + dt * omegaC1)
+        L = self.physics.get_normalized_progress_variable(Z, rC / r)
+        e_chem2 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
+        y[:, 2] += e_chem0 - e_chem2
+        self.state = self.conservative_to_primitive(y, self.state.gamma)
 
         # update properties
-        self.state = FluidState(
-            shape=(self.n,),
-            density=r,
-            pressure=p,
-            composition=Y,
-            velocity=u,
-        )
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -585,13 +570,8 @@ class Combustor:
         # initialize integrator
         y0 = np.zeros(3)
         integrator = integrate.ode(dydt).set_integrator("lsoda")
-        (r, ru, E, _) = self.primitive_to_conservative(
-            self.state.density,
-            self.state.velocity,
-            self.state.pressure,
-            self.state.composition,
-            self.state.gamma,
-        )
+        y = self.primitive_to_conservative(self.state)
+
         # determine the indices
         iIn = []
         eIn = np.arange(self.x.shape[0])
@@ -599,44 +579,37 @@ class Combustor:
             dlnAdt = self.dlnAdt(self.x, self.t)
             iIn = np.where(dlnAdt != 0.0)
             eIn = np.where(dlnAdt == 0.0)
+
         # integrate implicitly
         for i in iIn:
             # initialize
-            y0[:] = r[i], ru[i], E[i]
+            y0[:] = y[i, :3]
             args = np.array([self.x[i]]), self.state.gamma[i]
             integrator.set_initial_value(y0, self.t)
             integrator.set_f_params(args)
             # solve
             integrator.integrate(self.t + dt)
             # update
-            r[i], ru[i], E[i] = integrator.y
+            y[i, :3] = integrator.y
+
         # integrate explicitly
-        rhs = np.zeros((mn, eIn.shape[0]))
+        rhs = np.zeros((eIn.shape[0], mn))
         if self.dlnAdt is not None:
             dlnAdt = self.dlnAdt(self.x, self.t)[eIn]
-            rhs[0] -= r[eIn] * dlnAdt
-            rhs[1] -= ru[eIn] * dlnAdt
-            rhs[2] -= E[eIn] * dlnAdt
+            rhs -= y[eIn, :3] * dlnAdt
+
         if self.dlnAdx is not None:
             dlnAdx = self.dlnAdx(self.x, self.t)[eIn]
-            rhs[0] -= ru[eIn] * dlnAdx
-            rhs[1] -= (ru[eIn] ** 2.0 / r[eIn]) * dlnAdx
-            rhs[2] -= (
-                self.state.velocity[eIn] * (E[eIn] + self.state.pressure[eIn])
+            rhs[:, 0] -= y[eIn, 1] * dlnAdx
+            rhs[:, 1] -= (y[eIn, 1] ** 2.0 / y[eIn, 0]) * dlnAdx
+            rhs[:, 2] -= (
+                self.state.velocity[eIn] * (y[eIn, 2] + self.state.pressure[eIn])
             ) * dlnAdx
+
         # update
-        r[eIn] += dt * rhs[0]
-        ru[eIn] += dt * rhs[1]
-        E[eIn] += dt * rhs[2]
-        rY = r.reshape((r.shape[0], 1)) * self.state.composition
-        (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
-        self.state = FluidState(
-            shape=(self.n,),
-            density=r,
-            pressure=p,
-            composition=self.state.composition,
-            velocity=u,
-        )
+        y[eIn, :3] += dt * rhs
+        y[:, 3:] = y[:, [0]] * self.state.composition
+        self.state = self.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -646,79 +619,16 @@ class Combustor:
             inputs
                 dt=time step
         """
-        (r, ru, E, rY) = self.primitive_to_conservative(
-            self.state.density,
-            self.state.velocity,
-            self.state.pressure,
-            self.state.composition,
-            self.state.gamma,
-        )
+        y = self.primitive_to_conservative(self.state)
 
         # Get RHS
-        _, drudt, dEdt, _ = self.boundary_layer_source(self.state, self.physics)
+        dydt = self.boundary_layer_source(self.t, self.state, self.physics)
 
         # Single forward-Euler step
-        ru += drudt * dt
-        E += dEdt * dt
+        y += dydt * dt
 
-        (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
-        self.state = FluidState(
-            shape=(self.n,),
-            density=r,
-            pressure=p,
-            composition=self.state.composition,
-            velocity=u,
-        )
-        self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
-
-    def advance_diffusion(self, dt):
-        """
-        This method advances the diffusion terms in the axial direction
-            inputs
-                dt=time step
-        """
-        # initialize
-        mt = self.mt
-        mn = self.mn
-        r = np.ones(self.n + 2 * mt)
-        u = np.ones(self.n + 2 * mt)
-        p = np.ones(self.n + 2 * mt)
-        gamma = np.ones(self.n + 2 * mt)
-        gamma[:mt], gamma[-mt:] = self.state.gamma[0], self.state.gamma[-1]
-        Y = np.ones((self.n + 2 * mt, self.n_scalars))
-        (r[mt:-mt], u[mt:-mt], p[mt:-mt], Y[mt:-mt, :], gamma[mt:-mt]) = (
-            self.state.density,
-            self.state.velocity,
-            self.state.pressure,
-            self.state.composition,
-            self.state.gamma,
-        )
-        (r, ru, E, rY) = self.primitive_to_conservative(r, u, p, Y, gamma)
-        if self.thickening is not None:
-            self.F = self.thickening(self)
-        # 1st stage of RK2
-        rhs = self.get_viscous_flux(r, u, p, Y, gamma)
-        r1 = r + dt * rhs[:, 0]
-        ru1 = ru + dt * rhs[:, 1]
-        E1 = E + dt * rhs[:, 2]
-        rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservative_to_primitive(r1, ru1, E1, rY1, gamma)
-        # 2nd stage of RK2
-        rhs = self.get_viscous_flux(r1, u1, p1, Y1, gamma)
-        r = 0.5 * (r + r1 + dt * rhs[:, 0])
-        ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
-        E = 0.5 * (E + E1 + dt * rhs[:, 2])
-        rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
-        # update
-        self.state = FluidState(
-            shape=(self.n,),
-            density=r[mt:-mt],
-            pressure=p[mt:-mt],
-            composition=Y[mt:-mt, :],
-            velocity=u[mt:-mt],
-        )
+        # Update
+        self.state = self.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -729,38 +639,19 @@ class Combustor:
                 dt=time step
         """
         # initialize
-        mn = self.mn
-        (r, ru, E, rY) = self.primitive_to_conservative(
-            self.state.density,
-            self.state.velocity,
-            self.state.pressure,
-            self.state.composition,
-            self.state.gamma,
-        )
+        y = self.primitive_to_conservative(self.state)
+
         # 1st stage of RK2
-        rhs = self.sourceTerms(r, ru, E, rY, self.state.gamma, self.x, self.t)
-        r1 = r + dt * rhs[:, 0]
-        ru1 = ru + dt * rhs[:, 1]
-        E1 = E + dt * rhs[:, 2]
-        rY1 = rY + dt * rhs[:, mn:]
-        (r1, u1, p1, Y1) = self.conservative_to_primitive(
-            r1, ru1, E1, rY1, self.state.gamma
-        )
+        dydt = self.sourceTerms(y, self.state.gamma, self.x, self.t)
+        y1 = y + dt * dydt
+        # state1 = self.conservative_to_primitive(y1, self.state.gamma)
+
         # 2nd stage of RK2
-        rhs = self.sourceTerms(r1, ru1, E1, rY1, self.state.gamma, self.x, self.t + dt)
-        r = 0.5 * (r + r1 + dt * rhs[:, 0])
-        ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
-        E = 0.5 * (E + E1 + dt * rhs[:, 2])
-        rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
+        dydt = self.sourceTerms(y1, self.state.gamma, self.x, self.t + dt)
+        y = 0.5 * (y + y1 + dt * dydt)
+        self.state = self.conservative_to_primitive(y, self.state.gamma)
+
         # update
-        self.state = FluidState(
-            shape=(self.n,),
-            density=r,
-            pressure=p,
-            composition=Y,
-            velocity=u,
-        )
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -773,42 +664,26 @@ class Combustor:
         """
         # initialize
         mn = self.mn
-        (r, ru, E, rY) = self.primitive_to_conservative(
-            self.state.density,
-            self.state.velocity,
-            self.state.pressure,
-            self.state.composition,
-            self.state.gamma,
-        )
+        y = self.primitive_to_conservative(self.state)
+        (r, ru, E, rY) = y[:, 0], y[:, 1], y[:, 2], y[:, mn:]
         self.injector.update_fluid_tip_positions(dt, self.t, self.state.velocity)
+
         # 1st stage of RK2
-        rhs = self.injector.get_injector_sources(
+        dydt = self.injector.get_injector_sources(
             r, ru, E, rY[:, 0], rY[:, 1], self.state.gamma, self.t
         )
-        r1 = r + dt * rhs[:, 0]
-        ru1 = ru + dt * rhs[:, 1]
-        E1 = E + dt * rhs[:, 2]
-        rY1 = rY + dt * rhs[:, mn:]
-        (r1, _, _, _) = self.conservative_to_primitive(
-            r1, ru1, E1, rY1, self.state.gamma
-        )
+        y1 = y + dt * dydt
+        # state1 = self.conservative_to_primitive(y1, self.state.gamma)
+
         # 2nd stage of RK2
-        rhs = self.injector.get_injector_sources(
+        (r1, ru1, E1, rY1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, mn:]
+        dydt = self.injector.get_injector_sources(
             r1, ru1, E1, rY1[:, 0], rY1[:, 1], self.state.gamma, self.t + dt
         )
-        r = 0.5 * (r + r1 + dt * rhs[:, 0])
-        ru = 0.5 * (ru + ru1 + dt * rhs[:, 1])
-        E = 0.5 * (E + E1 + dt * rhs[:, 2])
-        rY = 0.5 * (rY + rY1 + dt * rhs[:, mn:])
-        (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
+        y = 0.5 * (y + y1 + dt * dydt)
+
         # update
-        self.state = FluidState(
-            shape=(self.n,),
-            density=r,
-            pressure=p,
-            composition=Y,
-            velocity=u,
-        )
+        self.state = self.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
