@@ -9,7 +9,7 @@ import numpy as np
 
 @dataclass
 class FluidState:
-    shape: int
+    shape: tuple[int, ...]
 
     density: np.ndarray | None = None
     temperature: np.ndarray | None = None

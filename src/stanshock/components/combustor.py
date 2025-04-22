@@ -370,7 +370,7 @@ class Combustor:
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
         # update
         self.state = FluidState(
-            shape=self.n,
+            shape=(self.n,),
             density=r[mt:-mt],
             pressure=p[mt:-mt],
             composition=Y[mt:-mt],
@@ -451,7 +451,7 @@ class Combustor:
 
         # update properties
         self.state = FluidState(
-            shape=self.n,
+            shape=(self.n,),
             density=r,
             pressure=p,
             composition=Y,
@@ -505,7 +505,7 @@ class Combustor:
         # get indices
         indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k], self.t)]
         state_temp = FluidState(
-            shape=len(indices),
+            shape=(len(indices),),
             density=self.state.density[indices].copy(),
             pressure=self.state.pressure[indices].copy(),
             composition=self.state.composition[indices, :].copy(),
@@ -631,7 +631,7 @@ class Combustor:
         rY = r.reshape((r.shape[0], 1)) * self.state.composition
         (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         self.state = FluidState(
-            shape=self.n,
+            shape=(self.n,),
             density=r,
             pressure=p,
             composition=self.state.composition,
@@ -663,7 +663,7 @@ class Combustor:
 
         (r, u, p, _) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         self.state = FluidState(
-            shape=self.n,
+            shape=(self.n,),
             density=r,
             pressure=p,
             composition=self.state.composition,
@@ -713,7 +713,7 @@ class Combustor:
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, gamma)
         # update
         self.state = FluidState(
-            shape=self.n,
+            shape=(self.n,),
             density=r[mt:-mt],
             pressure=p[mt:-mt],
             composition=Y[mt:-mt, :],
@@ -755,7 +755,7 @@ class Combustor:
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         # update
         self.state = FluidState(
-            shape=self.n,
+            shape=(self.n,),
             density=r,
             pressure=p,
             composition=Y,
@@ -803,7 +803,7 @@ class Combustor:
         (r, u, p, Y) = self.conservative_to_primitive(r, ru, E, rY, self.state.gamma)
         # update
         self.state = FluidState(
-            shape=self.n,
+            shape=(self.n,),
             density=r,
             pressure=p,
             composition=Y,

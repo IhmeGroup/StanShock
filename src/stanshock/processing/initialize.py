@@ -52,7 +52,7 @@ def initialize_constant(domain, gas, u) -> FluidState:
     composition = domain.physics.get_composition(gas.Y[None, :])
 
     return FluidState(
-        shape=n,
+        shape=(n,),
         density=ones * gas.density,
         pressure=ones * gas.P,
         gamma=ones * (gas.cp / gas.cv),
@@ -156,7 +156,7 @@ def initialize_diffuse_interface(
         )
 
     return FluidState(
-        shape=domain.n,
+        shape=(domain.n,),
         density=r,
         pressure=p,
         gamma=gamma,

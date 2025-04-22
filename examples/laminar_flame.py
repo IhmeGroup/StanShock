@@ -83,7 +83,7 @@ def main(
         Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
 
     ss.state = FluidState(
-        shape=nX,
+        shape=(nX,),
         density=np.interp(ss.x, flame.grid, flame.density),
         velocity=np.interp(ss.x, flame.grid, flame.velocity),
         pressure=flame.P * np.ones(ss.n),

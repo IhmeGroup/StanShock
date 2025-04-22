@@ -133,8 +133,8 @@ class ThermoTable(CanteraInterface):
                 R: vector of mixture-specific gas constants [n]
         """
         return get_specific_gas_constant_compiled(
-            state.composition, self.molecularWeights
-        )
+            state.composition.reshape((-1, self.n_scalars)), self.molecularWeights
+        ).reshape(state.shape)
 
     def get_cp(self, state: FluidState):
         """
@@ -149,8 +149,8 @@ class ThermoTable(CanteraInterface):
         if state.temperature is None:
             state.temperature = self.get_temperature(state)
         return get_cp_compiled(
-            state.temperature, state.composition, self.T, self.a, self.b
-        )
+            state.temperature.flatten(), state.composition.reshape((-1, self.n_scalars)), self.T, self.a, self.b
+        ).reshape(state.shape)
 
     def get_frozen_enthalpy(self, T, Y):
         """
