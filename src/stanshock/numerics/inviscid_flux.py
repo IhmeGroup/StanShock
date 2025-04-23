@@ -5,7 +5,8 @@ from numba import double, njit
 
 from stanshock.numerics.face_extrapolation import FaceExtrapolator
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.base import Array, RightHandSide
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
 
 # Global variables (parameters) used by the solver
 mn = 3  # number of 1D Euler equations

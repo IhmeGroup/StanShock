@@ -4,7 +4,8 @@ import numpy as np
 from scipy.optimize import root
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.base import Array, RightHandSide
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
 
 
 class SkinFriction:

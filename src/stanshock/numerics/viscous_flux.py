@@ -4,7 +4,8 @@ import numpy as np
 
 from stanshock.numerics.face_extrapolation import FaceExtrapolator
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.base import Array, RightHandSide
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
 
 
 class ViscousFlux(RightHandSide):

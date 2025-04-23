@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import cantera as ct
 import numpy as np
 
-from stanshock.system.base import Array
+from stanshock.system.backend import Array
 
 
 @dataclass
