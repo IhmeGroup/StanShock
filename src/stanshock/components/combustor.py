@@ -225,72 +225,6 @@ class Combustor:
                     YLR[NAssign, iX, :] = self.boundaryConditions[ibc][3]
         return face_states
 
-    def primitive_to_conservative(self, state: FluidState):
-        """
-        This method transforms the primitive variables to conservative
-            inputs:
-                r=density
-                u=velocity
-                p=pressure
-                Y=scalar matrix [x,scalar]
-                gamma=specific heat ratio
-            outputs:
-                r=density
-                ru=momentum
-                E=total non-chemical energy
-                rY=scalar density matrix
-        """
-        return np.concatenate(
-            (
-                state.density[:, None],
-                (state.density * state.velocity)[:, None],
-                (
-                    state.pressure / (state.gamma - 1.0)
-                    + 0.5 * state.density * state.velocity**2
-                )[:, None],
-                state.density[:, None] * state.composition,
-            ),
-            axis=1,
-        )
-
-    def conservative_to_primitive(self, state_array, gamma) -> FluidState:
-        """
-        This method transforms the conservative variables to the primitives
-            inputs:
-                r=density
-                ru=momentum
-                E=total non-chemical energy
-                rY=scalar density matrix
-                gamma=specific heat ratio
-            outputs:
-                r=density
-                u=velocity
-                p=pressure
-                Y=scalar matrix [x,scalar]
-        """
-        r = state_array[:, 0]
-        ru = state_array[:, 1]
-        E = state_array[:, 2]
-        rY = state_array[:, 3:]
-
-        u = ru / r
-        p = (gamma - 1.0) * (E - 0.5 * r * u**2.0)
-        Y = rY / r[:, None]
-        # bound
-        Y[Y > 1.0] = 1.0
-        Y[Y < 0.0] = 0.0
-        # scale
-        if self.physics.normalize_scalars:
-            Y = Y / np.sum(Y, axis=1, keepdims=True)
-
-        return FluidState(
-            shape=r.shape,
-            density=r,
-            velocity=u,
-            pressure=p,
-            composition=Y,
-        )
-
     def advance_advection(self, dt):
         """
         This method advances the advection terms by the prescribed timestep.
@@ -302,7 +236,7 @@ class Combustor:
         face_extrapolator = self.inviscid_flux_source.face_extrapolator
         mt = face_extrapolator.mt
         state = face_extrapolator.add_ghost_layers(self.state)
-        y = self.primitive_to_conservative(state)
+        y = self.physics.primitive_to_conservative(state)
         gamma_star = state.gamma  # Double-flux gamma* held constant over time step
 
         # 1st stage of RK3
@@ -311,7 +245,7 @@ class Combustor:
         dydt = self.inviscid_flux_source(self.t, face_states, self.physics)
         y1 = y.copy()
         y1[mt:-mt] += dt * dydt
-        state1 = self.conservative_to_primitive(y1, gamma_star)
+        state1 = self.physics.conservative_to_primitive(y1, gamma_star)
         state1.gamma = gamma_star
 
         # 2nd stage of RK3
@@ -320,7 +254,7 @@ class Combustor:
         dydt = self.inviscid_flux_source(self.t, face_states, self.physics)
         y2 = 0.75 * y + 0.25 * y1
         y2[mt:-mt] += 0.25 * dt * dydt
-        state2 = self.conservative_to_primitive(y2, gamma_star)
+        state2 = self.physics.conservative_to_primitive(y2, gamma_star)
         state2.gamma = gamma_star
 
         # 3rd stage of RK3
@@ -330,7 +264,7 @@ class Combustor:
         y = (1.0 / 3.0) * y[mt:-mt] + (2.0 / 3.0) * y2[mt:-mt] + (2.0 / 3.0) * dt * dydt
 
         # Remove ghost layers and update gamma
-        self.state = self.conservative_to_primitive(y, gamma_star[mt:-mt])
+        self.state = self.physics.conservative_to_primitive(y, gamma_star[mt:-mt])
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -344,7 +278,7 @@ class Combustor:
         face_extrapolator = self.viscous_flux_source.face_extrapolator
         mt = face_extrapolator.mt
         state = face_extrapolator.add_ghost_layers(self.state)
-        y = self.primitive_to_conservative(state)
+        y = self.physics.primitive_to_conservative(state)
         gamma_star = state.gamma  # Double-flux gamma* held constant over time step
 
         if self.thickening is not None:
@@ -359,7 +293,7 @@ class Combustor:
         dydt = self.viscous_flux_source(self.t, face_states, self.physics)
         y1 = y.copy()
         y1[mt:-mt] += dt * dydt
-        state1 = self.conservative_to_primitive(y1, gamma_star)
+        state1 = self.physics.conservative_to_primitive(y1, gamma_star)
         state1.gamma = gamma_star
 
         # 2nd stage of RK2
@@ -369,7 +303,7 @@ class Combustor:
         y = 0.5 * (y[mt:-mt] + y1[mt:-mt] + dt * dydt)
 
         # Remove ghost layers and update gamma
-        self.state = self.conservative_to_primitive(y, gamma_star[mt:-mt])
+        self.state = self.physics.conservative_to_primitive(y, gamma_star[mt:-mt])
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -411,7 +345,7 @@ class Combustor:
 
         # Using FPV
         # initialize
-        y = self.primitive_to_conservative(self.state)
+        y = self.physics.primitive_to_conservative(self.state)
         (r, rZ, rC) = y[:, 0], y[:, 3], y[:, 4]
         Z = rZ / r
         C = rC / r
@@ -427,7 +361,7 @@ class Combustor:
         L1 = self.physics.get_normalized_progress_variable(Z, C1)
         e_chem1 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L1)
         y1[:, 2] += e_chem0 - e_chem1
-        state1 = self.conservative_to_primitive(y1, self.state.gamma)
+        state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
         state1.gamma = self.state.gamma
 
         # 2nd stage of RK2
@@ -439,7 +373,7 @@ class Combustor:
         L = self.physics.get_normalized_progress_variable(Z, rC / r)
         e_chem2 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
         y[:, 2] += e_chem0 - e_chem2
-        self.state = self.conservative_to_primitive(y, self.state.gamma)
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
 
         # update properties
         self.state.temperature = self.physics.get_temperature(self.state)
@@ -570,7 +504,7 @@ class Combustor:
         # initialize integrator
         y0 = np.zeros(3)
         integrator = integrate.ode(dydt).set_integrator("lsoda")
-        y = self.primitive_to_conservative(self.state)
+        y = self.physics.primitive_to_conservative(self.state)
 
         # determine the indices
         iIn = []
@@ -609,7 +543,7 @@ class Combustor:
         # update
         y[eIn, :3] += dt * rhs
         y[:, 3:] = y[:, [0]] * self.state.composition
-        self.state = self.conservative_to_primitive(y, self.state.gamma)
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -619,7 +553,7 @@ class Combustor:
             inputs
                 dt=time step
         """
-        y = self.primitive_to_conservative(self.state)
+        y = self.physics.primitive_to_conservative(self.state)
 
         # Get RHS
         dydt = self.boundary_layer_source(self.t, self.state, self.physics)
@@ -628,7 +562,7 @@ class Combustor:
         y += dydt * dt
 
         # Update
-        self.state = self.conservative_to_primitive(y, self.state.gamma)
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
@@ -639,17 +573,17 @@ class Combustor:
                 dt=time step
         """
         # initialize
-        y = self.primitive_to_conservative(self.state)
+        y = self.physics.primitive_to_conservative(self.state)
 
         # 1st stage of RK2
         dydt = self.sourceTerms(y, self.state.gamma, self.x, self.t)
         y1 = y + dt * dydt
-        # state1 = self.conservative_to_primitive(y1, self.state.gamma)
+        # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
         dydt = self.sourceTerms(y1, self.state.gamma, self.x, self.t + dt)
         y = 0.5 * (y + y1 + dt * dydt)
-        self.state = self.conservative_to_primitive(y, self.state.gamma)
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
 
         # update
         self.state.temperature = self.physics.get_temperature(self.state)
@@ -664,7 +598,7 @@ class Combustor:
         """
         # initialize
         mn = self.mn
-        y = self.primitive_to_conservative(self.state)
+        y = self.physics.primitive_to_conservative(self.state)
         (r, ru, E, rY) = y[:, 0], y[:, 1], y[:, 2], y[:, mn:]
         self.injector.update_fluid_tip_positions(dt, self.t, self.state.velocity)
 
@@ -673,7 +607,7 @@ class Combustor:
             r, ru, E, rY[:, 0], rY[:, 1], self.state.gamma, self.t
         )
         y1 = y + dt * dydt
-        # state1 = self.conservative_to_primitive(y1, self.state.gamma)
+        # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
         (r1, ru1, E1, rY1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, mn:]
@@ -683,7 +617,7 @@ class Combustor:
         y = 0.5 * (y + y1 + dt * dydt)
 
         # update
-        self.state = self.conservative_to_primitive(y, self.state.gamma)
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
