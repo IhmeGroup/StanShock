@@ -202,12 +202,30 @@ def hllc_flux(rLR, uLR, pLR, YLR, gamma):
 
 
 class InviscidFlux(RightHandSide):
-    def __init__(self, face_extrapolator: FaceExtrapolator, riemann_solver, dx) -> None:
+    def __init__(
+        self,
+        face_extrapolator: FaceExtrapolator,
+        boundary_conditions,
+        riemann_solver,
+        dx,
+    ) -> None:
         self.face_extrapolator = face_extrapolator
+        self.boundary_conditions = boundary_conditions
         self.riemann_solver = riemann_solver
         self.dx = dx
 
-    def __call__(
+    def source(
+        self, _time: float, state_array: Array, physics: FluidPhysics, gamma_star: Array
+    ) -> Array:
+        state = physics.conservative_to_primitive(state_array, gamma_star)
+        state.gamma = gamma_star
+
+        face_states = self.face_extrapolator(state)
+        face_states = self.boundary_conditions(face_states)
+
+        return self.source_from_primitives(_time, face_states, physics)
+
+    def source_from_primitives(
         self, _time: float, face_states: FluidState, _physics: FluidPhysics
     ) -> Array:
         left_face_flux = self.riemann_solver(

@@ -14,6 +14,7 @@ from stanshock.processing.initialize import (
     initialize_riemann_problem,
 )
 from stanshock.processing.plot import plot_state
+from stanshock.system.base import RightHandSide
 
 
 class Combustor:
@@ -63,7 +64,7 @@ class Combustor:
         )
         self.includeBoundaryLayerTerms = False  # flag to include boundary layer terms
         self.wall_temperature = None  # wall temperature (needed for BL)
-        self.sourceTerms = None  # source term function
+        self.source_terms: RightHandSide | None = None  # source term function
         self.injector = None  # injector model
         self.fluxFunction = hllc_flux
         self.initialization = None  # initialization options
@@ -106,15 +107,17 @@ class Combustor:
             self.state = initialize_diffuse_interface(self, *self.initialization[1:])
 
         # Initialize the key physics
-        self.inviscid_flux_source = InviscidFlux(
+        self.inviscid_flux = InviscidFlux(
             face_extrapolator=FifthOrderWeno(),
+            boundary_conditions=self.apply_boundary_conditions,
             riemann_solver=self.fluxFunction,
             dx=self.dx,
         )
 
         if self.includeDiffusion:
-            self.viscous_flux_source = ViscousFlux(
+            self.viscous_flux = ViscousFlux(
                 face_extrapolator=FirstOrder(),
+                boundary_conditions=self.apply_boundary_conditions,
                 dx=self.dx,
             )
 
@@ -137,7 +140,7 @@ class Combustor:
                     ]
 
             # Initialize the boundary layer source terms
-            self.boundary_layer_source = BoundaryLayer(
+            self.boundary_layer = BoundaryLayer(
                 hydraulic_diameter=self.hydraulic_diameter,
                 characteristic_length=self.characteristic_length,
                 wall_temperature=self.wall_temperature,
@@ -233,34 +236,24 @@ class Combustor:
                 dt=time step
         """
         # Add ghost layers to the fluid state
-        face_extrapolator = self.inviscid_flux_source.face_extrapolator
+        face_extrapolator = self.inviscid_flux.face_extrapolator
         mt = face_extrapolator.mt
         state = face_extrapolator.add_ghost_layers(self.state)
         y = self.physics.primitive_to_conservative(state)
         gamma_star = state.gamma  # Double-flux gamma* held constant over time step
 
         # 1st stage of RK3
-        face_states = face_extrapolator(state)
-        face_states = self.apply_boundary_conditions(face_states)
-        dydt = self.inviscid_flux_source(self.t, face_states, self.physics)
+        dydt = self.inviscid_flux.source(self.t, y, self.physics, gamma_star)
         y1 = y.copy()
         y1[mt:-mt] += dt * dydt
-        state1 = self.physics.conservative_to_primitive(y1, gamma_star)
-        state1.gamma = gamma_star
 
         # 2nd stage of RK3
-        face_states = face_extrapolator(state1)
-        face_states = self.apply_boundary_conditions(face_states)
-        dydt = self.inviscid_flux_source(self.t, face_states, self.physics)
+        dydt = self.inviscid_flux.source(self.t, y1, self.physics, gamma_star)
         y2 = 0.75 * y + 0.25 * y1
         y2[mt:-mt] += 0.25 * dt * dydt
-        state2 = self.physics.conservative_to_primitive(y2, gamma_star)
-        state2.gamma = gamma_star
 
         # 3rd stage of RK3
-        face_states = face_extrapolator(state2)
-        face_states = self.apply_boundary_conditions(face_states)
-        dydt = self.inviscid_flux_source(self.t, face_states, gamma_star)
+        dydt = self.inviscid_flux.source(self.t, y2, self.physics, gamma_star)
         y = (1.0 / 3.0) * y[mt:-mt] + (2.0 / 3.0) * y2[mt:-mt] + (2.0 / 3.0) * dt * dydt
 
         # Remove ghost layers and update gamma
@@ -275,7 +268,7 @@ class Combustor:
                 dt=time step
         """
         # Add ghost layers to the fluid state
-        face_extrapolator = self.viscous_flux_source.face_extrapolator
+        face_extrapolator = self.viscous_flux.face_extrapolator
         mt = face_extrapolator.mt
         state = face_extrapolator.add_ghost_layers(self.state)
         y = self.physics.primitive_to_conservative(state)
@@ -285,21 +278,15 @@ class Combustor:
             self.F = self.thickening(self)
 
             # No gradient in F at boundary
-            self.viscous_flux_source.F = np.pad(self.F, mt, mode="edge")
+            self.viscous_flux.F = np.pad(self.F, mt, mode="edge")
 
         # 1st stage of RK2
-        face_states = face_extrapolator(state)
-        face_states = self.apply_boundary_conditions(face_states)
-        dydt = self.viscous_flux_source(self.t, face_states, self.physics)
+        dydt = self.viscous_flux.source(self.t, y, self.physics, gamma_star)
         y1 = y.copy()
         y1[mt:-mt] += dt * dydt
-        state1 = self.physics.conservative_to_primitive(y1, gamma_star)
-        state1.gamma = gamma_star
 
         # 2nd stage of RK2
-        face_states = face_extrapolator(state1)
-        face_states = self.apply_boundary_conditions(face_states)
-        dydt = self.viscous_flux_source(self.t, face_states, self.physics)
+        dydt = self.viscous_flux.source(self.t, y1, self.physics, gamma_star)
         y = 0.5 * (y[mt:-mt] + y1[mt:-mt] + dt * dydt)
 
         # Remove ghost layers and update gamma
@@ -556,7 +543,7 @@ class Combustor:
         y = self.physics.primitive_to_conservative(self.state)
 
         # Get RHS
-        dydt = self.boundary_layer_source(self.t, self.state, self.physics)
+        dydt = self.boundary_layer.source(self.t, y, self.physics, self.state.gamma)
 
         # Single forward-Euler step
         y += dydt * dt
@@ -576,12 +563,12 @@ class Combustor:
         y = self.physics.primitive_to_conservative(self.state)
 
         # 1st stage of RK2
-        dydt = self.sourceTerms(y, self.state.gamma, self.x, self.t)
+        dydt = self.source_terms(self.t, y, self.state.gamma, self.x)
         y1 = y + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
-        dydt = self.sourceTerms(y1, self.state.gamma, self.x, self.t + dt)
+        dydt = self.source_terms(self.t + dt, y1, self.state.gamma, self.x)
         y = 0.5 * (y + y1 + dt * dydt)
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
 
@@ -667,7 +654,7 @@ class Combustor:
                 self.advance_quasi_1d(dt)
             if self.includeBoundaryLayerTerms:
                 self.advance_boundary_layer(dt)
-            if self.sourceTerms is not None:
+            if self.source_terms is not None:
                 self.advance_source_terms(dt)
             if self.injector is not None:
                 self.advance_injector(dt)

@@ -116,7 +116,9 @@ class BoundaryLayer(RightHandSide):
         )
         return Nu
 
-    def __call__(self, _time: float, state: FluidState, physics: FluidPhysics) -> Array:
+    def source_from_primitives(
+        self, _time: float, state: FluidState, physics: FluidPhysics
+    ) -> Array:
         """Boundary layer contribution to RHS."""
         if self.hydraulic_diameter is None or self.characteristic_length is None:
             msg = "Combustor improperly initialized for boundary layer terms"
