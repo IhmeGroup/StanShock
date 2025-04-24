@@ -57,12 +57,8 @@ class Combustor:
         self.d_outer = (
             None  # Outer diameter of the shock tube as a function of x (needed for BL)
         )
-        self.dlnA_dt = (
-            None  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
-        )
-        self.dlnA_dx = (
-            None  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
-        )
+        self.dlnA_dt = None  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
+        self.dlnA_dx = None  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
         self.include_boundary_layer = False  # flag to include boundary layer terms
         self.wall_temperature = None  # wall temperature (needed for BL)
         self.source_terms: RightHandSide | None = None  # source term function
@@ -88,7 +84,13 @@ class Combustor:
 
         # Initialize the geometry of the domain
         self.geometry = Geometry(
-            self.x, self.h, self.w, self.d_inner, self.d_outer, self.dlnA_dt, self.dlnA_dx
+            self.x,
+            self.h,
+            self.w,
+            self.d_inner,
+            self.d_outer,
+            self.dlnA_dt,
+            self.dlnA_dx,
         )
 
         # set the number of scalars
@@ -199,7 +201,9 @@ class Combustor:
                     or self.boundary_conditions[ibc].lower() == "symmetry"
                 ):
                     uLR[NAssign, iX] = 0.0
-                elif self.verbose and self.boundary_conditions[ibc].lower() != "outflow":
+                elif (
+                    self.verbose and self.boundary_conditions[ibc].lower() != "outflow"
+                ):
                     print(
                         """Unrecognized Boundary Condition. Applying outflow by default.\n"""
                     )
@@ -592,7 +596,10 @@ class Combustor:
                     + f"Max T[K]: {self.physics.get_temperature(self.state).max()}. "
                     + f"Residual(p): {res_p}."
                 )
-            if (self.plot_state_interval > 0) and (iters % self.plot_state_interval == 0):
+            if (self.plot_state_interval > 0) and (
+                iters % self.plot_state_interval == 0
+            ):
                 plot_state(
-                    self, f"figures/anim/test_{iters // self.plot_state_interval:05d}.png"
+                    self,
+                    f"figures/anim/test_{iters // self.plot_state_interval:05d}.png",
                 )
