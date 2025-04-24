@@ -80,13 +80,13 @@ def main(
     # interpolate flame solution
     Y = ss.state.composition
     for iSp in range(gas.n_species):
-        Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
+        Y[:, iSp] = np.interp(ss.geometry.x, flame.grid, flame.Y[iSp, :])
 
     ss.state = FluidState(
         shape=(nX,),
-        density=np.interp(ss.x, flame.grid, flame.density),
-        velocity=np.interp(ss.x, flame.grid, flame.velocity),
-        pressure=flame.P * np.ones(ss.n),
+        density=np.interp(ss.geometry.x, flame.grid, flame.density),
+        velocity=np.interp(ss.geometry.x, flame.grid, flame.velocity),
+        pressure=flame.P * np.ones(ss.geometry.n),
         composition=Y,
     )
     T = ss.state.temperature = ss.physics.get_temperature(ss.state)
@@ -117,7 +117,9 @@ def main(
             label=r"$T/T_\mathrm{F}$",
         )
         T = ss.physics.get_temperature(ss.state)
-        plt.plot((ss.x - flame_center) / flameThickness, T / flame.T[-1], "r--s")
+        plt.plot(
+            (ss.geometry.x - flame_center) / flameThickness, T / flame.T[-1], "r--s"
+        )
         iOH = gas.species_index("OH")
         plt.plot(
             (flame.grid - flame_center) / flameThickness,
@@ -126,7 +128,7 @@ def main(
             label=r"$Y_\mathrm{OH}\times 10$",
         )
         plt.plot(
-            (ss.x - flame_center) / flameThickness,
+            (ss.geometry.x - flame_center) / flameThickness,
             ss.state.mass_fractions[:, iOH] * 10,
             "k--s",
         )
@@ -138,7 +140,7 @@ def main(
             label=r"$Y_\mathrm{O_2}$",
         )
         plt.plot(
-            (ss.x - flame_center) / flameThickness,
+            (ss.geometry.x - flame_center) / flameThickness,
             ss.state.mass_fractions[:, iO2],
             "g--s",
         )
@@ -150,7 +152,7 @@ def main(
             label=r"$Y_\mathrm{H_2}$",
         )
         plt.plot(
-            (ss.x - flame_center) / flameThickness,
+            (ss.geometry.x - flame_center) / flameThickness,
             ss.state.mass_fractions[:, iH2],
             "b--s",
         )
@@ -164,7 +166,7 @@ def main(
             plt.savefig(results_location / "laminarFlame.pdf")
 
     results = {
-        "position": ss.x,
+        "position": ss.geometry.x,
         "temperature": ss.physics.get_temperature(ss.state),
     }
     if results_location is not None:

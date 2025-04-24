@@ -111,7 +111,7 @@ def main(
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
         dlnA_dx=dlnA_dx,
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.x)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()
@@ -136,7 +136,7 @@ def main(
         d_outer=D,
         dlnA_dx=dlnA_dx,
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.x)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.x)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()

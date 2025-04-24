@@ -156,7 +156,7 @@ def main(
         d_outer=d_outer,
         dlnA_dx=dlnA_dx,
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.x)))  # end wall probe
     diagram_settings = [
         ("pressure", [p1 / 101325, p4 / 101325]),
         ("temperature", [T1, 800.0]),
@@ -169,9 +169,9 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssbl.x[1] - ssbl.x[0]
-    dV = A(ssbl.x) * dx
-    VDriver = np.sum(dV[ssbl.x < xShock])
+    dx = ssbl.geometry.x[1] - ssbl.geometry.x[0]
+    dV = A(ssbl.geometry.x) * dx
+    VDriver = np.sum(dV[ssbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
@@ -217,7 +217,7 @@ def main(
         d_outer=d_outer,
         dlnA_dx=dlnA_dx,
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.x)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.x)))  # end wall probe
     ssnbl.xt_diagrams += [
         XTDiagram(ssnbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
@@ -226,9 +226,9 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssnbl.x[1] - ssnbl.x[0]
-    dV = A(ssnbl.x) * dx
-    VDriver = np.sum(dV[ssnbl.x < xShock])
+    dx = ssnbl.geometry.x[1] - ssnbl.geometry.x[0]
+    dV = A(ssnbl.geometry.x) * dx
+    VDriver = np.sum(dV[ssnbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver

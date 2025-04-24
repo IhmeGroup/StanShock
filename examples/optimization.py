@@ -145,8 +145,8 @@ def main(
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
         d_outer=d_outer,
-        d_inner=ss.d_inner,
-        dlnA_dx=ss.dlnA_dx,
+        d_inner=ss.geometry.d_inner,
+        dlnA_dx=ss.geometry.dlnA_dx,
     )
 
     if plot_results:
@@ -158,7 +158,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.x)))  # end wall probe
+    ss.probes.append(Probe(ss, max(ss.geometry.x)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
@@ -169,9 +169,9 @@ def main(
     for diagram in ss.xt_diagrams:
         diagram.plot()
 
-    xInsert = ss.x
-    d_outer_insert = ss.d_outer(ss.x)
-    d_inner_insert = ss.d_inner(ss.x)
+    xInsert = ss.geometry.x
+    d_outer_insert = ss.geometry.d_outer(ss.geometry.x)
+    d_inner_insert = ss.geometry.d_inner(ss.geometry.x)
 
     # recalculate at higher resolution without the insert
     gas1.TPX = T1, p1, "AR:1"
@@ -193,7 +193,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.x)))  # end wall probe
+    ss.probes.append(Probe(ss, max(ss.geometry.x)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()

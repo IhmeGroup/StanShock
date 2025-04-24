@@ -104,11 +104,17 @@ class Combustor:
             msg = "No initialization method selected"
             raise Exception(msg)
         if self.initialization[0].lower() == "constant":
-            self.state = initialize_constant(self, *self.initialization[1:])
+            self.state = initialize_constant(
+                self.geometry, self.physics, *self.initialization[1:]
+            )
         elif self.initialization[0].lower() == "riemann":
-            self.state = initialize_riemann_problem(self, *self.initialization[1:])
+            self.state = initialize_riemann_problem(
+                self.geometry, self.physics, *self.initialization[1:]
+            )
         elif self.initialization[0].lower() == "diffuse_interface":
-            self.state = initialize_diffuse_interface(self, *self.initialization[1:])
+            self.state = initialize_diffuse_interface(
+                self.geometry, self.physics, *self.initialization[1:]
+            )
 
         # Initialize the key physics
         self.inviscid_flux = InviscidFlux(
