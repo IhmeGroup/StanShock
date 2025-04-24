@@ -164,7 +164,6 @@ class JICModel:
         self.c_inj = gas.sound_speed
         self.M_inj = 1.0
         self.mdot_inj = self.rho_inj * self.u_inj * self.A_inj
-
         self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
         self.mdot_inj_unique, self.mdot_inj_unique_idx = np.unique(
             self.mdot_inj, return_index=True
@@ -190,14 +189,15 @@ class JICModel:
 
         # Stoichiometry
         mdot_a = self.rho * self.u * self.A
-        mdot_f = self.n_inj * self.mdot_inj_unique
+        mdot_f = self.n_inj * self.mdot_inj
+        mdot_f_unique = self.n_inj * self.mdot_inj_unique
         self.phi_gl_unique = np.zeros_like(self.mdot_inj_unique)
         self.Z_gl_unique = np.zeros_like(self.mdot_inj_unique)
         for i_m in range(len(self.mdot_inj_unique)):
             self.gas.TDY = (
                 self.T,
                 self.rho,
-                f"O2:{0.233 * mdot_a},N2:{0.767 * mdot_a},{self.fuel}:{mdot_f[i_m]}",
+                f"O2:{0.233 * mdot_a},N2:{0.767 * mdot_a},{self.fuel}:{mdot_f_unique[i_m]}",
             )
             self.phi_gl_unique[i_m] = self.gas.equivalence_ratio(
                 self.fuel, "O2:0.21,N2:0.79"
@@ -205,6 +205,9 @@ class JICModel:
             self.Z_gl_unique[i_m] = self.gas.mixture_fraction(
                 self.fuel, "O2:0.21,N2:0.79"
             )
+        self.mdot_f_interp = interpolate.interp1d(
+            self.t_inj, mdot_f, bounds_error=False, fill_value=0.0
+        )
 
         # Compute the non-dimensional parameters
         self.J = (self.rho_inj * self.u_inj**2) / (

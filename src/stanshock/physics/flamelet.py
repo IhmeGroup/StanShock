@@ -32,11 +32,13 @@ class FPVTable:
     Class to read an FPV table from an HDF5 file and perform lookups.
     """
 
-    def __init__(self, filename):
+    def __init__(self, filename, p_correction=False, T_correction=False):
         """
         Initialize the FPVTable object by reading the HDF5 file.
         """
         self.filename = filename
+        self.p_correction = p_correction
+        self.T_correction = T_correction
         with h5py.File(filename, "r") as f:
             self.P = f["Header"]["Doubles"]["Double_0"].attrs["Value"][0]
             self.Z = f["Coordinates"]["Coor_0"][()]
@@ -130,10 +132,28 @@ class FPVTable:
         aloc = self.lookup("ALOC", Z, Q, L)
         return loc0 * (T / T0) ** aloc
     
+    def get_temperature(self, Z, Q, L, e_sens):
+         """
+         Compute the temperature at the given Z, Q, L and e values.
+         Note: Using sensible energy instead of internal energy because
+         StanShock transports the total non-chemical energy.
+         """
+         T0 = self.lookup("T0", Z, Q, L)
+         e0_sens = self.lookup("E0_SENS", Z, Q, L)
+         gamma0 = self.lookup("GAMMA0", Z, Q, L)
+         ag = self.lookup("AGAMMA", Z, Q, L)
+         R = self.lookup("ROM", Z, Q, L)
+         return T0 + ((gamma0 - 1) / ag) * (np.exp(ag * (e_sens - e0_sens) / R) - 1)
+    
     def get_source_progress_variable_compressibility_factor(self, Z, Q, L, p, T):
         """
         Compute the scaling factor for the progress variable source term at the given Z, Q, L, p and T values.
         """
-        TA = self.lookup("TA", Z, Q, L)
-        T0 = self.lookup("T0", Z, Q, L)
-        return (p / self.P) * np.exp(-TA * ((1 / T) - (1 / T0)))
+        factor = 1.0
+        if self.p_correction:
+            factor *= (p / self.P)
+        if self.T_correction:
+            TA = self.lookup("TA", Z, Q, L)
+            T0 = self.lookup("T0", Z, Q, L)
+            factor *= np.exp(-TA * ((1 / T) - (1 / T0)))
+        return factor

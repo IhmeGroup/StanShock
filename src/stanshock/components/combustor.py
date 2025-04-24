@@ -229,8 +229,9 @@ class Combustor:
             C = Y[:, 1]
             Q = np.zeros_like(self.x)
             L = self.fpv_table.get_normalized_progress_variable(Z, C)
-            R = self.fpv_table.get_specific_gas_constant(Z, Q, L)
-            T = p / (r * R)
+            gamma = self.get_gamma(T, Y)
+            e_sens = p / (r * (gamma - 1.0))
+            T = self.fpv_table.get_temperature(Z, Q, L, e_sens)
         elif self.physics == "FRC":
             T = self.thermoTable.get_temperature(r, p, Y)
         return T
