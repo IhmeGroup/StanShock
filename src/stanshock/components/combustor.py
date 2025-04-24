@@ -41,12 +41,12 @@ class Combustor:
         self.cfl = 1.0  # stability condition
         self.dx = 1.0  # grid spacing
         self.n = n  # grid size
-        self.boundaryConditions = ["outflow", "outflow"]
+        self.boundary_conditions = ["outflow", "outflow"]
         self.x = np.linspace(0.0, self.dx * (self.n - 1), self.n)
         self.F = np.ones(self.n)  # thickening
         self.t = 0.0  # time
         self.verbose = True  # console output switch
-        self.outputEvery = (
+        self.output_every = (
             1  # number of iterations of simulation advancement between logging updates
         )
         self.h = None  # height of the channel
@@ -57,30 +57,30 @@ class Combustor:
         self.d_outer = (
             None  # Outer diameter of the shock tube as a function of x (needed for BL)
         )
-        self.dlnAdt = (
-            None  # area of the shock tube as a function of time (needed for quasi-1D)
+        self.dlnA_dt = (
+            None  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
         )
-        self.dlnAdx = (
-            None  # area of the shock tube as a function of x (needed for quasi-1D)
+        self.dlnA_dx = (
+            None  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
         )
-        self.includeBoundaryLayerTerms = False  # flag to include boundary layer terms
+        self.include_boundary_layer = False  # flag to include boundary layer terms
         self.wall_temperature = None  # wall temperature (needed for BL)
         self.source_terms: RightHandSide | None = None  # source term function
         self.injector = None  # injector model
-        self.fluxFunction = hllc_flux
+        self.flux_function = hllc_flux
         self.initialization = None  # initialization options
         self.probes = []  # list of probe objects
-        self.XTDiagrams = []  # list of XT diagram objects
+        self.xt_diagrams = []  # list of XT diagram objects
         self.skin_friction_coefficient = None  # skin friction functor
-        self.optimizationIteration = 0  # counter to keep track of optimization
+        self.optimization_iteration = 0  # counter to keep track of optimization
         self.physics = physics  # Model handling all fluid property evaluations
         self.reacting = False  # flag to solver about whether to solve source terms
-        self.inReactingRegion = (
+        self.in_reacting_region = (
             lambda _x, _t: True
         )  # the reacting region of the shock tube.
-        self.includeDiffusion = False  # exclude diffusion
+        self.include_diffusion = False  # exclude diffusion
         self.thickening = None  # thickening function
-        self.plotStateInterval = -1  # plot the state every n iterations
+        self.plot_state_interval = -1  # plot the state every n iterations
         # overwrite the default data
         for key, item in kwargs.items():
             if key in self.__dict__:
@@ -88,7 +88,7 @@ class Combustor:
 
         # Initialize the geometry of the domain
         self.geometry = Geometry(
-            self.x, self.h, self.w, self.d_inner, self.d_outer, self.dlnAdt, self.dlnAdx
+            self.x, self.h, self.w, self.d_inner, self.d_outer, self.dlnA_dt, self.dlnA_dx
         )
 
         # set the number of scalars
@@ -112,18 +112,18 @@ class Combustor:
         self.inviscid_flux = InviscidFlux(
             face_extrapolator=FifthOrderWeno(),
             boundary_conditions=self.apply_boundary_conditions,
-            riemann_solver=self.fluxFunction,
+            riemann_solver=self.flux_function,
             dx=self.geometry.dx,
         )
 
-        if self.includeDiffusion:
+        if self.include_diffusion:
             self.viscous_flux = ViscousFlux(
                 face_extrapolator=FirstOrder(),
                 boundary_conditions=self.apply_boundary_conditions,
                 dx=self.geometry.dx,
             )
 
-        if self.includeBoundaryLayerTerms:
+        if self.include_boundary_layer:
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
                 hydraulic_diameter=self.geometry.hydraulic_diameter,
@@ -148,7 +148,7 @@ class Combustor:
                 timestep
         """
         local_timescale = self.geometry.dx / self.get_wave_speed()
-        if self.includeDiffusion:
+        if self.include_diffusion:
             mu = self.physics.get_mu(self.state)
             nu = mu / self.state.density
             alpha = self.physics.get_thermal_diffusivity(self.state) * self.F
@@ -193,26 +193,26 @@ class Combustor:
             uLR[NAssign, iX] = uLR[NUse, iX]
             pLR[NAssign, iX] = pLR[NUse, iX]
             YLR[NAssign, iX, :] = YLR[NUse, iX, :]
-            if type(self.boundaryConditions[ibc]) is str:
+            if type(self.boundary_conditions[ibc]) is str:
                 if (
-                    self.boundaryConditions[ibc].lower() == "reflecting"
-                    or self.boundaryConditions[ibc].lower() == "symmetry"
+                    self.boundary_conditions[ibc].lower() == "reflecting"
+                    or self.boundary_conditions[ibc].lower() == "symmetry"
                 ):
                     uLR[NAssign, iX] = 0.0
-                elif self.verbose and self.boundaryConditions[ibc].lower() != "outflow":
+                elif self.verbose and self.boundary_conditions[ibc].lower() != "outflow":
                     print(
                         """Unrecognized Boundary Condition. Applying outflow by default.\n"""
                     )
             else:
                 # assign Dirichlet conditions to (r,u,p,Y)
-                if self.boundaryConditions[ibc][0] is not None:
-                    rLR[NAssign, iX] = self.boundaryConditions[ibc][0]
-                if self.boundaryConditions[ibc][1] is not None:
-                    uLR[NAssign, iX] = self.boundaryConditions[ibc][1]
-                if self.boundaryConditions[ibc][2] is not None:
-                    pLR[NAssign, iX] = self.boundaryConditions[ibc][2]
-                if self.boundaryConditions[ibc][3] is not None:
-                    YLR[NAssign, iX, :] = self.boundaryConditions[ibc][3]
+                if self.boundary_conditions[ibc][0] is not None:
+                    rLR[NAssign, iX] = self.boundary_conditions[ibc][0]
+                if self.boundary_conditions[ibc][1] is not None:
+                    uLR[NAssign, iX] = self.boundary_conditions[ibc][1]
+                if self.boundary_conditions[ibc][2] is not None:
+                    pLR[NAssign, iX] = self.boundary_conditions[ibc][2]
+                if self.boundary_conditions[ibc][3] is not None:
+                    YLR[NAssign, iX, :] = self.boundary_conditions[ibc][3]
         return face_states
 
     def advance_advection(self, dt):
@@ -399,7 +399,7 @@ class Combustor:
         indices = [
             k
             for k in range(self.geometry.n)
-            if self.inReactingRegion(self.geometry.x[k], self.t)
+            if self.in_reacting_region(self.geometry.x[k], self.t)
         ]
         state_temp = FluidState(
             shape=(len(indices),),
@@ -442,7 +442,7 @@ class Combustor:
     def advance_quasi_1d(self, dt):
         """
         This method advances the quasi-1D terms used to model area changes in
-        the shock tube. The client must supply the functions dlnAdt and dlnAdx
+        the shock tube. The client must supply the functions dlnA_dt and dlnA_dx
         to the Combustor object.
         """
         y = self.physics.primitive_to_conservative(self.state)
@@ -545,7 +545,7 @@ class Combustor:
         This method updates all the XT Diagrams to the current value.
         """
         # update diagrams
-        for XTDiagram in self.XTDiagrams:
+        for XTDiagram in self.xt_diagrams:
             if iters % (XTDiagram.skipSteps + 1) == 0:
                 XTDiagram.update(self)
 
@@ -570,11 +570,11 @@ class Combustor:
                 self.advance_advection(dt)
                 self.advance_chemistry(dt / 2.0)
             # advance other terms
-            if self.includeDiffusion:
+            if self.include_diffusion:
                 self.advance_diffusion(dt)
-            if self.dlnAdt is not None or self.dlnAdx is not None:
+            if self.dlnA_dt is not None or self.dlnA_dx is not None:
                 self.advance_quasi_1d(dt)
-            if self.includeBoundaryLayerTerms:
+            if self.include_boundary_layer:
                 self.advance_boundary_layer(dt)
             if self.source_terms is not None:
                 self.advance_source_terms(dt)
@@ -586,13 +586,13 @@ class Combustor:
             self.update_XT_diagrams(iters)
             iters += 1
             res_p = np.linalg.norm(self.state.pressure - p_old)
-            if self.verbose and iters % self.outputEvery == 0:
+            if self.verbose and iters % self.output_every == 0:
                 print(
                     f"Iteration: {iters}. Current time: {self.t}. Time step: {dt:e}. "
                     + f"Max T[K]: {self.physics.get_temperature(self.state).max()}. "
                     + f"Residual(p): {res_p}."
                 )
-            if (self.plotStateInterval > 0) and (iters % self.plotStateInterval == 0):
+            if (self.plot_state_interval > 0) and (iters % self.plot_state_interval == 0):
                 plot_state(
-                    self, f"figures/anim/test_{iters // self.plotStateInterval:05d}.png"
+                    self, f"figures/anim/test_{iters // self.plot_state_interval:05d}.png"
                 )

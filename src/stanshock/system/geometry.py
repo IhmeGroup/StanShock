@@ -16,8 +16,8 @@ class Geometry(RightHandSide):
         w=None,
         d_inner=None,
         d_outer=None,
-        dlnAdt=None,
-        dlnAdx=None,
+        dlnA_dt=None,
+        dlnA_dx=None,
     ) -> None:
         self.x = x
         self.n = len(self.x)
@@ -27,8 +27,8 @@ class Geometry(RightHandSide):
         self.w = w
         self.d_inner = d_inner
         self.d_outer = d_outer
-        self.dlnAdt = dlnAdt
-        self.dlnAdx = dlnAdx
+        self.dlnA_dt = dlnA_dt
+        self.dlnA_dx = dlnA_dx
 
         if self.h is not None and self.w is not None:
             self.hydraulic_diameter = 2 * self.h * self.w / (self.h + self.w)
@@ -61,10 +61,10 @@ class Geometry(RightHandSide):
         # Divide domain between explicit and implicit source terms
         idx_explicit = np.arange(self.x.shape[0])
         idx_implicit = []
-        if self.dlnAdt is not None:
-            dlnAdt = self.dlnAdt(self.x, time)
-            idx_implicit = np.where(dlnAdt != 0.0)
-            idx_explicit = np.where(dlnAdt == 0.0)
+        if self.dlnA_dt is not None:
+            dlnA_dt = self.dlnA_dt(self.x, time)
+            idx_implicit = np.where(dlnA_dt != 0.0)
+            idx_explicit = np.where(dlnA_dt == 0.0)
 
         # Integrate fast terms implicitly
         rhs = np.zeros(state_array[self.idx_locations, self.idx_source_terms].shape)
@@ -93,17 +93,17 @@ class Geometry(RightHandSide):
         """Area change contributions to RHS."""
         rhs = np.zeros((idx.shape[0], 3))
 
-        if self.dlnAdt is not None:
-            dlnAdt = self.dlnAdt(self.x, time)[idx]
-            rhs -= state_array[idx, :3] * dlnAdt
+        if self.dlnA_dt is not None:
+            dlnA_dt = self.dlnA_dt(self.x, time)[idx]
+            rhs -= state_array[idx, :3] * dlnA_dt
 
-        if self.dlnAdx is not None:
-            dlnAdx = self.dlnAdx(self.x, time)[idx]
-            rhs[:, 0] -= state_array[idx, 1] * dlnAdx
-            rhs[:, 1] -= (state_array[idx, 1] ** 2.0 / state_array[idx, 0]) * dlnAdx
+        if self.dlnA_dx is not None:
+            dlnA_dx = self.dlnA_dx(self.x, time)[idx]
+            rhs[:, 0] -= state_array[idx, 1] * dlnA_dx
+            rhs[:, 1] -= (state_array[idx, 1] ** 2.0 / state_array[idx, 0]) * dlnA_dx
             rhs[:, 2] -= (
                 state.velocity[idx] * (state_array[idx, 2] + state.pressure[idx])
-            ) * dlnAdx
+            ) * dlnA_dx
 
         return rhs
 
@@ -116,16 +116,16 @@ class Geometry(RightHandSide):
         rhs = np.zeros(3)
 
         # create quasi-1D right hand side
-        if self.dlnAdt is not None:
-            dlnAdt = self.dlnAdt([x], time)[0]
-            rhs[0] -= r * dlnAdt
-            rhs[1] -= ru * dlnAdt
-            rhs[2] -= E * dlnAdt
+        if self.dlnA_dt is not None:
+            dlnA_dt = self.dlnA_dt([x], time)[0]
+            rhs[0] -= r * dlnA_dt
+            rhs[1] -= ru * dlnA_dt
+            rhs[2] -= E * dlnA_dt
 
-        if self.dlnAdx is not None:
-            dlnAdx = self.dlnAdx([x], time)[0]
-            rhs[0] -= ru * dlnAdx
-            rhs[1] -= (ru**2.0 / r) * dlnAdx
-            rhs[2] -= (ru / r * (E + p)) * dlnAdx
+        if self.dlnA_dx is not None:
+            dlnA_dx = self.dlnA_dx([x], time)[0]
+            rhs[0] -= ru * dlnA_dx
+            rhs[1] -= (ru**2.0 / r) * dlnA_dx
+            rhs[2] -= (ru / r * (E + p)) * dlnA_dx
 
         return rhs

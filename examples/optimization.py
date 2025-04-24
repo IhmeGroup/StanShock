@@ -50,26 +50,26 @@ def main(
     Delta = 10 * (xUpper - xLower) / float(nXFine)
     x = np.linspace(xLower, xUpper, nXCoarse)
 
-    def DInner(x):
+    def d_inner(x):
         return np.zeros_like(x)
 
-    def dDInnerdx(x):
+    def dd_inner_dx(x):
         return np.zeros_like(x)
 
-    def DOuter(x):
+    def d_outer(x):
         return smoothing_function(x, xShock, Delta, DDriver, DDriven)
 
-    def dDOuterdx(x):
+    def dd_outer_dx(x):
         return smoothing_function_gradient(x, xShock, Delta, DDriver, DDriven)
 
     def A(x):
-        return np.pi / 4.0 * (DOuter(x) ** 2.0 - DInner(x) ** 2.0)
+        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
 
-    def dAdx(x):
-        return np.pi / 2.0 * (DOuter(x) * dDOuterdx(x) - DInner(x) * dDInnerdx(x))
+    def dA_dx(x):
+        return np.pi / 2.0 * (d_outer(x) * dd_outer_dx(x) - d_inner(x) * dd_inner_dx(x))
 
-    def dlnAdx(x, t):
-        return dAdx(x) / A(x)
+    def dlnA_dx(x, t):
+        return dA_dx(x) / A(x)
 
     # compute the gas dynamics
     def res(Ms1):
@@ -102,7 +102,7 @@ def main(
     gas4.TPX = T4, p4, "HE:1"
 
     # set up solver parameters
-    boundaryConditions = ["reflecting", "reflecting"]
+    boundary_conditions = ["reflecting", "reflecting"]
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
@@ -111,13 +111,13 @@ def main(
         x=x,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
-        boundaryConditions=boundaryConditions,
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
-        outputEvery=100,
-        includeBoundaryLayerTerms=True,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
-        DOuter=DOuter,
-        dlnAdx=dlnAdx,
+        output_every=100,
+        include_boundary_layer=True,
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
+        d_outer=d_outer,
+        dlnA_dx=dlnA_dx,
     )
 
     # Solve
@@ -139,14 +139,14 @@ def main(
         x=x,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
-        boundaryConditions=boundaryConditions,
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
-        outputEvery=100,
-        includeBoundaryLayerTerms=True,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
-        DOuter=DOuter,
-        DInner=ss.DInner,
-        dlnAdx=ss.dlnAdx,
+        output_every=100,
+        include_boundary_layer=True,
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
+        d_outer=d_outer,
+        d_inner=ss.d_inner,
+        dlnA_dx=ss.dlnA_dx,
     )
 
     if plot_results:
@@ -154,7 +154,7 @@ def main(
             ("pressure", [0.5, 25]),
             ("temperature", [200.0, 1800.0]),
         ]
-        ss.XTDiagrams += [
+        ss.xt_diagrams += [
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
@@ -166,12 +166,12 @@ def main(
     pInsert = np.array(ss.probes[0].p)
     tInsert = np.array(ss.probes[0].t)
 
-    for diagram in ss.XTDiagrams:
+    for diagram in ss.xt_diagrams:
         diagram.plot()
 
     xInsert = ss.x
-    DOuterInsert = ss.DOuter(ss.x)
-    DInnerInsert = ss.DInner(ss.x)
+    d_outer_insert = ss.d_outer(ss.x)
+    d_inner_insert = ss.d_inner(ss.x)
 
     # recalculate at higher resolution without the insert
     gas1.TPX = T1, p1, "AR:1"
@@ -180,16 +180,16 @@ def main(
         x=x,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
-        boundaryConditions=boundaryConditions,
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
-        outputEvery=100,
-        includeBoundaryLayerTerms=True,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
-        DOuter=DOuter,
-        dlnAdx=dlnAdx,
+        output_every=100,
+        include_boundary_layer=True,
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
+        d_outer=d_outer,
+        dlnA_dx=dlnA_dx,
     )
     if plot_results:
-        ss.XTDiagrams += [
+        ss.xt_diagrams += [
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
@@ -202,7 +202,7 @@ def main(
     tNoInsert = np.array(ss.probes[0].t)
     # plot
     if plot_results:
-        for diagram in ss.XTDiagrams:
+        for diagram in ss.xt_diagrams:
             diagram.plot()
 
         plt.figure()
@@ -216,8 +216,8 @@ def main(
         plt.tight_layout()
 
         plt.figure()
-        plt.plot(xInsert, DOuterInsert, "k", label=r"$D_\mathrm{o}$")
-        plt.plot(xInsert, DInnerInsert, "r", label=r"$D_\mathrm{i}$")
+        plt.plot(xInsert, d_outer_insert, "k", label=r"$D_\mathrm{o}$")
+        plt.plot(xInsert, d_inner_insert, "r", label=r"$D_\mathrm{i}$")
         plt.xlabel(r"$x\ [\mathrm{m}]$")
         plt.ylabel(r"$D\ [\mathrm{m}]$")
         plt.legend(loc="best")
@@ -228,8 +228,8 @@ def main(
     results = {
         "pressure_with_insert": pInsert,
         "pressure_without_insert": pNoInsert,
-        "insert_diameter": DInnerInsert,
-        "shock_tube_diameter": DOuterInsert,
+        "insert_diameter": d_inner_insert,
+        "shock_tube_diameter": d_outer_insert,
         "position": xInsert,
         "time_with_insert": tInsert,
         "time_without_insert": tNoInsert,

@@ -55,7 +55,7 @@ def main(
     flame_center = flame.grid[np.argmax(np.gradient(flame.T, flame.grid))]
     L = flame.grid[-1] - flame.grid[0]
     xUpper, xLower = flame_center + L * f, flame_center - L * f
-    boundaryConditions = (
+    boundary_conditions = (
         (gasUnburned.density, uUnburned, None, gasUnburned.Y),
         (None, None, gasBurned.P, None),
     )
@@ -70,11 +70,11 @@ def main(
         dx=(xUpper - xLower) / (nX - 1),
         initialization=("Riemann", unburnedState, burnedState, flame_center),
         physics=physics,
-        boundaryConditions=boundaryConditions,
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
         reacting=True,
-        includeDiffusion=True,
-        outputEvery=10,
+        include_diffusion=True,
+        output_every=10,
     )
 
     # interpolate flame solution

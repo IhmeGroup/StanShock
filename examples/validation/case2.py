@@ -77,7 +77,7 @@ def main(
         diameter[x > xShock] = DDriven
         return diameter
 
-    def dDdx(x):
+    def dD_dx(x):
         dDiameterdx = np.ones(len(x)) * (DeltaD / DeltaX)
         dDiameterdx[x < (xShock - DeltaX)] = 0.0
         dDiameterdx[x > xShock] = 0.0
@@ -86,15 +86,15 @@ def main(
     def A(x):
         return np.pi / 4.0 * D(x) ** 2.0
 
-    def dAdx(x):
-        return np.pi / 2.0 * D(x) * dDdx(x)
+    def dA_dx(x):
+        return np.pi / 2.0 * D(x) * dD_dx(x)
 
-    def dlnAdx(x, t):
-        return dAdx(x) / A(x)
+    def dlnA_dx(x, t):
+        return dA_dx(x) / A(x)
 
     # set up solver parameters
     print("Solving with boundary layer terms")
-    boundaryConditions = ["reflecting", "reflecting"]
+    boundary_conditions = ["reflecting", "reflecting"]
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
@@ -104,13 +104,13 @@ def main(
         x=x,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
-        boundaryConditions=boundaryConditions,
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
-        outputEvery=100,
-        includeBoundaryLayerTerms=True,
+        output_every=100,
+        include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
         d_outer=D,
-        dlnAdx=dlnAdx,
+        dlnA_dx=dlnA_dx,
     )
     ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe
 
@@ -122,7 +122,7 @@ def main(
 
     # without  boundary layer model
     print("Solving without boundary layer model")
-    boundaryConditions = ["reflecting", "reflecting"]
+    boundary_conditions = ["reflecting", "reflecting"]
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
@@ -130,12 +130,12 @@ def main(
         x=x,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
-        boundaryConditions=boundaryConditions,
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
-        outputEvery=100,
-        includeBoundaryLayerTerms=False,
+        output_every=100,
+        include_boundary_layer=False,
         d_outer=D,
-        dlnAdx=dlnAdx,
+        dlnA_dx=dlnA_dx,
     )
     ssnbl.probes.append(Probe(ssnbl, max(ssnbl.x)))  # end wall probe
 

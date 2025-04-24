@@ -93,9 +93,9 @@ class BoundaryLayer(RightHandSide):
         Nu[laminarIndices] = 3.657  # from the analytical solution
 
         # low turbulent portion of the flow (accounts for isothermal wall)
-        lowTurublentIndices = np.logical_and(Re > ReCrit, Re <= ReLowTurbulent)
-        ReLT, PrLT = Re[lowTurublentIndices], Pr[lowTurublentIndices]
-        Nu[lowTurublentIndices] = (
+        lowTurbulentIndices = np.logical_and(Re > ReCrit, Re <= ReLowTurbulent)
+        ReLT, PrLT = Re[lowTurbulentIndices], Pr[lowTurbulentIndices]
+        Nu[lowTurbulentIndices] = (
             0.021 * PrLT**0.5 * ReLT**0.8
         )  # empircal correlation for isothermal case
 
