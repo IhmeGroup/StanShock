@@ -104,6 +104,9 @@ def main(
 
     # plot setup
     if plot_results:
+        T = ss.physics.get_temperature(ss.state)
+        state = ss.physics.set_state(ss.state)
+
         plt.close("all")
         font = {"family": "serif", "serif": ["computer modern roman"]}
         plt.rc("font", **font)
@@ -116,7 +119,6 @@ def main(
             "r",
             label=r"$T/T_\mathrm{F}$",
         )
-        T = ss.physics.get_temperature(ss.state)
         plt.plot(
             (ss.geometry.x - flame_center) / flameThickness, T / flame.T[-1], "r--s"
         )
@@ -129,7 +131,7 @@ def main(
         )
         plt.plot(
             (ss.geometry.x - flame_center) / flameThickness,
-            ss.state.mass_fractions[:, iOH] * 10,
+            state.mass_fractions[:, iOH] * 10,
             "k--s",
         )
         iO2 = gas.species_index("O2")
@@ -141,7 +143,7 @@ def main(
         )
         plt.plot(
             (ss.geometry.x - flame_center) / flameThickness,
-            ss.state.mass_fractions[:, iO2],
+            state.mass_fractions[:, iO2],
             "g--s",
         )
         iH2 = gas.species_index("H2")
@@ -153,7 +155,7 @@ def main(
         )
         plt.plot(
             (ss.geometry.x - flame_center) / flameThickness,
-            ss.state.mass_fractions[:, iH2],
+            state.mass_fractions[:, iH2],
             "b--s",
         )
         plt.xlabel(r"$x/\delta_\mathrm{F}$")
@@ -167,7 +169,7 @@ def main(
 
     results = {
         "position": ss.geometry.x,
-        "temperature": ss.physics.get_temperature(ss.state),
+        "temperature": T,
     }
     if results_location is not None:
         results_location = Path(results_location)
