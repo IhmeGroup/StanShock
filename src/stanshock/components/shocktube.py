@@ -73,15 +73,16 @@ class ShockTube(Combustor):
         )  # RBF is the gaussian correlation
 
         # Check for boundary layer terms
-        if not self.includeBoundaryLayerTerms:
-            self.includeBoundaryLayerTerms = True
+        if not self.include_boundary_layer:
+            self.include_boundary_layer = True
             if self.verbose:
                 print("WARNING: Boundary Layer Terms Included")
 
+        geometry = self.geometry
         msg = None
-        if self.DOuter is None or self.dlnAdx is None:
-            msg = "Driver optimization must have DOuter and dlnAdx defined"
-        if self.DInner is not None:
+        if geometry.d_outer is None or geometry.dlnA_dx is None:
+            msg = "Driver optimization must have d_outer and dlnA_dx defined"
+        if geometry.d_inner is not None:
             msg = "Driver optimization cannot have an inner diameter"
         if self.state.pressure[0] < self.state.pressure[-1]:
             msg = "Optimization routine requires the driver gas to be on the left."
@@ -114,31 +115,31 @@ class ShockTube(Combustor):
                 (-2.0 * (g1 - 1.0) + Ms1**2.0 * (3.0 * g1 - 1.0))
                 / (2.0 + Ms1**2.0 * (g1 - 1.0))
             )
-            p5 = p5op1 * self.p[-1]
+            p5 = p5op1 * self.state.pressure[-1]
         # Get initial state for reinitialization
         rInitial = np.copy(self.state.density)
         uInitial = np.copy(self.state.velocity)
         pInitial = np.copy(self.state.pressure)
         YInitial = np.copy(self.state.composition)
         gammaInitial = np.copy(self.state.gamma)
-        dlnAdxInitial = self.dlnAdx
+        dlnA_dx_initial = geometry.dlnA_dx
 
-        def dDOuterdx(x):
+        def dd_outerdx(x):
             return (
-                self.DOuter(x) / 2.0 * dlnAdxInitial(x, 0.0)
+                geometry.d_outer(x) / 2.0 * dlnA_dx_initial(x, 0.0)
             )  # assume temporally constant area
 
         # Determine geometry from pressure
         dpAbs = np.abs(pInitial[1:] - pInitial[:-1])
-        xShock = max(zip(dpAbs, self.x[1:]))[
+        xShock = max(zip(dpAbs, geometry.x[1:]))[
             1
         ]  # maximum pressure gradient corresponds to shock
-        (xMin, xMax, probeLocation) = (self.x[0], xShock, self.x[-1])
+        (xMin, xMax, probeLocation) = (geometry.x[0], xShock, geometry.x[-1])
         LMax = xMax - xMin  # maximum length of constrained optimization
         DMax = min(
-            self.DOuter(np.linspace(xMin, xMax))
+            geometry.d_outer(np.linspace(xMin, xMax))
         )  # maximum diameter of constrained optimization
-        smoothingLength = 10 * self.dx
+        smoothingLength = 10 * geometry.dx
         if LMax <= smoothingLength:
             msg = "This calculation will likely be unstable. Refine the grid"
             raise Exception(msg)
@@ -181,10 +182,10 @@ class ShockTube(Combustor):
                 dAInsdx[inds] = -AIns0 / (xIns1 - xIns0)
                 return dAInsdx
 
-            def DInner(x):
+            def d_inner(x):
                 return np.sqrt(4.0 * AInsert(x) / np.pi)
 
-            def dDInnerdx(x):
+            def dd_innerdx(x):
                 dDIndx = np.zeros_like(x)
                 inds = np.logical_and(x >= xIns0, x < xIns1)
                 dDIndx[inds] = (
@@ -195,20 +196,20 @@ class ShockTube(Combustor):
                 return dDIndx
 
             def A(x):
-                return np.pi / 4.0 * (self.DOuter(x) ** 2.0 - DInner(x) ** 2.0)
+                return np.pi / 4.0 * (geometry.d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
 
-            def dAdx(x):
+            def dA_dx(x):
                 return (
                     np.pi
                     / 2.0
-                    * (self.DOuter(x) * dDOuterdx(x) - DInner(x) * dDInnerdx(x))
+                    * (geometry.d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
                 )
 
             # initialize (may be at a previous state in the optimization)
-            self.dlnAdx = lambda x, _t: dAdx(x) / A(x)
-            self.DInner = DInner
+            geometry.dlnA_dx = lambda x, _t: dA_dx(x) / A(x)
+            geometry.d_inner = d_inner
             self.state = FluidState(
-                shape=self.n,
+                shape=(geometry.n,),
                 density=np.copy(rInitial),
                 velocity=np.copy(uInitial),
                 pressure=np.copy(pInitial),
@@ -222,11 +223,11 @@ class ShockTube(Combustor):
             # solve
             if self.verbose:
                 print(
-                    f"Solving Optimization. Iteration={self.optimizationIteration}, L={LInsert:.3f}, D={DInsert:.3f}, alpha={alpha:.3f}"
+                    f"Solving Optimization. Iteration={self.optimization_iteration}, L={LInsert:.3f}, D={DInsert:.3f}, alpha={alpha:.3f}"
                 )
             self.t = 0.0
             self.advance_simulation(tFinal)
-            self.optimizationIteration += 1
+            self.optimization_iteration += 1
             # return
             dlnpdt, p5Act = self.pressure_rise(
                 np.array(self.probes[0].t), np.array(self.probes[0].p)
@@ -289,7 +290,7 @@ class ShockTube(Combustor):
         maxImprovement = minImprovement + 1.0
         while (
             ymin > eps
-            and self.optimizationIteration < maxIter
+            and self.optimization_iteration < maxIter
             and maxImprovement > minImprovement
         ):
             # fit the GP
@@ -322,7 +323,7 @@ class ShockTube(Combustor):
                 print(
                     f"Minimum of current iteration: {ymin:f}. Expected improvement of the next iteration: {maxImprovement:f}"
                 )
-        if self.optimizationIteration >= maxIter and self.verbose:
+        if self.optimization_iteration >= maxIter and self.verbose:
             print("No minimum found within tolerance.")
         elif maxImprovement <= minImprovement and self.verbose:
             print(

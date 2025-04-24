@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import cantera as ct
 import numpy as np
 
-from stanshock.physics.fluid_base import FluidState
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.backend import Array
+from stanshock.system.geometry import Geometry
 
 
-def smoothing_function(x, xShock, Delta, phiLeft, phiRight):
+def smoothing_function(
+    x: Array,
+    xShock: float,
+    Delta: float,
+    phiLeft: float,
+    phiRight: float,
+) -> Array:
     """
     This helper function returns the function of the variable smoothed
     over the interface
@@ -22,7 +31,13 @@ def smoothing_function(x, xShock, Delta, phiLeft, phiRight):
     return phi
 
 
-def smoothing_function_gradient(x, xShock, Delta, phiLeft, phiRight):
+def smoothing_function_gradient(
+    x: Array,
+    xShock: float,
+    Delta: float,
+    phiLeft: float,
+    phiRight: float,
+) -> Array:
     """
     This helper function returns the derivative of the smoothing function
         inputs:
@@ -38,21 +53,26 @@ def smoothing_function_gradient(x, xShock, Delta, phiLeft, phiRight):
     return dphidx
 
 
-def initialize_constant(domain, gas, u) -> FluidState:
+def initialize_constant(
+    geometry: Geometry,
+    physics: FluidPhysics,
+    gas: ct.Solution,
+    u: float,
+) -> FluidState:
     """
     This helper function initializes a constant state
         inputs:
             gas = Cantera solution object at the desired thermodynamic state
             u = velocity
     """
-    n = domain.n
+    n = geometry.n
     ones = np.ones(n)
 
     # Initialize state
-    composition = domain.physics.get_composition(gas.Y[None, :])
+    composition = physics.get_composition(gas.Y[None, :])
 
     return FluidState(
-        shape=n,
+        shape=(n,),
         density=ones * gas.density,
         pressure=ones * gas.P,
         gamma=ones * (gas.cp / gas.cv),
@@ -62,7 +82,11 @@ def initialize_constant(domain, gas, u) -> FluidState:
 
 
 def initialize_riemann_problem(
-    domain, left_state, right_state, shock_location
+    geometry: Geometry,
+    physics: FluidPhysics,
+    left_state: tuple[ct.Solution, float],
+    right_state: tuple[ct.Solution, float],
+    shock_location: float,
 ) -> FluidState:
     """
     This helper function initializes a Riemann Problem
@@ -75,7 +99,7 @@ def initialize_riemann_problem(
                           (canteraSolution,u)
             shock_location = x-location of the shock within the domain
     """
-    gas = domain.physics.gas
+    gas = physics.gas
     left_gas, u_left = left_state
     right_gas, u_right = right_state
     if (
@@ -86,12 +110,12 @@ def initialize_riemann_problem(
         raise Exception(msg)
 
     # Initialize with left state
-    state = initialize_constant(domain, left_gas, u_left)
+    state = initialize_constant(geometry, physics, left_gas, u_left)
 
     # Override with right state
-    state_right = initialize_constant(domain, right_gas, u_right)
+    state_right = initialize_constant(geometry, physics, right_gas, u_right)
 
-    index = np.where(domain.x >= shock_location)[0]
+    index = np.where(geometry.x >= shock_location)[0]
     state.density[index] = state_right.density[index]
     state.velocity[index] = state_right.velocity[index]
     state.pressure[index] = state_right.pressure[index]
@@ -102,7 +126,12 @@ def initialize_riemann_problem(
 
 
 def initialize_diffuse_interface(
-    domain, left_state, right_state, shock_location, delta_smoothing
+    geometry: Geometry,
+    physics: FluidPhysics,
+    left_state: tuple[ct.Solution, float],
+    right_state: tuple[ct.Solution, float],
+    shock_location: float,
+    delta_smoothing: float,
 ) -> FluidState:
     """
     This helper function initializes an interface smoothed over a distance
@@ -116,7 +145,7 @@ def initialize_diffuse_interface(
             shock_location = x-location of the shock within the domain
             delta_smoothing = distance over which the interface is smoothed linearly
     """
-    gas = domain.physics.gas
+    gas = physics.gas
     left_gas, u_left = left_state
     right_gas, u_right = right_state
     if (
@@ -128,27 +157,27 @@ def initialize_diffuse_interface(
 
     gamma_left = left_gas.cp / left_gas.cv
     gamma_right = right_gas.cp / right_gas.cv
-    composition_left = domain.physics.get_composition(left_gas.Y)
-    composition_right = domain.physics.get_composition(right_gas.Y)
+    composition_left = physics.get_composition(left_gas.Y)
+    composition_right = physics.get_composition(right_gas.Y)
 
     # Smooth transition between left and right states
     r = smoothing_function(
-        domain.x, shock_location, delta_smoothing, left_gas.density, right_gas.density
+        geometry.x, shock_location, delta_smoothing, left_gas.density, right_gas.density
     )
-    domain.u = smoothing_function(
-        domain.x, shock_location, delta_smoothing, u_left, u_right
+    geometry.u = smoothing_function(
+        geometry.x, shock_location, delta_smoothing, u_left, u_right
     )
     p = smoothing_function(
-        domain.x, shock_location, delta_smoothing, left_gas.P, right_gas.P
+        geometry.x, shock_location, delta_smoothing, left_gas.P, right_gas.P
     )
     gamma = smoothing_function(
-        domain.x, shock_location, delta_smoothing, gamma_left, gamma_right
+        geometry.x, shock_location, delta_smoothing, gamma_left, gamma_right
     )
 
-    composition = np.zeros((domain.n, domain.n_scalars))
-    for kSp in range(domain.n_scalars):
+    composition = np.zeros((geometry.n, geometry.n_scalars))
+    for kSp in range(geometry.n_scalars):
         composition[:, kSp] = smoothing_function(
-            domain.x,
+            geometry.x,
             shock_location,
             delta_smoothing,
             composition_left[:, kSp],
@@ -156,7 +185,7 @@ def initialize_diffuse_interface(
         )
 
     return FluidState(
-        shape=domain.n,
+        shape=(geometry.n,),
         density=r,
         pressure=p,
         gamma=gamma,
