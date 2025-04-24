@@ -42,10 +42,10 @@ def main(
     # DDriver = 4.5 * 0.0254
     LDriver = 142.0 * 0.0254
     LDriven = 9.73
-    DOuterInsertBack = 3.375 * 0.0254
-    DOuterInsertFront = 1.25 * 0.0254
+    d_outerInsertBack = 3.375 * 0.0254
+    d_outerInsertFront = 1.25 * 0.0254
     LOuterInsert = 102.0 * 0.0254
-    DInnerInsert = 0.625 * 0.0254
+    d_innerInsert = 0.625 * 0.0254
     LInnerInsert = 117.0 * 0.0254
 
     # Set up gasses and determine the initial pressures
@@ -74,62 +74,62 @@ def main(
     xShock = 0.0
     x = np.linspace(xLower, xUpper, nX)
     # DeltaD = DDriven - DDriver
-    # dDOuterInsertdx = (DOuterInsertFront - DOuterInsertBack) / LOuterInsert
+    # dd_outerInsertdx = (d_outerInsertFront - d_outerInsertBack) / LOuterInsert
     DeltaSmoothingFunction = (xUpper - xLower) / float(nX) * 10.0
 
-    def DOuter(x):
+    def d_outer(x):
         return DDriven * np.ones(nX)
 
-    def DInner(x):
+    def d_inner(x):
         diameter = np.zeros(nX)
         diameter += smoothing_function(
-            x, xLower + LInnerInsert, DeltaSmoothingFunction, DInnerInsert, 0.0
+            x, xLower + LInnerInsert, DeltaSmoothingFunction, d_innerInsert, 0.0
         )
         diameter += smoothing_function(
             x,
             xLower + LOuterInsert,
             DeltaSmoothingFunction,
-            DOuterInsertFront - DInnerInsert,
+            d_outerInsertFront - d_innerInsert,
             0.0,
         )
         diameter += smoothing_function(
             x,
             xLower + LOuterInsert / 2.0,
             LOuterInsert,
-            DOuterInsertBack - DOuterInsertFront,
+            d_outerInsertBack - d_outerInsertFront,
             0.0,
         )
         return diameter
 
-    def dDOuterdx(x):
+    def dd_outerdx(x):
         return np.zeros(nX)
 
-    def dDInnerdx(x):
+    def dd_innerdx(x):
         dDiameterdx = np.zeros(nX)
         dDiameterdx += smoothing_function_gradient(
-            x, xLower + LInnerInsert, DeltaSmoothingFunction, DInnerInsert, 0.0
+            x, xLower + LInnerInsert, DeltaSmoothingFunction, d_innerInsert, 0.0
         )
         dDiameterdx += smoothing_function_gradient(
             x,
             xLower + LOuterInsert,
             DeltaSmoothingFunction,
-            DOuterInsertFront - DInnerInsert,
+            d_outerInsertFront - d_innerInsert,
             0.0,
         )
         dDiameterdx += smoothing_function_gradient(
             x,
             xLower + LOuterInsert / 2.0,
             LOuterInsert,
-            DOuterInsertBack - DOuterInsertFront,
+            d_outerInsertBack - d_outerInsertFront,
             0.0,
         )
         return dDiameterdx
 
     def A(x):
-        return np.pi / 4.0 * (DOuter(x) ** 2.0 - DInner(x) ** 2.0)
+        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
 
     def dAdx(x):
-        return np.pi / 2.0 * (DOuter(x) * dDOuterdx(x) - DInner(x) * dDInnerdx(x))
+        return np.pi / 2.0 * (d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
 
     def dlnAdx(x, t):
         return dAdx(x) / A(x)
@@ -151,8 +151,8 @@ def main(
         outputEvery=100,
         includeBoundaryLayerTerms=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
-        DInner=DInner,
-        DOuter=DOuter,
+        d_inner=d_inner,
+        d_outer=d_outer,
         dlnAdx=dlnAdx,
     )
     ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe
@@ -177,8 +177,8 @@ def main(
         cfl=0.9,
         outputEvery=100,
         includeBoundaryLayerTerms=False,
-        DInner=DInner,
-        DOuter=DOuter,
+        d_inner=d_inner,
+        d_outer=d_outer,
         dlnAdx=dlnAdx,
     )
     ssnbl.probes.append(Probe(ssnbl, max(ssnbl.x)))  # end wall probe

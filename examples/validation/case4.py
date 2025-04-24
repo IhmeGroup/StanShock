@@ -114,24 +114,24 @@ def main(
     )
     dDInterpdxInterp = (dInterp[1:] - dInterp[:-1]) / (xInterp[1:] - xInterp[:-1])
 
-    def DOuter(x):
+    def d_outer(x):
         nX = x.shape[0]
         return DDriven * np.ones(nX)
 
-    def DInner(x):
+    def d_inner(x):
         return np.interp(x, xInterp, dInterp)
 
-    def dDOuterdx(x):
+    def dd_outerdx(x):
         return np.zeros(nX)
 
-    def dDInnerdx(x):
+    def dd_innerdx(x):
         return np.interp(x, xInterp[:-1], dDInterpdxInterp)
 
     def A(x):
-        return np.pi / 4.0 * (DOuter(x) ** 2.0 - DInner(x) ** 2.0)
+        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
 
     def dAdx(x):
-        return np.pi / 2.0 * (DOuter(x) * dDOuterdx(x) - DInner(x) * dDInnerdx(x))
+        return np.pi / 2.0 * (d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
 
     def dlnAdx(x, t):
         return dAdx(x) / A(x)
@@ -152,8 +152,8 @@ def main(
         outputEvery=100,
         includeBoundaryLayerTerms=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
-        DInner=DInner,
-        DOuter=DOuter,
+        d_inner=d_inner,
+        d_outer=d_outer,
         dlnAdx=dlnAdx,
     )
     ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe
@@ -213,8 +213,8 @@ def main(
         outputEvery=100,
         includeBoundaryLayerTerms=False,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
-        DInner=DInner,
-        DOuter=DOuter,
+        d_inner=d_inner,
+        d_outer=d_outer,
         dlnAdx=dlnAdx,
     )
     ssnbl.probes.append(Probe(ssnbl, max(ssnbl.x)))  # end wall probe

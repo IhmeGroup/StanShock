@@ -15,6 +15,7 @@ from stanshock.processing.initialize import (
 )
 from stanshock.processing.plot import plot_state
 from stanshock.system.base import RightHandSide
+from stanshock.system.geometry import Geometry
 
 
 class Combustor:
@@ -50,10 +51,10 @@ class Combustor:
         )
         self.h = None  # height of the channel
         self.w = None  # width of the channel
-        self.DInner = (
+        self.d_inner = (
             None  # Inner diameter of the shock tube as a function of x (needed for BL)
         )
-        self.DOuter = (
+        self.d_outer = (
             None  # Outer diameter of the shock tube as a function of x (needed for BL)
         )
         self.dlnAdt = (
@@ -85,9 +86,10 @@ class Combustor:
             if key in self.__dict__:
                 self.__dict__[key] = item
 
-        # Ensure the mesh parameters are consistent
-        self.n = len(self.x)
-        self.dx = self.x[1] - self.x[0]
+        # Initialize the geometry of the domain
+        self.geometry = Geometry(
+            self.x, self.h, self.w, self.d_inner, self.d_outer, self.dlnAdt, self.dlnAdx
+        )
 
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
@@ -111,38 +113,21 @@ class Combustor:
             face_extrapolator=FifthOrderWeno(),
             boundary_conditions=self.apply_boundary_conditions,
             riemann_solver=self.fluxFunction,
-            dx=self.dx,
+            dx=self.geometry.dx,
         )
 
         if self.includeDiffusion:
             self.viscous_flux = ViscousFlux(
                 face_extrapolator=FirstOrder(),
                 boundary_conditions=self.apply_boundary_conditions,
-                dx=self.dx,
+                dx=self.geometry.dx,
             )
 
-        # Compute the hydraulic diameter and characteristic length scale
         if self.includeBoundaryLayerTerms:
-            if self.h is not None and self.w is not None:
-                self.hydraulic_diameter = 2 * self.h * self.w / (self.h + self.w)
-                self.characteristic_length = self.hydraulic_diameter.copy()
-            else:
-                self.hydraulic_diameter = self.DOuter(self.x)
-                self.characteristic_length = self.hydraulic_diameter.copy()
-
-                if self.DInner is not None:
-                    self.hydraulic_diameter -= self.DInner(self.x)
-                    self.characteristic_length = 0.5 * self.hydraulic_diameter
-
-                    noInsert = self.DInner(self.x) == 0.0
-                    self.characteristic_length[noInsert] = self.hydraulic_diameter[
-                        noInsert
-                    ]
-
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
-                hydraulic_diameter=self.hydraulic_diameter,
-                characteristic_length=self.characteristic_length,
+                hydraulic_diameter=self.geometry.hydraulic_diameter,
+                characteristic_length=self.geometry.characteristic_length,
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
@@ -162,7 +147,7 @@ class Combustor:
             outputs:
                 timestep
         """
-        local_timescale = self.dx / self.get_wave_speed()
+        local_timescale = self.geometry.dx / self.get_wave_speed()
         if self.includeDiffusion:
             mu = self.physics.get_mu(self.state)
             nu = mu / self.state.density
@@ -171,7 +156,9 @@ class Combustor:
                 np.max(self.physics.get_mass_diffusivity(self.state), axis=1) * self.F
             )
             viscous_timescale = (
-                0.5 * self.dx**2.0 / np.maximum(4.0 / 3.0 * nu, np.maximum(alpha, diff))
+                0.5
+                * self.geometry.dx**2.0
+                / np.maximum(4.0 / 3.0 * nu, np.maximum(alpha, diff))
             )
             local_timescale = np.minimum(local_timescale, viscous_timescale)
         return self.cfl * min(local_timescale)
@@ -336,7 +323,7 @@ class Combustor:
         (r, rZ, rC) = y[:, 0], y[:, 3], y[:, 4]
         Z = rZ / r
         C = rC / r
-        Q = np.zeros(self.n)
+        Q = np.zeros(self.geometry.n)
         L = self.physics.get_normalized_progress_variable(Z, C)
         e_chem0 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
 
@@ -409,7 +396,11 @@ class Combustor:
         from scipy import integrate
 
         # get indices
-        indices = [k for k in range(self.n) if self.inReactingRegion(self.x[k], self.t)]
+        indices = [
+            k
+            for k in range(self.geometry.n)
+            if self.inReactingRegion(self.geometry.x[k], self.t)
+        ]
         state_temp = FluidState(
             shape=(len(indices),),
             density=self.state.density[indices].copy(),
@@ -453,82 +444,13 @@ class Combustor:
         This method advances the quasi-1D terms used to model area changes in
         the shock tube. The client must supply the functions dlnAdt and dlnAdx
         to the Combustor object.
-            inputs
-                dt=time step
         """
-        mn = self.mn
-
-        #######################################################################
-        def dydt(t, y, args):
-            """
-            function: dydt
-            -------------------------------------------------------------------
-            this function gives the source terms for the quasi 1D
-                inputs
-                    dt=time step
-            """
-            # unpack the input and initialize
-            x, gamma = args
-            r, ru, E = y
-            p = (gamma - 1.0) * (E - 0.5 * ru**2.0 / r)
-            f = np.zeros(3)
-            # create quasi-1D right hand side
-            if self.dlnAdt is not None:
-                dlnAdt = self.dlnAdt(x, t)[0]
-                f[0] -= r * dlnAdt
-                f[1] -= ru * dlnAdt
-                f[2] -= E * dlnAdt
-            if self.dlnAdx is not None:
-                dlnAdx = self.dlnAdx(x, t)[0]
-                f[0] -= ru * dlnAdx
-                f[1] -= (ru**2.0 / r) * dlnAdx
-                f[2] -= (ru / r * (E + p)) * dlnAdx
-            return f
-
-        #######################################################################
-        from scipy import integrate
-
-        # initialize integrator
-        y0 = np.zeros(3)
-        integrator = integrate.ode(dydt).set_integrator("lsoda")
         y = self.physics.primitive_to_conservative(self.state)
 
-        # determine the indices
-        iIn = []
-        eIn = np.arange(self.x.shape[0])
-        if self.dlnAdt is not None:
-            dlnAdt = self.dlnAdt(self.x, self.t)
-            iIn = np.where(dlnAdt != 0.0)
-            eIn = np.where(dlnAdt == 0.0)
+        dydt = self.geometry.source(self.t, y, self.physics, self.state.gamma, dt)
 
-        # integrate implicitly
-        for i in iIn:
-            # initialize
-            y0[:] = y[i, :3]
-            args = np.array([self.x[i]]), self.state.gamma[i]
-            integrator.set_initial_value(y0, self.t)
-            integrator.set_f_params(args)
-            # solve
-            integrator.integrate(self.t + dt)
-            # update
-            y[i, :3] = integrator.y
-
-        # integrate explicitly
-        rhs = np.zeros((eIn.shape[0], mn))
-        if self.dlnAdt is not None:
-            dlnAdt = self.dlnAdt(self.x, self.t)[eIn]
-            rhs -= y[eIn, :3] * dlnAdt
-
-        if self.dlnAdx is not None:
-            dlnAdx = self.dlnAdx(self.x, self.t)[eIn]
-            rhs[:, 0] -= y[eIn, 1] * dlnAdx
-            rhs[:, 1] -= (y[eIn, 1] ** 2.0 / y[eIn, 0]) * dlnAdx
-            rhs[:, 2] -= (
-                self.state.velocity[eIn] * (y[eIn, 2] + self.state.pressure[eIn])
-            ) * dlnAdx
-
-        # update
-        y[eIn, :3] += dt * rhs
+        # Update
+        y[:, :3] += dt * dydt
         y[:, 3:] = y[:, [0]] * self.state.composition
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
@@ -563,12 +485,12 @@ class Combustor:
         y = self.physics.primitive_to_conservative(self.state)
 
         # 1st stage of RK2
-        dydt = self.source_terms(self.t, y, self.state.gamma, self.x)
+        dydt = self.source_terms(self.t, y, self.state.gamma, self.geometry.x)
         y1 = y + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
-        dydt = self.source_terms(self.t + dt, y1, self.state.gamma, self.x)
+        dydt = self.source_terms(self.t + dt, y1, self.state.gamma, self.geometry.x)
         y = 0.5 * (y + y1 + dt * dydt)
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
 
