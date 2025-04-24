@@ -129,3 +129,11 @@ class FPVTable:
         T0 = self.lookup("T0", Z, Q, L)
         aloc = self.lookup("ALOC", Z, Q, L)
         return loc0 * (T / T0) ** aloc
+    
+    def get_source_progress_variable_compressibility_factor(self, Z, Q, L, p, T):
+        """
+        Compute the scaling factor for the progress variable source term at the given Z, Q, L, p and T values.
+        """
+        TA = self.lookup("TA", Z, Q, L)
+        T0 = self.lookup("T0", Z, Q, L)
+        return (p / self.P) * np.exp(-TA * ((1 / T) - (1 / T0)))

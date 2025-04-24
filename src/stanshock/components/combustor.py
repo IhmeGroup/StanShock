@@ -623,6 +623,9 @@ class Combustor:
         # 1st stage of RK2
         rhsY = np.zeros((self.n, self.n_scalars))
         omegaC = self.injector.get_chemical_sources(self.Y[:, 0], self.Y[:, 1])
+        omegaC *= self.fpv_table.get_source_progress_variable_compressibility_factor(
+            self.Y[:, 0], Q, L, self.p, self.get_temperature(r, self.p, self.Y)
+        )
         rhsY[:, 1] = omegaC * r
         rY1 = rY + dt * rhsY
         L1 = self.fpv_table.get_normalized_progress_variable(
@@ -633,6 +636,9 @@ class Combustor:
         (r1, u1, p1, Y1) = self.conservative_to_primitive(r, ru, E1, rY1, self.gamma)
         # 2nd stage of RK2
         omegaC1 = self.injector.get_chemical_sources(Y1[:, 0], Y1[:, 1])
+        omegaC1 *= self.fpv_table.get_source_progress_variable_compressibility_factor(
+            Y1[:, 0], Q, L, p1, self.get_temperature(r, p1, Y1)
+        )
         rhsY[:, 1] = omegaC1 * r1
         rY = 0.5 * (rY + rY1 + dt * rhsY)
         L = self.fpv_table.get_normalized_progress_variable(rY[:, 0] / r, rY[:, 1] / r)
