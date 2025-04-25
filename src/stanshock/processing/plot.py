@@ -25,9 +25,10 @@ class XTDiagram:
         self.name = variable.lower()
         self.skipSteps = skipSteps  # number of timesteps to skip
         # check interpolation grid
+        geometry = domain.geometry
         if x is None:
-            self.x = domain.x
-        elif (x[-1] > domain.x[-1]) or (x[0] < domain.x[0]):
+            self.x = geometry.x
+        elif (x[-1] > geometry.x[-1]) or (x[0] < geometry.x[0]):
             msg = "Invalid Interpolation Grid"
             raise Exception(msg)
         else:
@@ -46,34 +47,33 @@ class XTDiagram:
                 XTDiagram: the XTDiagram object
         """
         variable = self.name
-        if domain.physics == "FPV":
-            scalarNames = ["mixture fraction", "progress variable"]
-        elif domain.physics == "FRC":
-            scalarNames = [species.lower() for species in domain.gas.species_names]
+        state = domain.state
+        geometry = domain.geometry
+
         if variable in ["density", "r", "rho"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.r))
+            self.variable.append(np.interp(self.x, geometry.x, state.density))
         elif variable in ["velocity", "u"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.u))
+            self.variable.append(np.interp(self.x, geometry.x, state.velocity))
         elif variable in ["pressure", "p"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.p))
+            self.variable.append(np.interp(self.x, geometry.x, state.pressure))
         elif variable in ["temperature", "t"]:
-            T = domain.get_temperature(domain.r, domain.p, domain.Y)
-            self.variable.append(np.interp(self.x, domain.x, T))
+            T = domain.physics.get_temperature(state)
+            self.variable.append(np.interp(self.x, geometry.x, T))
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            self.variable.append(np.interp(self.x, domain.x, domain.gamma))
-        elif variable in scalarNames:
-            scalarIndex = scalarNames.index(variable)
-            self.variable.append(np.interp(self.x, domain.x, domain.Y[:, scalarIndex]))
-        elif variable in ["mach", "m"]:
-            M = np.abs(domain.u) / domain.get_sound_speed(
-                domain.r, domain.p, domain.gamma
+            self.variable.append(np.interp(self.x, geometry.x, state.gamma))
+        elif variable in domain.physics.scalar_names:
+            scalarIndex = domain.physics.scalar_names.index(variable)
+            self.variable.append(
+                np.interp(self.x, geometry.x, state.composition[:, scalarIndex])
             )
+        elif variable in ["mach", "m"]:
+            M = np.abs(state.velocity) / domain.physics.get_sound_speed(state)
             self.variable.append(np.interp(self.x, self.x, M))
         else:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
         self.t.append(domain.t)
-        if (domain.injector is not None):
+        if domain.injector is not None:
             self.mdot.append(domain.injector.mdot_f_interp(domain.t))
 
     def plot(self, figdir="."):
@@ -108,13 +108,10 @@ class XTDiagram:
             title = r"$M~[\mathrm{-}]$"
         else:
             title = r"$\mathrm{" + variable + "}$"
-        
+
         has_mdot = mdot and any(mdot)
-        if has_mdot:
-            figsize = (6, 4)
-        else:
-            figsize = (6, 3)
-        
+        figsize = (6, 4) if has_mdot else (6, 3)
+
         fig = plt.figure(figsize=figsize)
         if has_mdot:
             gs = fig.add_gridspec(1, 3, width_ratios=[6, 1, 0.5], wspace=0.125)
@@ -123,9 +120,9 @@ class XTDiagram:
             cbar_ax = fig.add_subplot(gs[0, 2])
         else:
             main_ax = plt.gca()
-        
+
         fig.suptitle(title, fontsize=14)
-        
+
         if self.limits is None:
             pcm = main_ax.pcolormesh(X, T, variableMatrix, cmap="jet")
         else:
@@ -137,23 +134,23 @@ class XTDiagram:
                 vmin=self.limits[0],
                 vmax=self.limits[1],
             )
-        
+
         main_ax.set_xlabel(r"$x~[\mathrm{m}]$")
         main_ax.set_ylabel(r"$t~[\mathrm{ms}]$")
         main_ax.set_xlim(min(self.x), max(self.x))
         main_ax.set_ylim(min(t), max(t))
-        
+
         if has_mdot:
-            cbar = fig.colorbar(pcm, cax=cbar_ax)
+            fig.colorbar(pcm, cax=cbar_ax)
         else:
-            cbar = fig.colorbar(pcm, ax=main_ax)
-        
+            fig.colorbar(pcm, ax=main_ax)
+
         if has_mdot:
-            mdot_ax.plot(mdot, t, 'r-', linewidth=2)
+            mdot_ax.plot(mdot, t, "r-", linewidth=2)
             mdot_ax.set_xlabel(r"$\dot{m}~[\mathrm{g/s}]$")
             mdot_ax.set_yticklabels([])
-            mdot_ax.grid(True, axis='x', linestyle='--', alpha=0.7)
-        
+            mdot_ax.grid(True, axis="x", linestyle="--", alpha=0.7)
+
         plt.tight_layout()
         plt.savefig(Path(figdir) / f"{variable}.png", bbox_inches="tight", dpi=300)
 
@@ -162,7 +159,11 @@ def add_h_plot(domain, ax, scale=1.0):
     ax1 = ax.twinx()
     ax1.set_zorder(-np.inf)
     ax.patch.set_visible(False)
-    ax1.plot(domain.x * scale, domain.h * scale, color="0.8", linestyle="--")
+
+    geometry = domain.geometry
+    x = geometry.x
+    h = geometry.h if geometry.h is not None else geometry.d_outer(x)
+    ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
     ax1.axhline(0, color="0.8", linestyle="--")
     ax1.set_aspect("equal")
     ax1.set_ylabel("h [mm]")
@@ -171,63 +172,64 @@ def add_h_plot(domain, ax, scale=1.0):
 
 def plot_state(domain, filename):
     xscale = 1.0e3
-    T = domain.get_temperature(domain.r, domain.p, domain.Y)
+    physics = domain.physics
+    state = domain.state
+    geometry = domain.geometry
+    T = physics.get_temperature(state)
 
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
-    ax[0].plot(domain.x * xscale, domain.r)
+    ax[0].plot(geometry.x * xscale, state.density)
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
-    if domain.h is not None:
+    if geometry.h is not None:
         add_h_plot(domain, ax[0], scale=xscale)
 
-    ax[1].plot(domain.x * xscale, domain.u)
+    ax[1].plot(geometry.x * xscale, state.velocity)
     ax[1].set_ymargin(0.1)
     ax[1].set_ylabel(r"$u$ [m/s]")
-    if domain.h is not None:
+    if geometry.h is not None:
         add_h_plot(domain, ax[1], scale=xscale)
 
-    ax[2].plot(domain.x * xscale, domain.p)
+    ax[2].plot(geometry.x * xscale, state.pressure)
     ax[2].set_ymargin(0.1)
     ax[2].set_ylabel(r"$p$ [Pa]")
-    if domain.h is not None:
+    if geometry.h is not None:
         add_h_plot(domain, ax[2], scale=xscale)
 
-    ax[3].plot(domain.x * xscale, T)
+    ax[3].plot(geometry.x * xscale, T)
     ax[3].set_ymargin(0.1)
     ax[3].set_ylabel(r"$T$ [K]")
-    if domain.h is not None:
+    if geometry.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
-    M = np.abs(domain.u) / domain.get_sound_speed(domain.r, domain.p, domain.gamma)
-    ax[4].plot(domain.x * xscale, M)
+    M = np.abs(state.velocity) / physics.get_sound_speed(state)
+    ax[4].plot(geometry.x * xscale, M)
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
-    if domain.h is not None:
+    if geometry.h is not None:
         add_h_plot(domain, ax[4], scale=xscale)
 
-    if domain.physics == "FPV":
-        Z = domain.Y[:, 0]
-        C = domain.Y[:, 1]
-        Q = np.zeros_like(domain.x)
-        L = domain.fpv_table.get_normalized_progress_variable(Z, C)
-        Y_H2 = domain.fpv_table.lookup("H2", Z, Q, L)
-        Y_OH = domain.fpv_table.lookup("OH", Z, Q, L)
-        Y_H2O = domain.fpv_table.lookup("H2O", Z, Q, L)
-    elif domain.physics == "FRC":
-        Y_H2 = domain.Y[:, domain.gas.species_index("H2")]
-        Y_OH = domain.Y[:, domain.gas.species_index("OH")]
-        Y_H2O = domain.Y[:, domain.gas.species_index("H2O")]
-    ax[5].plot(domain.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
-    ax[5].plot(domain.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
-    ax[5].plot(domain.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
+    if physics.is_flamelet:
+        state = physics.set_state(state)
+        Y_H2 = physics.lookup("H2", state)
+        Y_OH = physics.lookup("OH", state)
+        Y_H2O = physics.lookup("H2O", state)
+    else:
+        Y = state.mass_fractions
+        Y_H2 = Y[:, physics.gas.species_index("H2")]
+        Y_OH = Y[:, physics.gas.species_index("OH")]
+        Y_H2O = Y[:, physics.gas.species_index("H2O")]
+    ax[5].plot(geometry.x * xscale, Y_H2, label=r"$\mathrm{H}_2$")
+    ax[5].plot(geometry.x * xscale, Y_OH, label=r"$\mathrm{OH}$")
+    ax[5].plot(geometry.x * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
     if Y_H2.max() < 1e-6:
         ax[5].set_ylim(-1e-3, 1e-3)
     else:
         ax[5].set_ymargin(0.1)
     ax[5].set_ylabel(r"$Y_k$ [-]")
     ax[5].legend(loc="upper right")
-    if domain.h is not None:
+    if geometry.h is not None:
         add_h_plot(domain, ax[5], scale=xscale)
 
     ax[6].scatter(
@@ -237,7 +239,7 @@ def plot_state(domain, filename):
     )
     ax[6].set_ymargin(0.1)
     ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
-    if domain.h is not None:
+    if geometry.h is not None:
         add_h_plot(domain, ax[6], scale=xscale)
 
     ax[6].set_xlabel("x [mm]")

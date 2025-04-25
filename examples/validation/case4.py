@@ -10,6 +10,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
 
@@ -84,7 +85,7 @@ def main(
     xLower = -LDriver
     xUpper = LDriven
     xShock = 0.0
-    geometry = (nX, xLower, xUpper, xShock)
+    x = np.linspace(xLower, xUpper, nX)
     # arrays from HTGL
     xInterp = -0.0254 * np.array(
         [142, 140, 130, 120, 110, 100, 90, 80, 70, 60, 50, 40, 36, 37, 30, 20, 10, 0]
@@ -113,50 +114,54 @@ def main(
     )
     dDInterpdxInterp = (dInterp[1:] - dInterp[:-1]) / (xInterp[1:] - xInterp[:-1])
 
-    def DOuter(x):
+    def d_outer(x):
         nX = x.shape[0]
         return DDriven * np.ones(nX)
 
-    def DInner(x):
+    def d_inner(x):
         return np.interp(x, xInterp, dInterp)
 
-    def dDOuterdx(x):
+    def dd_outerdx(x):
         return np.zeros(nX)
 
-    def dDInnerdx(x):
+    def dd_innerdx(x):
         return np.interp(x, xInterp[:-1], dDInterpdxInterp)
 
     def A(x):
-        return np.pi / 4.0 * (DOuter(x) ** 2.0 - DInner(x) ** 2.0)
+        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
 
-    def dAdx(x):
-        return np.pi / 2.0 * (DOuter(x) * dDOuterdx(x) - DInner(x) * dDInnerdx(x))
+    def dA_dx(x):
+        return np.pi / 2.0 * (d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
 
-    def dlnAdx(x, t):
-        return dAdx(x) / A(x)
+    def dlnA_dx(x, t):
+        return dA_dx(x) / A(x)
 
     # solve with boundary layer model
-    boundaryConditions = ["reflecting", "reflecting"]
+    boundary_conditions = ["reflecting", "reflecting"]
     state1 = (gas1, u1)
     state4 = (gas4, u4)
+    physics_model = ThermoTable(gas1)
+
     ssbl = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
-        boundaryConditions=boundaryConditions,
+        n=nX,
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
-        outputEvery=100,
-        includeBoundaryLayerTerms=True,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
-        DInner=DInner,
-        DOuter=DOuter,
-        dlnAdx=dlnAdx,
+        output_every=100,
+        include_boundary_layer=True,
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
+        d_inner=d_inner,
+        d_outer=d_outer,
+        dlnA_dx=dlnA_dx,
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.x)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.x)))  # end wall probe
     diagram_settings = [
         ("pressure", [p1 / 101325, p4 / 101325]),
         ("temperature", [T1, 800.0]),
     ]
-    ssbl.XTDiagrams += [
+    ssbl.xt_diagrams += [
         XTDiagram(ssbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
     ]
@@ -164,9 +169,9 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssbl.x[1] - ssbl.x[0]
-    dV = A(ssbl.x) * dx
-    VDriver = np.sum(dV[ssbl.x < xShock])
+    dx = ssbl.geometry.x[1] - ssbl.geometry.x[0]
+    dV = A(ssbl.geometry.x) * dx
+    VDriver = np.sum(dV[ssbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
@@ -180,9 +185,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssbl.r[iX] = gas4.density
-            ssbl.Y[iX, :] = gas4.Y
-            ssbl.gamma[iX] = gas4.cp / gas4.cv
+            ssbl.state.density[iX] = gas4.density
+            ssbl.state.composition[iX, :] = gas4.Y
+            ssbl.state.gamma[iX] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()
@@ -191,27 +196,29 @@ def main(
     print("The process took ", t1 - t0)
 
     if plot_results:
-        for diagram in ssbl.XTDiagrams:
+        for diagram in ssbl.xt_diagrams:
             diagram.plot()
 
     # Solve without boundary layer model
-    boundaryConditions = ["reflecting", "reflecting"]
+    boundary_conditions = ["reflecting", "reflecting"]
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
-        gas1,
-        initialization=("riemann", state4, state1, geometry),
-        boundaryConditions=boundaryConditions,
+        n=nX,
+        x=x,
+        physics=physics_model,
+        initialization=("riemann", state4, state1, xShock),
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
-        outputEvery=100,
-        includeBoundaryLayerTerms=False,
-        Tw=T1,  # assume wall temperature is in thermal eq. with gas
-        DInner=DInner,
-        DOuter=DOuter,
-        dlnAdx=dlnAdx,
+        output_every=100,
+        include_boundary_layer=False,
+        wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
+        d_inner=d_inner,
+        d_outer=d_outer,
+        dlnA_dx=dlnA_dx,
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.x)))  # end wall probe
-    ssnbl.XTDiagrams += [
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.x)))  # end wall probe
+    ssnbl.xt_diagrams += [
         XTDiagram(ssnbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
     ]
@@ -219,9 +226,9 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssnbl.x[1] - ssnbl.x[0]
-    dV = A(ssnbl.x) * dx
-    VDriver = np.sum(dV[ssnbl.x < xShock])
+    dx = ssnbl.geometry.x[1] - ssnbl.geometry.x[0]
+    dV = A(ssnbl.geometry.x) * dx
+    VDriver = np.sum(dV[ssnbl.geometry.x < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
@@ -235,9 +242,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssnbl.r[iX] = gas4.density
-            ssnbl.Y[iX, :] = gas4.Y
-            ssnbl.gamma[iX] = gas4.cp / gas4.cv
+            ssnbl.state.density[iX] = gas4.density
+            ssnbl.state.composition[iX, :] = gas4.Y
+            ssnbl.state.gamma[iX] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()
@@ -246,7 +253,7 @@ def main(
     print("The process took ", t1 - t0)
 
     if plot_results:
-        for diagram in ssnbl.XTDiagrams:
+        for diagram in ssnbl.xt_diagrams:
             diagram.plot()
 
         # import shock tube data

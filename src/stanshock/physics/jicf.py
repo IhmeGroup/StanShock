@@ -247,7 +247,7 @@ class JICModel:
             self.Z_var_profile = np.load(datadir / "Z_var_profile.npy")
         else:
             self.calc_Z_avg_var_profiles(write=True)
-        
+
         # Precompute the mapping from mdot to Z mean and variance profiles
         self.Z_avg_profile_interp = interpolate.RegularGridInterpolator(
             (self.mdot_inj_unique, self.x), self.Z_avg_profile
@@ -983,7 +983,7 @@ class JICModel:
         if (Zbar < eps) or (Zbar > 1 - eps) or (Lbar < eps) or (Lbar > 1 - eps):
             result = omega_C_interp((Zbar, Lbar))
             return (i_Zbar, i_Lbar, i_S, result)
-        
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
 
@@ -1022,7 +1022,7 @@ class JICModel:
         omega_C_interp = interpolate.RegularGridInterpolator(
             (Z_sample, L_sample), omega_C, bounds_error=False, fill_value=0.0
         )
-        
+
         # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
         n_tab = (100, 100, 100)
         self.Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
@@ -1066,7 +1066,7 @@ class JICModel:
             np.save(datadir / "Lbar_vec.npy", self.Lbar_vec)
             np.save(datadir / "logsigma2_vec.npy", self.logsigma2_vec)
             np.save(datadir / "omega_C_int.npy", self.omega_C_int)
-        
+
         # Build 3D table interpolator
         self.omega_C_int_interp = interpolate.RegularGridInterpolator(
             (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
