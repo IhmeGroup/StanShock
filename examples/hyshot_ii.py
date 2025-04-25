@@ -87,12 +87,12 @@ h[x < L_const] = h_const
 h[x >= L_const] = h_const + (x[x >= L_const] - L_const) * np.tan(theta_exhaust)
 A = h * w
 lnA = np.log(A)
-dlnAdx_data = np.gradient(lnA, x)
-dlnAdx_interp = interpolate.interp1d(x, dlnAdx_data, kind="cubic")
+dlnA_dx_data = np.gradient(lnA, x)
+dlnA_dx_interp = interpolate.interp1d(x, dlnA_dx_data, kind="cubic")
 
 
-def dlnAdx(x, t):
-    return dlnAdx_interp(x)
+def dlnA_dx(x, t):
+    return dlnA_dx_interp(x)
 
 
 # Time parameters
@@ -147,14 +147,14 @@ def sourceTerms(rho, rhou, rhoE, rhoY, gamma, x, t):
 
 # Initialize and run the simulation
 ss = Combustor(
-    dlnAdx=dlnAdx,
+    dlnA_dx=dlnA_dx,
     initialization=("constant", initState, x),
-    boundaryConditions=BCs,
+    boundary_conditions=BCs,
     sourceTerms=sourceTerms,
     cfl=0.5,
     reacting=True,
-    includeDiffusion=False,
-    outputEvery=10,
+    include_diffusion=False,
+    output_every=10,
     physics=ThermoTable(gas),
 )
 ss.advance_simulation(t_end)

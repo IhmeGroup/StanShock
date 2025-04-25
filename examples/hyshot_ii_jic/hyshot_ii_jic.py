@@ -225,12 +225,12 @@ h[x < L_const] = h_const
 h[x >= L_const] = h_const + (x[x >= L_const] - L_const) * np.tan(theta_exhaust)
 A = h * w
 lnA = np.log(A)
-dlnAdx_data = np.gradient(lnA, x)
-dlnAdx_interp = interpolate.interp1d(x, dlnAdx_data, kind="cubic")
+dlnA_dx_data = np.gradient(lnA, x)
+dlnA_dx_interp = interpolate.interp1d(x, dlnA_dx_data, kind="cubic")
 
 
-def dlnAdx(x, t):
-    return dlnAdx_interp(x)
+def dlnA_dx(x, t):
+    return dlnA_dx_interp(x)
 
 
 # PDF sampling parameters
@@ -403,19 +403,19 @@ ss = Combustor(
     h=h,
     w=w,
     x=x,
-    dlnAdx=dlnAdx,
-    Tw=300.0,
-    includeBoundaryLayerTerms=True,
+    dlnA_dx=dlnA_dx,
+    wall_temperature=300.0,
+    include_boundary_layer=True,
     initialization=("constant", gas_init, U_in),
-    boundaryConditions=BCs,
+    boundary_conditions=BCs,
     sourceTerms=None,
     injector=jic,
     cfl=0.5,
     physics=fpv_table,
     reacting=True,
-    includeDiffusion=False,
-    outputEvery=10,
-    plotStateInterval=10,
+    include_diffusion=False,
+    output_every=10,
+    plot_state_interval=10,
 )
 
 plot_variables = [
@@ -427,9 +427,9 @@ plot_variables = [
     "progress variable",
     "mach",
 ]
-ss.XTDiagrams = [XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables]
+ss.xt_diagrams = [XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables]
 ss.advance_simulation(t_f[-1])
-for diagram in ss.XTDiagrams:
+for diagram in ss.xt_diagrams:
     diagram.plot(figdir=figdir)
 
 code.interact(local=locals())

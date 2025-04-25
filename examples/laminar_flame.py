@@ -55,7 +55,7 @@ def main(
     flame_center = flame.grid[np.argmax(np.gradient(flame.T, flame.grid))]
     L = flame.grid[-1] - flame.grid[0]
     xUpper, xLower = flame_center + L * f, flame_center - L * f
-    boundaryConditions = (
+    boundary_conditions = (
         (gasUnburned.density, uUnburned, None, gasUnburned.Y),
         (None, None, gasBurned.P, None),
     )
@@ -70,23 +70,23 @@ def main(
         dx=(xUpper - xLower) / (nX - 1),
         initialization=("Riemann", unburnedState, burnedState, flame_center),
         physics=physics,
-        boundaryConditions=boundaryConditions,
+        boundary_conditions=boundary_conditions,
         cfl=0.9,
         reacting=True,
-        includeDiffusion=True,
-        outputEvery=10,
+        include_diffusion=True,
+        output_every=10,
     )
 
     # interpolate flame solution
     Y = ss.state.composition
     for iSp in range(gas.n_species):
-        Y[:, iSp] = np.interp(ss.x, flame.grid, flame.Y[iSp, :])
+        Y[:, iSp] = np.interp(ss.geometry.x, flame.grid, flame.Y[iSp, :])
 
     ss.state = FluidState(
-        shape=nX,
-        density=np.interp(ss.x, flame.grid, flame.density),
-        velocity=np.interp(ss.x, flame.grid, flame.velocity),
-        pressure=flame.P * np.ones(ss.n),
+        shape=(nX,),
+        density=np.interp(ss.geometry.x, flame.grid, flame.density),
+        velocity=np.interp(ss.geometry.x, flame.grid, flame.velocity),
+        pressure=flame.P * np.ones(ss.geometry.n),
         composition=Y,
     )
     T = ss.state.temperature = ss.physics.get_temperature(ss.state)
@@ -104,6 +104,9 @@ def main(
 
     # plot setup
     if plot_results:
+        T = ss.physics.get_temperature(ss.state)
+        state = ss.physics.set_state(ss.state)
+
         plt.close("all")
         font = {"family": "serif", "serif": ["computer modern roman"]}
         plt.rc("font", **font)
@@ -116,8 +119,9 @@ def main(
             "r",
             label=r"$T/T_\mathrm{F}$",
         )
-        T = ss.physics.get_temperature(ss.state)
-        plt.plot((ss.x - flame_center) / flameThickness, T / flame.T[-1], "r--s")
+        plt.plot(
+            (ss.geometry.x - flame_center) / flameThickness, T / flame.T[-1], "r--s"
+        )
         iOH = gas.species_index("OH")
         plt.plot(
             (flame.grid - flame_center) / flameThickness,
@@ -126,8 +130,8 @@ def main(
             label=r"$Y_\mathrm{OH}\times 10$",
         )
         plt.plot(
-            (ss.x - flame_center) / flameThickness,
-            ss.state.mass_fractions[:, iOH] * 10,
+            (ss.geometry.x - flame_center) / flameThickness,
+            state.mass_fractions[:, iOH] * 10,
             "k--s",
         )
         iO2 = gas.species_index("O2")
@@ -138,8 +142,8 @@ def main(
             label=r"$Y_\mathrm{O_2}$",
         )
         plt.plot(
-            (ss.x - flame_center) / flameThickness,
-            ss.state.mass_fractions[:, iO2],
+            (ss.geometry.x - flame_center) / flameThickness,
+            state.mass_fractions[:, iO2],
             "g--s",
         )
         iH2 = gas.species_index("H2")
@@ -150,8 +154,8 @@ def main(
             label=r"$Y_\mathrm{H_2}$",
         )
         plt.plot(
-            (ss.x - flame_center) / flameThickness,
-            ss.state.mass_fractions[:, iH2],
+            (ss.geometry.x - flame_center) / flameThickness,
+            state.mass_fractions[:, iH2],
             "b--s",
         )
         plt.xlabel(r"$x/\delta_\mathrm{F}$")
@@ -164,8 +168,8 @@ def main(
             plt.savefig(results_location / "laminarFlame.pdf")
 
     results = {
-        "position": ss.x,
-        "temperature": ss.physics.get_temperature(ss.state),
+        "position": ss.geometry.x,
+        "temperature": T,
     }
     if results_location is not None:
         results_location = Path(results_location)

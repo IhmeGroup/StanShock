@@ -2,56 +2,64 @@ from __future__ import annotations
 
 import numpy as np
 
-from stanshock.physics.fluid_base import FluidState
+from stanshock.numerics.face_extrapolation import FaceExtrapolator
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
 
 
-def viscous_flux(domain, rLR, uLR, pLR, YLR):
-    """
-    This method computes the viscous flux at each interface
-        inputs:
-            rLR=array containing left and right density states [nLR,nFaces]
-            uLR=array containing left and right velocity states [nLR,nFaces]
-            pLR=array containing left and right pressure states [nLR,nFaces]
-            YLR=array containing left and right scalar states
-                [nLR,nFaces,nSp]
-        return:
-            f=modeled viscous fluxes [nFaces,mn+nSp]
-    """
-    # get the temperature, pressure, and composition for each cell (including the two ghosts)
-    nT = domain.n + 2
-    mn = domain.mn
+class ViscousFlux(RightHandSide):
+    def __init__(
+        self, face_extrapolator: FaceExtrapolator, boundary_conditions, dx
+    ) -> None:
+        self.face_extrapolator = face_extrapolator
+        self.boundary_conditions = boundary_conditions
+        self.dx = dx
+        self.F = 1.0
 
-    physics = domain.physics
-    state = FluidState(
-        shape=nT,
-        density=np.concatenate((rLR[0, :], rLR[1, [-1]])),
-        pressure=np.concatenate((pLR[0, :], pLR[1, [-1]])),
-        velocity=np.concatenate((uLR[0, :], uLR[1, [-1]])),
-        composition=np.concatenate((YLR[0, :, :], YLR[1, [-1], :]), axis=0),
-    )
-    state.temperature = T = physics.get_temperature(state)
-    state.density = None
+    def source(
+        self, _time: float, state_array: Array, physics: FluidPhysics, gamma_star: Array
+    ) -> Array:
+        state = physics.conservative_to_primitive(state_array, gamma_star)
+        state.gamma = gamma_star
 
-    F = np.ones(nT)
-    F[1:-1] = domain.F
-    F[0], F[-1] = domain.F[0], domain.F[-1]  # no gradient in F at boundary
+        face_states = self.face_extrapolator(state)
+        face_states = self.boundary_conditions(face_states)
 
-    mu = physics.get_mu(state)
-    k = physics.get_thermal_conductivity(state) * F
-    diff = physics.get_mass_diffusivity(state) * F[:, None]
+        return self.source_from_primitives(_time, face_states, physics)
 
-    # compute the gas properties at the face
-    viscosity = (mu[1:] + mu[:-1]) / 2.0
-    conductivity = (k[1:] + k[:-1]) / 2.0
-    diffusivities = (diff[1:, :] + diff[:-1, :]) / 2.0
-    r = ((rLR[0, :] + rLR[1, :]) / 2.0).reshape(-1, 1)
-    # get the central differences
-    dudx = (uLR[1, :] - uLR[0, :]) / domain.dx
-    dTdx = (T[1:] - T[:-1]) / domain.dx
-    dYdx = (YLR[1, :, :] - YLR[0, :, :]) / domain.dx
-    # compute the fluxes
-    f = np.zeros((nT - 1, mn + domain.n_scalars))
-    f[:, 1] = 4.0 / 3.0 * viscosity * dudx
-    f[:, 2] = conductivity * dTdx
-    f[:, mn:] = r * diffusivities * dYdx
-    return f
+    def source_from_primitives(
+        self, _time: float, face_states: FluidState, physics: FluidPhysics
+    ) -> Array:
+        # Compute properties at the extrapolated cell faces
+        face_states.temperature = physics.get_temperature(face_states)
+        viscosity = physics.get_mu(face_states)
+        conductivity = physics.get_thermal_conductivity(face_states) * self.F
+        diffusivities = physics.get_mass_diffusivity(face_states) * self.F
+
+        # Average the properties from either side
+        density = 0.5 * (face_states.density[0, :] + face_states.density[1, :])
+        viscosity = 0.5 * (viscosity[0, :] + viscosity[1, :])
+        conductivity = 0.5 * (conductivity[0, :] + conductivity[1, :])
+        diffusivities = 0.5 * (diffusivities[0, :, :] + diffusivities[1, :, :])
+
+        # Compute gradients across the faces via central difference
+        dudx = (face_states.velocity[1, :] - face_states.velocity[0, :]) / self.dx
+        dTdx = (face_states.temperature[1, :] - face_states.temperature[0, :]) / self.dx
+        dYdx = (
+            face_states.composition[1, :, :] - face_states.composition[0, :, :]
+        ) / self.dx
+
+        # Compute the fluxes
+        face_flux = np.concatenate(
+            (
+                np.zeros((face_states.shape[1], 1)),
+                (4.0 / 3.0 * viscosity * dudx)[:, None],
+                (conductivity * dTdx)[:, None],
+                density[:, None] * diffusivities * dYdx,
+            ),
+            axis=1,
+        )
+
+        # Apply central difference
+        return (face_flux[1:, :] - face_flux[:-1, :]) / self.dx

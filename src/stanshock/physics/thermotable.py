@@ -85,14 +85,14 @@ class ThermoTable(CanteraInterface):
     relevant methods
     """
 
-    def __init__(self, gas: ct.Solution):
+    def __init__(self, gas: ct.Solution, ox_def=None, fuel_def=None, prog_def=None):
         """
         This method initializes the temperature table. The table uses a
         piecewise linear function for the constant pressure specific heat
         coefficients. The coefficients are selected to retain the exact
         enthalpies at the table points.
         """
-        super().__init__(gas)
+        super().__init__(gas, ox_def, fuel_def, prog_def)
         nSp = gas.n_species
         self.TMin = 50.0
         self.dT = 100.0
@@ -133,8 +133,8 @@ class ThermoTable(CanteraInterface):
                 R: vector of mixture-specific gas constants [n]
         """
         return get_specific_gas_constant_compiled(
-            state.composition, self.molecularWeights
-        )
+            state.composition.reshape((-1, self.n_scalars)), self.molecularWeights
+        ).reshape(state.shape)
 
     def get_cp(self, state: FluidState):
         """
@@ -149,8 +149,12 @@ class ThermoTable(CanteraInterface):
         if state.temperature is None:
             state.temperature = self.get_temperature(state)
         return get_cp_compiled(
-            state.temperature, state.composition, self.T, self.a, self.b
-        )
+            state.temperature.flatten(),
+            state.composition.reshape((-1, self.n_scalars)),
+            self.T,
+            self.a,
+            self.b,
+        ).reshape(state.shape)
 
     def get_frozen_enthalpy(self, T, Y):
         """
