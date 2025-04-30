@@ -958,7 +958,9 @@ class JICModel:
         Z_sample = np.linspace(0.0, 1.0, 100)
         L_sample = np.linspace(0.0, 1.0, 100)
         Z_sample_mesh, L_sample_mesh = np.meshgrid(Z_sample, L_sample, indexing="ij")
-        omega_C = self.fpv_table.lookup_direct("SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh)
+        omega_C = self.fpv_table.lookup_direct(
+            "SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh
+        )
         omega_C_interp = interpolate.RegularGridInterpolator(
             (Z_sample, L_sample), omega_C, bounds_error=False, fill_value=0.0
         )
