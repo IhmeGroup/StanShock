@@ -8,6 +8,7 @@ import numpy as np
 from scipy import interpolate
 
 from stanshock.components.combustor import Combustor
+from stanshock.physics.thermotable import ThermoTable
 
 plt.rcParams.update(
     {
@@ -146,7 +147,6 @@ def sourceTerms(rho, rhou, rhoE, rhoY, gamma, x, t):
 
 # Initialize and run the simulation
 ss = Combustor(
-    gas,
     dlnA_dx=dlnA_dx,
     initialization=("constant", initState, x),
     boundary_conditions=BCs,
@@ -155,7 +155,7 @@ ss = Combustor(
     reacting=True,
     include_diffusion=False,
     output_every=10,
-    physics="FRC",
+    physics=ThermoTable(gas),
 )
 ss.advance_simulation(t_end)
 
