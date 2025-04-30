@@ -43,7 +43,6 @@ class JICModel:
 
     def __init__(
         self,
-        gas,
         fuel,
         x,
         x_inj,
@@ -69,8 +68,6 @@ class JICModel:
         """
         This method initializes the Jet-in-Crossflow model with the following
         parameters:
-        gas: Cantera.Solution
-            The Cantera gas object
         fuel: str
             The fuel species
         x: float
@@ -114,7 +111,7 @@ class JICModel:
         load_MIB_profile: bool
             Whether to load the MIB profile
         """
-        self.gas = gas
+        self.gas = fpv_table.gas
         self.fuel = fuel
 
         self.x = x
@@ -145,10 +142,8 @@ class JICModel:
         self.p = self.gas.P
         self.W = self.gas.mean_molecular_weight
         self.gamma = self.gas.cp / self.gas.cv
-        self.c = gas.sound_speed
+        self.c = self.gas.sound_speed
         self.M = self.u / self.c
-
-        self.__prep_zbilger()
 
         # Properties of the injected fluid
         self.t_inj = t_inj
@@ -161,7 +156,7 @@ class JICModel:
         self.E_inj = self.gas.int_energy_mass + 0.5 * self.u_inj**2
         self.W_inj = self.gas.mean_molecular_weight
         self.gamma_inj = self.gas.cp / self.gas.cv
-        self.c_inj = gas.sound_speed
+        self.c_inj = self.gas.sound_speed
         self.M_inj = 1.0
         self.mdot_inj = self.rho_inj * self.u_inj * self.A_inj
         self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
@@ -275,52 +270,6 @@ class JICModel:
             self.E_CHEM_profile = np.load(datadir / "E_CHEM_profile_MIB.npy")
         else:
             self.calc_MIB_profile(write=True)
-
-    def __prep_zbilger(self):
-        #             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H - (Y_O - Yo_O)/W_O
-        # ZBilger =  -----------------------------------------------------------
-        #            2(Yf_C - Yo_C)/W_C + (Yf_H - Yo_H)/2W_H - (Yf_O - Yo_O)/W_O
-        has_C = "C" in self.gas.element_names
-
-        i_C = self.gas.element_index("C") if has_C else 0
-        i_H = self.gas.element_index("H")
-        i_O = self.gas.element_index("O")
-
-        W_C = self.gas.atomic_weight(i_C) if has_C else 1.0
-        W_H = self.gas.atomic_weight(i_H)
-        W_O = self.gas.atomic_weight(i_O)
-
-        self.gas.X = "O2:0.21,N2:0.79"
-        Yo_C = self.gas.elemental_mass_fraction("C") if has_C else 0.0
-        Yo_H = self.gas.elemental_mass_fraction("H")
-        Yo_O = self.gas.elemental_mass_fraction("O")
-
-        self.gas.X = f"{self.fuel}:1"
-        Yf_C = self.gas.elemental_mass_fraction("C") if has_C else 0.0
-        Yf_H = self.gas.elemental_mass_fraction("H")
-        Yf_O = self.gas.elemental_mass_fraction("O")
-
-        s = 1.0 / (
-            2.0 * (Yf_C - Yo_C) / W_C
-            + 0.5 * (Yf_H - Yo_H) / W_H
-            - 1.0 * (Yf_O - Yo_O) / W_O
-        )
-
-        self.Z_weights = np.zeros(self.gas.n_species)
-        for k in range(self.gas.n_species):
-            self.Z_weights[k] = (
-                2.0 * (self.gas.n_atoms(k, i_C) if has_C else 0.0)
-                + 0.5 * self.gas.n_atoms(k, i_H)
-                - 1.0 * self.gas.n_atoms(k, i_O)
-            ) / self.gas.molecular_weights[k]
-        self.Z_offset = -(2.0 * Yo_C / W_C + 0.5 * Yo_H / W_H - 1.0 * Yo_O / W_O)
-
-        self.Z_weights *= s
-        self.Z_offset *= s
-
-        self.Z_weight_f = self.Z_weights[self.gas.species_index(self.fuel)]
-        self.Z_weight_O2 = self.Z_weights[self.gas.species_index("O2")]
-        self.Z_weight_N2 = self.Z_weights[self.gas.species_index("N2")]
 
     def y_cl(self, x_cl):
         # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
@@ -561,15 +510,6 @@ class JICModel:
         for z_inj in self.z_inj:
             grad_Z += self.grad_Z_3D_single_inj(x, y, z, z_inj)
         return grad_Z
-
-    def __Yf_to_Z(self, Yf):
-        Ya = 1 - Yf
-        YO2 = 0.23291 * Ya
-        YN2 = Ya - YO2
-        Z = (
-            self.Z_weight_f * Yf + self.Z_weight_O2 * YO2 + self.Z_weight_N2 * YN2
-        ) + self.Z_offset
-        return np.minimum(np.maximum(Z, 0.0), 1.0)
 
     def Z_3D_adjusted(self, x, y, z):
         """
@@ -821,14 +761,14 @@ class JICModel:
         E_CHEM_avg = np.zeros_like(self.mdot_inj_unique)
         for i_m in range(len(self.mdot_inj_unique)):
             if np.isnan(self.rho_inj_unique[i_m]):
-                C_avg[i_m] = self.fpv_table.lookup("PROG", 0.0, 0.0, 0.0)
-                E_CHEM_avg[i_m] = self.fpv_table.lookup("E0_CHEM", 0.0, 0.0, 0.0)
+                C_avg[i_m] = self.fpv_table.lookup_direct("PROG", 0.0, 0.0, 0.0)
+                E_CHEM_avg[i_m] = self.fpv_table.lookup_direct("E0_CHEM", 0.0, 0.0, 0.0)
                 continue
 
             def integrand(z, y, i_m=i_m):
                 # Z = self.Z_3D_adjusted(x, y, z)[i_m]
                 Z = self.Z_3D_interp[i_m]((x, y, z))
-                return self.fpv_table.lookup("PROG", Z, 0.0, 1.0)
+                return self.fpv_table.lookup_direct("PROG", Z, 0.0, 1.0)
 
             C_avg[i_m] = (
                 2.0
@@ -841,7 +781,7 @@ class JICModel:
             def integrand(z, y, i_m=i_m):
                 # Z = self.Z_3D_adjusted(x, y, z)[i_m]
                 Z = self.Z_3D_interp[i_m]((x, y, z))
-                return self.fpv_table.lookup("E0_CHEM", Z, 0.0, 1.0)
+                return self.fpv_table.lookup_direct("E0_CHEM", Z, 0.0, 1.0)
 
             E_CHEM_avg[i_m] = (
                 2.0
@@ -858,8 +798,8 @@ class JICModel:
         self.E_CHEM_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
 
         # Debugging way
-        C = self.fpv_table.lookup("PROG", self.Z_3D_data, 0.0, 1.0)
-        E_CHEM = self.fpv_table.lookup("E0_CHEM", self.Z_3D_data, 0.0, 1.0)
+        C = self.fpv_table.lookup_direct("PROG", self.Z_3D_data, 0.0, 1.0)
+        E_CHEM = self.fpv_table.lookup_direct("E0_CHEM", self.Z_3D_data, 0.0, 1.0)
 
         C_profile = np.mean(C, axis=(2, 3))
         E_CHEM_profile = np.mean(E_CHEM, axis=(2, 3))
@@ -875,8 +815,8 @@ class JICModel:
         # for i in tqdm(range(len(self.x))):
         #     if self.x[i] < self.x_inj:
         #         # Assume no fuel in the domain
-        #         self.C_profile[:, i] = self.fpv_table.lookup('PROG', 0.0, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup('E0_CHEM', 0.0, 0.0, 0.0)
+        #         self.C_profile[:, i] = self.fpv_table.lookup_direct('PROG', 0.0, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E0_CHEM', 0.0, 0.0, 0.0)
         #     elif self.x[i] > self.x_noz:
         #         # Freeze the profiles in the nozzle
         #         self.C_profile[:, i] = self.C_profile[:, i-1]
@@ -884,8 +824,8 @@ class JICModel:
         #     elif self.x[i] < self.x_inj + 0.001:
         #         # DEBUG: Assume nearly no mixing, so no burning
         #         Z_avg = self.Z_avg_profile[:, i]
-        #         self.C_profile[:, i] = self.fpv_table.lookup('PROG', Z_avg, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup('E0_CHEM', Z_avg, 0.0, 0.0)
+        #         self.C_profile[:, i] = self.fpv_table.lookup_direct('PROG', Z_avg, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E0_CHEM', Z_avg, 0.0, 0.0)
         #     else:
         #         self.C_profile[:,i], self.E_CHEM_profile[:, i] = self.C_E_CHEM_avg_MIB(self.x[i])
 
@@ -1018,7 +958,7 @@ class JICModel:
         Z_sample = np.linspace(0.0, 1.0, 100)
         L_sample = np.linspace(0.0, 1.0, 100)
         Z_sample_mesh, L_sample_mesh = np.meshgrid(Z_sample, L_sample, indexing="ij")
-        omega_C = self.fpv_table.lookup("SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh)
+        omega_C = self.fpv_table.lookup_direct("SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh)
         omega_C_interp = interpolate.RegularGridInterpolator(
             (Z_sample, L_sample), omega_C, bounds_error=False, fill_value=0.0
         )
