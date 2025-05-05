@@ -5,6 +5,8 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
 
 
 class TableVariable:
@@ -232,3 +234,58 @@ class FPVTable(FluidPhysics):
 
     def get_source_terms(self, state):
         return self.lookup("SRC_PROG", state)
+
+    def primitive_to_conservative(self, state: FluidState):
+        """Transform primitive variables into vector of conservatives."""
+        # Get conservative vector with sensible + kinetic energy
+        y = super().primitive_to_conservative(state)
+
+        # Add chemical energy from flamelet table
+        y[..., 2] += state.density * self.lookup("E0_CHEM", state)
+
+        return y
+
+    def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
+        """Transform conservative variables into primitives."""
+        r = state_array[..., 0]
+        ru = state_array[..., 1]
+        E = state_array[..., 2]
+        rY = state_array[..., 3:]
+
+        # Get the composition first
+        Y = rY / r[..., None]
+
+        # Bound
+        Y[Y > 1.0] = 1.0
+        Y[Y < 0.0] = 0.0
+
+        # Subtract chemical energy from flamelet table
+        Z = Y[..., 0]
+        C = Y[..., 1]
+        Q = np.zeros_like(Z)
+        L = self.get_normalized_progress_variable(Z, C)
+        E -= r * self.lookup_direct("E0_CHEM", Z, Q, L)
+
+        # Now get velocity and pressure
+        u = ru / r
+        p = (gamma - 1.0) * (E - 0.5 * r * u**2.0)
+
+        return FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            pressure=p,
+            composition=Y,
+            mixture_fraction=Z,
+            progress_variable=C,
+            normalized_progress_variable=L,
+        )
+
+
+class FPVSource(RightHandSide):
+    def source(
+        self, _time: float, state_array: Array, physics: FPVTable, gamma_star: Array
+    ) -> Array:
+        state = physics.conservative_to_primitive(state_array, gamma_star)
+
+        return state.density * physics.get_source_terms(state)

@@ -313,53 +313,22 @@ class Combustor:
             inputs
                 dt=time step
         """
-        # Using mixed-is-burned (MIB)
-        # (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.state.gamma)
-        # Z = rY[:, 0] / r
-        # Q = np.zeros(self.n)
-        # C = rY[:, 1] / r
-        # L = self.physics.get_normalized_progress_variable(Z, C)
-        # e_chem0 = r * self.physics.lookup('E0_CHEM', Z, Q, L)
-        # C1, e_chem1 = self.injector.get_MIB_profiles()
-        # e_chem1 *= r
-        # E1 = E + e_chem0 - e_chem1
-        # rY1 = rY
-        # rY1[:, 1] = r * C1
-        # (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E1,rY1,self.state.gamma)
-
         # Using FPV
         # initialize
+        gamma_star = self.state.gamma
         y = self.physics.primitive_to_conservative(self.state)
-        (r, rZ, rC) = y[:, 0], y[:, 3], y[:, 4]
-        Z = rZ / r
-        C = rC / r
-        Q = np.zeros(self.geometry.n)
-        L = self.physics.get_normalized_progress_variable(Z, C)
-        e_chem0 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
 
         # 1st stage of RK2
-        omegaC = r * self.injector.get_chemical_sources(Z, C)
+        dydt = self.injector.source(self.t, y, self.physics, gamma_star)
         y1 = y.copy()
-        y1[:, 4] += dt * omegaC
-        C1 = y1[:, 4] / r
-        L1 = self.physics.get_normalized_progress_variable(Z, C1)
-        e_chem1 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L1)
-        y1[:, 2] += e_chem0 - e_chem1
-        state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
-        state1.gamma = self.state.gamma
+        y1[:, 4] = y[:, 4] + dt * dydt
 
         # 2nd stage of RK2
-        self.physics.set_state(state1)
-        omegaC1 = state1.density * self.injector.get_chemical_sources(
-            state1.Z, state1.C
-        )
-        rC = y[:, 4] = 0.5 * (y[:, 4] + y1[:, 4] + dt * omegaC1)
-        L = self.physics.get_normalized_progress_variable(Z, rC / r)
-        e_chem2 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
-        y[:, 2] += e_chem0 - e_chem2
-        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
+        dydt[:, 4] = self.injector.source(self.t, y1, self.physics, gamma_star)
+        y[:, 4] = 0.5*(y[:, 4] + y1[:, 4] + dt * dydt)
 
         # update properties
+        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
 
