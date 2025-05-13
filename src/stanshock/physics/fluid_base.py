@@ -37,10 +37,11 @@ class FluidState:
 class FluidPhysics(ABC):
     def __init__(self, gas: ct.Solution, ox_def=None, fuel_def=None, prog_def=None):
         self.gas = gas
-        self.n_scalars = self.gas.n_species
-        self.scalar_names = [species.lower() for species in self.gas.species_names]
+        self.n_scalars = max(self.gas.n_species - 1, 1)
+        self.scalar_names = [
+            self.gas.species_name(i).lower() for i in range(self.n_scalars)
+        ]
 
-        self.normalize_scalars = True
         self.is_flamelet = False
 
         # For mixture fraction and progress variable definitions (optional):
@@ -135,7 +136,13 @@ class FluidPhysics(ABC):
 
     def get_bilger_mixture_fraction(self, Y):
         """Compute the Bilger mixture fraction from given mass fractions."""
-        return np.clip(np.dot(Y, self.Z_weights) + self.Z_offset, 0.0, 1.0)
+        if self.gas.n_species > 1:
+            Y_full = np.zeros(self.gas.n_species)
+            Y_full[:-1] = Y
+            Y_full[-1] = 1.0 - np.sum(Y_full[:-1])
+        else:
+            Y_full = Y
+        return np.clip(np.dot(Y_full, self.Z_weights) + self.Z_offset, 0.0, 1.0)
 
     def initialize_progress_variable(self, prog_def: dict[str, float]):
         """Set coefficients defining progress variable."""
@@ -156,7 +163,13 @@ class FluidPhysics(ABC):
             msg = "Progress Variable Not Defined"
             raise Exception(msg)
 
-        return np.clip(np.dot(Y, self.prog_weights), 0.0, 1.0)
+        if self.gas.n_species > 1:
+            Y_full = np.zeros(self.gas.n_species)
+            Y_full[:-1] = Y
+            Y_full[-1] = 1.0 - np.sum(Y_full[:-1])
+        else:
+            Y_full = Y
+        return np.clip(np.dot(Y_full, self.prog_weights), 0.0, 1.0)
 
     def set_state(self, state: FluidState) -> FluidState:
         """Updates internal representation of the fluid state if needed."""
@@ -211,10 +224,6 @@ class FluidPhysics(ABC):
         Y[Y > 1.0] = 1.0
         Y[Y < 0.0] = 0.0
 
-        # Scale
-        if self.normalize_scalars:
-            Y = Y / np.sum(Y, axis=-1, keepdims=True)
-
         return FluidState(
             shape=r.shape,
             density=r,
@@ -222,3 +231,13 @@ class FluidPhysics(ABC):
             pressure=p,
             composition=Y,
         )
+
+    @abstractmethod
+    def get_viscous_flux(
+        self,
+        face_states: FluidState,
+        dudx: Array,
+        dTdx: Array,
+        dYdx: Array,
+    ) -> Array:
+        """Compute viscous fluxes."""

@@ -186,7 +186,7 @@ def main(
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
             ssbl.state.density[iX] = gas4.density
-            ssbl.state.composition[iX, :] = gas4.Y
+            ssbl.state.composition[iX, :] = gas4.Y[:-1]
             ssbl.state.gamma[iX] = gas4.cp / gas4.cv
 
     # Solve
@@ -243,7 +243,7 @@ def main(
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
             ssnbl.state.density[iX] = gas4.density
-            ssnbl.state.composition[iX, :] = gas4.Y
+            ssnbl.state.composition[iX, :] = gas4.Y[:-1]
             ssnbl.state.gamma[iX] = gas4.cp / gas4.cv
 
     # Solve

@@ -108,7 +108,7 @@ initState = gas_init, U_in
 W_in = gas_init.mean_molecular_weight
 
 # Define the boundary conditions
-BC_inlet = gas_init.density, U_in, gas_init.P, gas_init.Y
+BC_inlet = gas_init.density, U_in, gas_init.P, gas_init.Y[:-1]
 BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
@@ -131,7 +131,7 @@ scale_factor = 3.960715337483353
 
 
 def sourceTerms(rho, rhou, rhoE, rhoY, gamma, x, t):
-    nsp = gas.n_species
+    nsp = gas.n_species - 1
     rhs = np.zeros([len(x), 3 + nsp])
     index = np.logical_and(x >= x_inj, x < x_inj + L_src)
     dx = x[1] - x[0]

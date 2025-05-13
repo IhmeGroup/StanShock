@@ -325,7 +325,7 @@ class Combustor:
 
         # 2nd stage of RK2
         dydt[:, 4] = self.injector.source(self.t, y1, self.physics, gamma_star)
-        y[:, 4] = 0.5*(y[:, 4] + y1[:, 4] + dt * dydt)
+        y[:, 4] = 0.5 * (y[:, 4] + y1[:, 4] + dt * dydt)
 
         # update properties
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
@@ -353,7 +353,12 @@ class Combustor:
             # unpack the input
             r = args[0]
             F = args[1]
-            Y = y[:-1]
+            if self.physics.gas.n_species > 1:
+                Y = np.zeros(self.physics.gas.n_species)
+                Y[:-1] = y[:-1]
+                Y[-1] = 1.0 - np.sum(Y[:-1])
+            else:
+                Y = y[:-1]
             T = y[-1]
             # set the state for the gas object
             self.physics.gas.TDY = T, r, Y
@@ -367,7 +372,10 @@ class Combustor:
             YDot = wDot / r
             TDot = -np.sum(eRT * wHatDot) * ct.gas_constant * T / (r * cv)
             f = np.zeros(self.n_scalars + 1)
-            f[:-1] = YDot
+            if self.physics.gas.n_species > 1:
+                f[:-1] = YDot[:-1]
+            else:
+                f[:-1] = YDot
             f[-1] = TDot
             return f / F
 
@@ -406,7 +414,6 @@ class Combustor:
             Y = integrator.y[:-1]
             Y[Y > 1.0] = 1.0
             Y[Y < 0.0] = 0.0
-            Y /= np.sum(Y)
             # update
             state_temp.composition[TIndex, :] = Y
             state_temp.temperature[TIndex] = integrator.y[-1]

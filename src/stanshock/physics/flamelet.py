@@ -43,7 +43,6 @@ class FPVTable(FluidPhysics):
         self.gas = gas
         self.n_scalars = 2
         self.scalar_names = ["mixture fraction", "progress variable"]
-        self.normalize_scalars = False
         self.is_flamelet = True
         self.filename = filename
         with h5py.File(filename, "r") as f:
@@ -269,6 +268,7 @@ class FPVTable(FluidPhysics):
         # Now get velocity and pressure
         u = ru / r
         p = (gamma - 1.0) * (E - 0.5 * r * u**2.0)
+        # TODO - update this to use new energy equation
 
         return FluidState(
             shape=r.shape,
@@ -279,6 +279,34 @@ class FPVTable(FluidPhysics):
             mixture_fraction=Z,
             progress_variable=C,
             normalized_progress_variable=L,
+        )
+
+    def get_viscous_flux(
+        self,
+        face_states: FluidState,
+        dudx: Array,
+        dTdx: Array,
+        dYdx: Array,
+    ) -> Array:
+        """Compute viscous fluxes."""
+        viscosity = self.get_mu(face_states)
+        conductivity = self.get_thermal_conductivity(face_states)
+        diffusivities = self.get_mass_diffusivity(face_states)
+
+        # Average the properties from either side
+        density = 0.5 * (face_states.density[0, :] + face_states.density[1, :])
+        viscosity = 0.5 * (viscosity[0, :] + viscosity[1, :])
+        conductivity = 0.5 * (conductivity[0, :] + conductivity[1, :])
+        diffusivities = 0.5 * (diffusivities[0, :, :] + diffusivities[1, :, :])
+
+        return np.concatenate(
+            (
+                np.zeros((face_states.shape[1], 1)),
+                (4.0 / 3.0 * viscosity * dudx)[:, None],
+                (conductivity * dTdx)[:, None],
+                density[:, None] * diffusivities * dYdx,
+            ),
+            axis=1,
         )
 
 

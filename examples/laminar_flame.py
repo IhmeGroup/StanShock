@@ -56,7 +56,7 @@ def main(
     L = flame.grid[-1] - flame.grid[0]
     xUpper, xLower = flame_center + L * f, flame_center - L * f
     boundary_conditions = (
-        (gasUnburned.density, uUnburned, None, gasUnburned.Y),
+        (gasUnburned.density, uUnburned, None, gasUnburned.Y[:-1]),
         (None, None, gasBurned.P, None),
     )
     if physics_model == "ThermoTable":
@@ -79,7 +79,7 @@ def main(
 
     # interpolate flame solution
     Y = ss.state.composition
-    for iSp in range(gas.n_species):
+    for iSp in range(physics.n_scalars):
         Y[:, iSp] = np.interp(ss.geometry.x, flame.grid, flame.Y[iSp, :])
 
     ss.state = FluidState(

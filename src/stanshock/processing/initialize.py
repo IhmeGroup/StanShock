@@ -69,7 +69,10 @@ def initialize_constant(
     ones = np.ones(n)
 
     # Initialize state
-    composition = physics.get_composition(gas.Y[None, :])
+    if gas.n_species > 1:
+        composition = physics.get_composition(gas.Y[None, :-1])
+    else:
+        composition = physics.get_composition(gas.Y[None, :])
 
     return FluidState(
         shape=(n,),
@@ -157,8 +160,12 @@ def initialize_diffuse_interface(
 
     gamma_left = left_gas.cp / left_gas.cv
     gamma_right = right_gas.cp / right_gas.cv
-    composition_left = physics.get_composition(left_gas.Y)
-    composition_right = physics.get_composition(right_gas.Y)
+    if gas.n_species > 1:
+        composition_left = physics.get_composition(left_gas.Y[:-1])
+        composition_right = physics.get_composition(right_gas.Y[:-1])
+    else:
+        composition_left = physics.get_composition(left_gas.Y)
+        composition_right = physics.get_composition(right_gas.Y)
 
     # Smooth transition between left and right states
     r = smoothing_function(

@@ -4,6 +4,7 @@ import cantera as ct
 import numpy as np
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.backend import Array
 
 
 class CanteraInterface(FluidPhysics):
@@ -26,7 +27,14 @@ class CanteraInterface(FluidPhysics):
 
         # Update SolutionArray only if state has changed
         if not state._cache_valid:
-            state.mass_fractions = state.composition
+            if self.gas.n_species > 1:
+                state.mass_fractions = np.zeros(
+                    (state.composition.shape)[:-1] + (self.gas.n_species,)
+                )
+                state.mass_fractions[..., :-1] = state.composition
+                state.mass_fractions[..., -1] = 1.0 - np.sum(state.composition, axis=-1)
+            else:
+                state.mass_fractions = state.composition
 
             # Prioritize density-based updates
             if state.density is not None:
@@ -90,11 +98,72 @@ class CanteraInterface(FluidPhysics):
         return state.sound_speed
 
     def get_mass_diffusivity(self, state: FluidState):
-        """Compute mixture-averaged diffusion coefficients."""
+        """Compute mixture-averaged diffusion coefficients for use with mass fraction gradients."""
         self.set_state(state)
-        return self.sol.mix_diff_coeffs
+        return self.sol.mix_diff_coeffs_mass
+
+    def get_enthalpies(self, state: FluidState):
+        """Compute partial mass enthalpies of the gas."""
+        self.set_state(state)
+        return self.sol.partial_molar_enthalpies / self.sol.molecular_weights
 
     def get_source_terms(self, state: FluidState):
         """Compute reaction source terms corresponding to transported scalars."""
         self.set_state(state)
         return self.sol.net_production_rates
+
+    def get_viscous_flux(
+        self,
+        face_states: FluidState,
+        dudx: Array,
+        dTdx: Array,
+        dYdx: Array,
+    ) -> Array:
+        """Compute viscous fluxes."""
+        viscosity = self.get_mu(face_states)
+        conductivity = self.get_thermal_conductivity(face_states)
+        diffusivities = self.get_mass_diffusivity(face_states)
+        enthalpies = self.get_enthalpies(face_states)
+
+        # Average the properties from either side
+        if self.gas.n_species > 1:
+            composition = np.zeros((face_states.shape[1], self.gas.n_species))
+            composition[:, :-1] = 0.5 * (
+                face_states.composition[0, :, :] + face_states.composition[1, :, :]
+            )
+            composition[:, -1] = 1.0 - np.sum(composition[:, :-1], axis=1)
+        else:
+            composition = 0.5 * (
+                face_states.composition[0, :, :] + face_states.composition[1, :, :]
+            )
+        density = 0.5 * (face_states.density[0, :] + face_states.density[1, :])
+        viscosity = 0.5 * (viscosity[0, :] + viscosity[1, :])
+        conductivity = 0.5 * (conductivity[0, :] + conductivity[1, :])
+        diffusivities = 0.5 * (diffusivities[0, :, :] + diffusivities[1, :, :])
+        enthalpies = 0.5 * (enthalpies[0, :, :] + enthalpies[1, :, :])
+
+        if self.gas.n_species > 1:
+            rhoYV = np.zeros((face_states.shape[1], self.gas.n_species))
+            rhoYV[:, :-1] = -density[:, None] * diffusivities[:, :-1] * dYdx
+            rhoYV[:, -1] = -density * diffusivities[:, -1] * (-np.sum(dYdx, axis=1))
+        else:
+            rhoYV = -density[:, None] * diffusivities[:, None] * dYdx
+        rhoYVc = -np.sum(rhoYV, axis=1)
+        rhoYV += rhoYVc[:, None] * composition
+
+        flux_rho = np.zeros((face_states.shape[1], 1))
+        flux_rhou = (4.0 / 3.0 * viscosity * dudx)[:, None]
+        flux_rhoY = rhoYV[:, :-1]
+        flux_rhoE = (conductivity * dTdx)[:, None] + (rhoYV * enthalpies).sum(axis=-1)[
+            :, None
+        ]
+
+        return np.concatenate(
+            (
+                flux_rho,
+                flux_rhou,
+                flux_rhoE,
+                flux_rhoY,
+            ),
+            axis=1,
+        )

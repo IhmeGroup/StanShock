@@ -19,20 +19,26 @@ def get_specific_gas_constant_compiled(Y, molecularWeights):
     Function used by the thermoTable class to find the gas constant. This
     function is compiled for speed-up.
         inputs:
-            Y: scalar [nX,nSp]
+            Y: scalar [nX,nSp-1]
             molecularWeights: species molecular weights [nSp]
         output:
             R: gas constants [nX]
     """
     # find dimensions
     nX = len(Y[:, 0])
-    nSp = len(Y[0, :])
+    nSp = molecularWeights.size
+    if nSp > 1:
+        Y_full = np.zeros((nX, nSp))
+        Y_full[:, :-1] = Y
+        Y_full[:, -1] = 1.0 - np.sum(Y, axis=1)
+    else:
+        Y_full = Y
     # determine R
     R = np.zeros(nX)
     for iX in range(nX):
         molecularWeight = 0.0
         for iSp in range(nSp):
-            molecularWeight += Y[iX, iSp] / molecularWeights[iSp]
+            molecularWeight += Y_full[iX, iSp] / molecularWeights[iSp]
         molecularWeight = 1.0 / molecularWeight
         R[iX] = ct.gas_constant / molecularWeight
     return R
@@ -54,7 +60,13 @@ def get_cp_compiled(T, Y, TTable, a, b):
     """
     # find dimensions
     nX = len(Y[:, 0])
-    nSp = len(Y[0, :])
+    nSp = a.shape[1]
+    if nSp > 1:
+        Y_full = np.zeros((nX, nSp))
+        Y_full[:, :-1] = Y
+        Y_full[:, -1] = 1.0 - np.sum(Y, axis=1)
+    else:
+        Y_full = Y
     # find table extremes
     TMin = TTable[0]
     dT = TTable[1] - TTable[0]  # assume constant steps in table
@@ -72,7 +84,7 @@ def get_cp_compiled(T, Y, TTable, a, b):
         index = indices[iX]
         bbar = 0.0
         for iSp in range(nSp):
-            bbar += Y[iX, iSp] * (
+            bbar += Y_full[iX, iSp] * (
                 a[index, iSp] / 2.0 * (T[iX] + TTable[index]) + b[index, iSp]
             )
         cp[iX] = bbar
@@ -181,8 +193,7 @@ class ThermoTable(CanteraInterface):
         """
         This method computes the specific heat ratio, gamma.
             inputs:
-                T: vector of temperatures [n]
-                Y: matrix of mass fractions [n,nSp]
+                state: FluidState object
             outputs:
                 gamma: vector of specific heat ratios [n]
         """
@@ -194,9 +205,7 @@ class ThermoTable(CanteraInterface):
         """
         This method applies the ideal gas law to compute the temperature
             inputs:
-                r: vector of densities [n]
-                p: vector of pressures [n]
-                Y: matrix of mass fractions [n,nSp]
+                state: FluidState object
             outputs:
                 T: vector of temperatures
         """
