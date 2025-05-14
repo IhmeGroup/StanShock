@@ -16,6 +16,7 @@ class FluidState:
     density: np.ndarray | None = None
     temperature: np.ndarray | None = None
     pressure: np.ndarray | None = None
+    internal_energy: np.ndarray | None = None
     mass_fractions: np.ndarray | None = None
     mole_fractions: np.ndarray | None = None
     mixture_fraction: np.ndarray | None = None
@@ -191,46 +192,16 @@ class FluidPhysics(ABC):
         raise NotImplementedError(msg)
 
     @abstractmethod
-    def get_source_terms(self, state: FluidState):
-        """Compute reaction source terms corresponding to transported scalars."""
-
     def primitive_to_conservative(self, state: FluidState):
         """Transform primitive variables into vector of conservatives."""
-        return np.concatenate(
-            (
-                state.density[..., None],
-                (state.density * state.velocity)[..., None],
-                (
-                    state.pressure / (state.gamma - 1.0)
-                    + 0.5 * state.density * state.velocity**2
-                )[..., None],
-                state.density[..., None] * state.composition,
-            ),
-            axis=-1,
-        )
 
+    @abstractmethod
     def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
         """Transform conservative variables into primitives."""
-        r = state_array[..., 0]
-        ru = state_array[..., 1]
-        E = state_array[..., 2]
-        rY = state_array[..., 3:]
 
-        u = ru / r
-        p = (gamma - 1.0) * (E - 0.5 * r * u**2.0)
-        Y = rY / r[..., None]
-
-        # Bound
-        Y[Y > 1.0] = 1.0
-        Y[Y < 0.0] = 0.0
-
-        return FluidState(
-            shape=r.shape,
-            density=r,
-            velocity=u,
-            pressure=p,
-            composition=Y,
-        )
+    @abstractmethod
+    def get_source_terms(self, state: FluidState):
+        """Compute reaction source terms corresponding to transported scalars."""
 
     @abstractmethod
     def get_viscous_flux(

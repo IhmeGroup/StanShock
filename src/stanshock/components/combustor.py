@@ -410,10 +410,9 @@ class Combustor:
             integrator.set_f_params(args)
             # solve
             integrator.integrate(dt)
-            # clip and normalize
+            # clip
             Y = integrator.y[:-1]
-            Y[Y > 1.0] = 1.0
-            Y[Y < 0.0] = 0.0
+            Y = np.clip(Y, 0.0, 1.0)
             # update
             state_temp.composition[TIndex, :] = Y
             state_temp.temperature[TIndex] = integrator.y[-1]

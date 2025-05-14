@@ -30,14 +30,13 @@ class FaceExtrapolator(ABC):
 
         return FluidState(
             shape=(state.shape[0] + 2 * mt,),
-            density=np.pad(state.density, mt, mode="constant", constant_values=1.0),
-            velocity=np.pad(state.velocity, mt, mode="constant", constant_values=1.0),
-            pressure=np.pad(state.pressure, mt, mode="constant", constant_values=1.0),
+            density=np.pad(state.density, mt, mode="edge"),
+            velocity=np.pad(state.velocity, mt, mode="edge"),
+            pressure=np.pad(state.pressure, mt, mode="edge"),
             composition=np.pad(
                 state.composition,
                 ((mt, mt), (0, 0)),
-                mode="constant",
-                constant_values=1.0,
+                mode="edge",
             ),
             gamma=np.pad(state.gamma, mt, mode="edge"),
         )

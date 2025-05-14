@@ -40,14 +40,29 @@ class CanteraInterface(FluidPhysics):
             if state.density is not None:
                 if state.pressure is not None:
                     self.sol.DPY = state.density, state.pressure, state.mass_fractions
-                else:
+                    state.temperature = self.sol.T
+                    state.internal_energy = self.sol.int_energy_mass
+                elif state.internal_energy is not None:
+                    self.sol.UVY = (
+                        state.internal_energy,
+                        1 / state.density,
+                        state.mass_fractions,
+                    )
+                    state.temperature = self.sol.T
+                    state.pressure = self.sol.P
+                elif state.temperature is not None:
                     self.sol.TDY = (
                         state.temperature,
                         state.density,
                         state.mass_fractions,
                     )
+                    state.pressure = self.sol.P
+                    state.internal_energy = self.sol.int_energy_mass
+                else:
+                    msg = "Cannot set state: need either pressure, internal energy, or temperature."
+                    raise ValueError(msg)
                 state.density = self.sol.density_mass
-            else:
+            elif (state.pressure is not None) and (state.temperature is not None):
                 self.sol.TPY = state.temperature, state.pressure, state.mass_fractions
                 state.temperature = self.sol.T
 
@@ -106,6 +121,59 @@ class CanteraInterface(FluidPhysics):
         """Compute partial mass enthalpies of the gas."""
         self.set_state(state)
         return self.sol.partial_molar_enthalpies / self.sol.molecular_weights
+
+    def primitive_to_conservative(self, state: FluidState):
+        """Transform primitive variables into vector of conservatives, accounting for chemical contributions."""
+        # Compute total energy including chemical contributions
+        self.set_state(state)
+        total_energy = state.internal_energy + 0.5 * state.velocity**2
+
+        return np.concatenate(
+            (
+                state.density[..., None],
+                (state.density * state.velocity)[..., None],
+                (state.density * total_energy)[..., None],
+                state.density[..., None] * state.composition,
+            ),
+            axis=-1,
+        )
+
+    def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
+        """Transform conservative variables into primitives, accounting for chemical contributions."""
+        r = state_array[..., 0]
+        ru = state_array[..., 1]
+        re_t = state_array[..., 2]
+        rY = state_array[..., 3:]
+
+        u = ru / r
+        Y = rY / r[..., None]
+
+        # Bound mass fractions
+        Y = np.clip(Y, 0.0, 1.0)
+
+        # Compute specific internal energy from total energy
+        e_int = (re_t / r) - 0.5 * u**2
+
+        temp_state = FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            internal_energy=e_int,
+            composition=Y,
+        )
+        self.set_state(temp_state)
+
+        gamma += 1
+        # TODO - how to handle double flux? modify gamma to silence unused warning for now
+
+        return FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            pressure=self.sol.P,
+            temperature=self.sol.T,
+            composition=Y,
+        )
 
     def get_source_terms(self, state: FluidState):
         """Compute reaction source terms corresponding to transported scalars."""

@@ -77,9 +77,9 @@ def initialize_constant(
     return FluidState(
         shape=(n,),
         density=ones * gas.density,
+        velocity=ones * u,
         pressure=ones * gas.P,
         gamma=ones * (gas.cp / gas.cv),
-        velocity=ones * u,
         composition=np.tile(composition, (n, 1)),
     )
 
@@ -194,6 +194,7 @@ def initialize_diffuse_interface(
     return FluidState(
         shape=(geometry.n,),
         density=r,
+        velocity=geometry.u,
         pressure=p,
         gamma=gamma,
         composition=composition,

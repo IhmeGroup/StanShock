@@ -241,6 +241,7 @@ class FPVTable(FluidPhysics):
 
         # Add chemical energy from flamelet table
         y[..., 2] += state.density * self.lookup("E0_CHEM", state)
+        # TODO - ^ update this to use new energy equation
 
         return y
 
@@ -248,27 +249,26 @@ class FPVTable(FluidPhysics):
         """Transform conservative variables into primitives."""
         r = state_array[..., 0]
         ru = state_array[..., 1]
-        E = state_array[..., 2]
+        re_t = state_array[..., 2]
         rY = state_array[..., 3:]
 
         # Get the composition first
         Y = rY / r[..., None]
 
         # Bound
-        Y[Y > 1.0] = 1.0
-        Y[Y < 0.0] = 0.0
+        Y = np.clip(Y, 0.0, 1.0)
 
         # Subtract chemical energy from flamelet table
         Z = Y[..., 0]
         C = Y[..., 1]
         Q = np.zeros_like(Z)
         L = self.get_normalized_progress_variable(Z, C)
-        E -= r * self.lookup_direct("E0_CHEM", Z, Q, L)
+        rE = re_t - r * self.lookup_direct("E0_CHEM", Z, Q, L)
 
         # Now get velocity and pressure
         u = ru / r
-        p = (gamma - 1.0) * (E - 0.5 * r * u**2.0)
-        # TODO - update this to use new energy equation
+        p = (gamma - 1.0) * (rE - 0.5 * r * u**2.0)
+        # TODO - ^ update this: use Saghafian to get temperature, then use P = rho * R * T
 
         return FluidState(
             shape=r.shape,

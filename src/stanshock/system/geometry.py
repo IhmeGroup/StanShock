@@ -111,8 +111,9 @@ class Geometry(RightHandSide):
         """Fast source terms for quasi-1D geometry."""
         # Unpack the input and initialize
         x, gamma = args
-        r, ru, E = y
-        p = (gamma - 1.0) * (E - 0.5 * ru**2.0 / r)
+        r, ru, rE = y
+        p = (gamma - 1.0) * (rE - 0.5 * ru**2.0 / r)
+        # TODO - ^ update this to use new energy equation (and maybe use physics's conservative_to_primitive)
         rhs = np.zeros(3)
 
         # create quasi-1D right hand side
@@ -120,12 +121,12 @@ class Geometry(RightHandSide):
             dlnA_dt = self.dlnA_dt([x], time)[0]
             rhs[0] -= r * dlnA_dt
             rhs[1] -= ru * dlnA_dt
-            rhs[2] -= E * dlnA_dt
+            rhs[2] -= rE * dlnA_dt
 
         if self.dlnA_dx is not None:
             dlnA_dx = self.dlnA_dx([x], time)[0]
             rhs[0] -= ru * dlnA_dx
             rhs[1] -= (ru**2.0 / r) * dlnA_dx
-            rhs[2] -= (ru / r * (E + p)) * dlnA_dx
+            rhs[2] -= (ru / r * (rE + p)) * dlnA_dx
 
         return rhs
