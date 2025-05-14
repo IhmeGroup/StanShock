@@ -16,7 +16,7 @@ class Gradient(ABC):
         """Compute property gradients across the interior cell faces."""
 
 
-class CentralDifference:
+class CentralDifference(Gradient):
     def __init__(self, n_ghost_layers: int = 1) -> None:
         self.n_ghost_layers = n_ghost_layers
 

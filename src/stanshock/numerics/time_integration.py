@@ -21,12 +21,13 @@ class TimeIntegrator(ABC):
         state_array: Array,
         physics: FluidPhysics,
         gamma_star: Array,
+        e0_star: Array,
     ) -> tuple[float, Array]:
         """Integrate the state from `time` to `time+dt` given the rhs."""
 
 
 class ScipyIVP(TimeIntegrator):
-    def __init__(self, rhs: RightHandSide, method: str="LSODA", **kwargs) -> None:
+    def __init__(self, rhs: RightHandSide, method: str = "LSODA", **kwargs) -> None:
         """Interface to SciPy's IVP solvers.
 
         The specific solver can be selected with the `method` input, and additional
@@ -50,6 +51,7 @@ class ScipyIVP(TimeIntegrator):
         state_array: Array,
         physics: FluidPhysics,
         gamma_star: Array,
+        e0_star: Array,
     ) -> tuple[float, Array]:
         # integrator = self.integrator(self.rhs.source).set_integrator("lsoda")
         # integrator.set_initial_value(y=state_array, t=time)
@@ -58,10 +60,10 @@ class ScipyIVP(TimeIntegrator):
 
         results = self.integrator(
             fun=self.rhs.source,
-            t_span=(time, time+dt),
+            t_span=(time, time + dt),
             y0=state_array.flatten(),
             method=self.method,
-            args=(physics, gamma_star),
+            args=(physics, gamma_star, e0_star),
             **self.solver_options,
         )
 
@@ -79,6 +81,7 @@ class RungeKuttaBase(TimeIntegrator):
         state_array: Array,
         physics: FluidPhysics,
         gamma_star: Array,
+        e0_star: Array,
     ) -> tuple[float, Array]:
         t = time
         y = state_array.flatten()
@@ -94,6 +97,7 @@ class RungeKuttaBase(TimeIntegrator):
                 state_array=state_array,
                 physics=physics,
                 gamma_star=gamma_star,
+                e0_star=e0_star,
             )
 
             if b != 1.0:
@@ -171,6 +175,7 @@ class StrangSplitting(TimeIntegrator):
         state_array: Array,
         physics: FluidPhysics,
         gamma_star: Array,
+        e0_star: Array,
     ) -> tuple[float, Array]:
         y = state_array.flatten()
 
@@ -181,6 +186,7 @@ class StrangSplitting(TimeIntegrator):
             state_array=y,
             physics=physics,
             gamma_star=gamma_star,
+            e0_star=e0_star,
         )
 
         # Take full-step with reaction terms
@@ -190,6 +196,7 @@ class StrangSplitting(TimeIntegrator):
             state_array=y,
             physics=physics,
             gamma_star=gamma_star,
+            e0_star=e0_star,
         )
 
         # Take half-step with transport terms
@@ -199,15 +206,18 @@ class StrangSplitting(TimeIntegrator):
             state_array=y,
             physics=physics,
             gamma_star=gamma_star,
+            e0_star=e0_star,
         )
 
         return t, y
 
 
 class LieSplitting(TimeIntegrator):
-    def __init__(self, operators: list[TimeIntegrator], update_gamma_star: bool=False) -> None:
+    def __init__(
+        self, operators: list[TimeIntegrator], update_double_flux: bool = False
+    ) -> None:
         self.operators = operators
-        self.update_gamma_star = update_gamma_star
+        self.update_double_flux = update_double_flux
 
     def advance(
         self,
@@ -216,18 +226,24 @@ class LieSplitting(TimeIntegrator):
         state_array: Array,
         physics: FluidPhysics,
         gamma_star: Array,
+        e0_star: Array,
     ) -> tuple[float, Array]:
         y = state_array.flatten()
 
         for operator in self.operators:
             _, y = operator.advance(
-                dt=dt, time=time, state_array=y, physics=physics, gamma_star=gamma_star
+                dt=dt,
+                time=time,
+                state_array=y,
+                physics=physics,
+                gamma_star=gamma_star,
+                e0_star=e0_star,
             )
 
-            # Optionally: Update the gamma_star value
-            if self.update_gamma_star:
-                state = physics.conservative_to_primitive(y, gamma_star)
+            # Optionally: Update the double flux variables
+            if self.update_double_flux:
+                state = physics.conservative_to_primitive(y, gamma_star, e0_star)
                 state.temperature = physics.get_temperature(state)
-                gamma_star = physics.get_gamma(state)
+                gamma_star, e0_star = physics.get_double_flux_variables(state)
 
-        return time+dt, y
+        return time + dt, y

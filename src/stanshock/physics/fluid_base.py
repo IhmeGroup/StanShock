@@ -281,3 +281,17 @@ class FluidPhysics(ABC):
     @abstractmethod
     def get_source_terms(self, state: FluidState) -> Array:
         """Compute reaction source terms corresponding to transported scalars."""
+
+
+class ChemistrySource:
+    def source(
+        self,
+        _time: float,
+        state_array: Array,
+        physics: FluidPhysics,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        """Compute the temporal gradient of the current state of the system."""
+        state = physics.conservative_to_primitive(state_array, gamma_star, e0_star)
+        return physics.get_source_terms(state)
