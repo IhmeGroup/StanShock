@@ -9,8 +9,8 @@ import numpy as np
 from scipy import interpolate, optimize
 
 from stanshock.components.combustor import Combustor
+from stanshock.models.jicf import JICModel
 from stanshock.physics.flamelet import FPVTable
-from stanshock.physics.jicf import JICModel
 from stanshock.processing.plot import XTDiagram
 
 XSMALL_SIZE = 12
