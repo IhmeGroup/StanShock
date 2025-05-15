@@ -1048,8 +1048,16 @@ class JICModel(RightHandSide):
         Zvar = self.Z_var_profile_interp((mdot_inj, self.x))
         Zvar = np.maximum(Zvar, 10 ** self.logsigma2_vec.min())
 
-        return factor * state.density * self.omega_C_int_interp(
-            (state.mixture_fraction, state.normalized_progress_variable, np.log10(Zvar))
+        return (
+            factor
+            * state.density
+            * self.omega_C_int_interp(
+                (
+                    state.mixture_fraction,
+                    state.normalized_progress_variable,
+                    np.log10(Zvar),
+                )
+            )
         )
 
     def get_MIB_profiles(self):

@@ -319,12 +319,16 @@ class Combustor:
         dydt = np.zeros_like(y)
 
         # 1st stage of RK2
-        dydt[:, 4] = self.injector.get_chemical_sources(self.t, y, self.physics, gamma_star)
+        dydt[:, 4] = self.injector.get_chemical_sources(
+            self.t, y, self.physics, gamma_star
+        )
         y1 = y + dt * dydt
 
         # 2nd stage of RK2
-        dydt[:, 4] = self.injector.get_chemical_sources(self.t, y1, self.physics, gamma_star)
-        y = 0.5*(y + y1 + dt * dydt)
+        dydt[:, 4] = self.injector.get_chemical_sources(
+            self.t, y1, self.physics, gamma_star
+        )
+        y = 0.5 * (y + y1 + dt * dydt)
 
         # update properties
         self.state = self.physics.conservative_to_primitive(y, gamma_star)
@@ -493,7 +497,7 @@ class Combustor:
         y1 = y + dt * dydt
 
         # 2nd stage of RK2
-        dydt = self.injector.source(self.t+dt, y1, self.physics, gamma_star)
+        dydt = self.injector.source(self.t + dt, y1, self.physics, gamma_star)
         y = 0.5 * (y + y1 + dt * dydt)
 
         # update
