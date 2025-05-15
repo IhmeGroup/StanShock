@@ -12,6 +12,9 @@ from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 
 from stanshock.physics.flamelet import FPVTable
+from stanshock.physics.fluid_base import FluidPhysics
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
 
 XSMALL_SIZE = 12
 SMALL_SIZE = 14
@@ -36,7 +39,7 @@ plt.rcParams.update(
 datadir = Path("./data")
 
 
-class JICModel:
+class JICModel(RightHandSide):
     """
     This is a class defined to encapsulate the Jet-in-Crossflow model
     """
@@ -873,13 +876,21 @@ class JICModel:
         # Drop fluid tips that have passed the end of the domain
         self.fluid_tips = self.fluid_tips[self.fluid_tips[:, 0] < self.x[-1]]
 
-    def get_injector_sources(self, rho, rhoU, E, rhoZ, rhoC, gamma, t):
+    def source(
+        self,
+        _time: float,
+        state_array: Array,
+        _physics: FluidPhysics,
+        _gamma_star: Array,
+    ) -> Array:
         """
         This method computes a fuel injector source term to target the desired
         mixture fraction profile.
         """
-        rhs = np.zeros((rho.shape[0], 5))
-        _ = (rhoU, E, rhoC, gamma, t)  # Hack to silence linter
+        rhs = np.zeros_like(state_array)
+
+        rho = state_array[:, 0]
+        rhoZ = state_array[:, 4]
 
         Z = rhoZ / rho
         mdot_inj = np.interp(
@@ -1014,7 +1025,9 @@ class JICModel:
             (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
         )
 
-    def get_chemical_sources(self, Z, C):
+    def get_chemical_sources(
+        self, _time: float, state_array: Array, physics: FPVTable, gamma_star: Array
+    ) -> Array:
         """
         This method computes the chemical source terms [1/s] using the FPV table.
         Z: float
@@ -1022,6 +1035,11 @@ class JICModel:
         C: float
             The array of progress variable values at different grid points
         """
+        # Get primitive variables
+        state = physics.conservative_to_primitive(state_array, gamma_star)
+        factor = physics.get_source_progress_variable_compressibility_factor(state)
+
+        # Get the mixture fraction variance profile
         mdot_inj = np.interp(
             self.x,
             np.flip(self.fluid_tips, axis=0)[:, 0],
@@ -1029,8 +1047,10 @@ class JICModel:
         )
         Zvar = self.Z_var_profile_interp((mdot_inj, self.x))
         Zvar = np.maximum(Zvar, 10 ** self.logsigma2_vec.min())
-        L = self.fpv_table.get_normalized_progress_variable(Z, C)
-        return self.omega_C_int_interp((Z, L, np.log10(Zvar)))
+
+        return factor * state.density * self.omega_C_int_interp(
+            (state.mixture_fraction, state.normalized_progress_variable, np.log10(Zvar))
+        )
 
     def get_MIB_profiles(self):
         """
