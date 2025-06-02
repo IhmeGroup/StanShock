@@ -5,6 +5,7 @@ import numpy as np
 
 from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.numerics.face_extrapolation import FifthOrderWeno, FirstOrder
+from stanshock.numerics.gradient import CentralDifference
 from stanshock.numerics.inviscid_flux import InviscidFlux, hllc_flux
 from stanshock.numerics.viscous_flux import ViscousFlux
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
@@ -128,7 +129,7 @@ class Combustor:
             self.viscous_flux = ViscousFlux(
                 face_extrapolator=FirstOrder(),
                 boundary_conditions=self.apply_boundary_conditions,
-                dx=self.geometry.dx,
+                gradient=CentralDifference(),
             )
 
         if self.include_boundary_layer:
@@ -278,12 +279,12 @@ class Combustor:
             self.viscous_flux.F = np.pad(self.F, mt, mode="edge")
 
         # 1st stage of RK2
-        dydt = self.viscous_flux.source(self.t, y, self.physics, gamma_star)
+        dydt = self.viscous_flux.source(self.t, y, self.geometry, self.physics, gamma_star)
         y1 = y.copy()
         y1[mt:-mt] += dt * dydt
 
         # 2nd stage of RK2
-        dydt = self.viscous_flux.source(self.t, y1, self.physics, gamma_star)
+        dydt = self.viscous_flux.source(self.t, y1, self.geometry, self.physics, gamma_star)
         y = 0.5 * (y[mt:-mt] + y1[mt:-mt] + dt * dydt)
 
         # Remove ghost layers and update gamma
