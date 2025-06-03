@@ -29,7 +29,9 @@
 StanShock is a quasi-1D gas dynamics solver designed to model shock tube
 experiments and, more recently, scramjet engines. It is currently under heavy
 development to bring in new capabilities and modernize the infrastructure, and
-should thus be considered unstable until further notice.
+should thus be considered unstable until further notice. For the prior release,
+see
+[StanShock v0.1.1](https://github.com/IhmeGroup/StanShock/releases/tag/v0.1.1)
 
 ## Installation
 
