@@ -180,8 +180,8 @@ class FluidPhysics(ABC):
     def primitive_to_conservative(self, state: FluidState):
         """Transform primitive variables into vector of conservatives, accounting for chemical contributions."""
         # Compute total non-chemical energy
-        self.set_state(state)
-        total_energy = state.sensible_energy + 0.5 * state.velocity**2
+        sensible_energy = state.pressure / (state.density * (state.gamma - 1.0))
+        total_energy = sensible_energy + 0.5 * state.velocity**2
 
         return np.concatenate(
             (

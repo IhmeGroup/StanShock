@@ -97,7 +97,7 @@ class Geometry(RightHandSide):
         rhs_compact = self.source_slow(time, state0_compact, state, idx_explicit)
         rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:]  # ru and rE
         rhs[idx_explicit, 2:] += (
-            rhs_compact[idx_explicit, 0] * Y0[idx_explicit, :]
+            rhs_compact[idx_explicit, 0:1] * Y0[idx_explicit, :]
         )  # rY sources
 
         return rhs

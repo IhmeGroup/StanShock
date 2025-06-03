@@ -149,7 +149,7 @@ def hllc_flux(rLR, uLR, pLR, YLR, gamma):
                 + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
             )
             for kSc in range(nSc):
-                FLR[K, iFace, 3 + kSc] = (
+                FLR[K, iFace, mn + kSc] = (
                     rLR[K, iFace] * uLR[K, iFace] * YLR[K, iFace, kSc]
                 )
 
