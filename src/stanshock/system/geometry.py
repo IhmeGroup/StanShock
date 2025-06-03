@@ -48,7 +48,7 @@ class Geometry(RightHandSide):
 
         # Define global indices
         self.idx_locations = np.s_[:]
-        self.idx_source_terms = np.s_[:3]
+        self.idx_source_terms = np.s_[:]
 
     def source(
         self,
@@ -58,6 +58,15 @@ class Geometry(RightHandSide):
         gamma_star: Array,
         dt: float,
     ):
+        # Compute the density from the state array
+        rY0 = state_array[:, 2:]
+        r0 = rY0[..., : physics.n_scalars_rho_sum].sum(axis=-1)
+        Y0 = rY0 / r0[..., None]
+
+        state0_compact = np.zeros((state_array.shape[0], 3))
+        state0_compact[:, 0] = r0
+        state0_compact[:, 1:] = state_array[:, :2]  # ru and rE
+
         # Divide domain between explicit and implicit source terms
         idx_explicit = np.arange(self.x.shape[0])
         idx_implicit = []
@@ -70,7 +79,7 @@ class Geometry(RightHandSide):
         rhs = np.zeros(state_array[self.idx_locations, self.idx_source_terms].shape)
         for i in idx_implicit:
             # Initialize
-            y0 = state_array[i, self.idx_source_terms]
+            y0 = state0_compact[i, :].copy()
             args = self.x[i], gamma_star[i]
             self.integrator.set_initial_value(y0, time)
             self.integrator.set_f_params(args)
@@ -79,53 +88,61 @@ class Geometry(RightHandSide):
             self.integrator.integrate(time + dt)
 
             # Store RHS source term
-            rhs[i, :] = (self.integrator.y - state_array[i, self.idx_source_terms]) / dt
+            rhs_compact = (self.integrator.y - state0_compact[i, :]) / dt
+            rhs[i, 0:2] += rhs_compact[1:]  # ru and rE
+            rhs[i, 2:] += rhs_compact[0] * Y0[i, :]  # rY sources
 
         # Add slow source terms
         state = physics.conservative_to_primitive(state_array, gamma_star)
-        rhs[idx_explicit, :] = self.source_slow(time, state_array, state, idx_explicit)
+        rhs_compact = self.source_slow(time, state0_compact, state, idx_explicit)
+        rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:]  # ru and rE
+        rhs[idx_explicit, 2:] += (
+            rhs_compact[idx_explicit, 0] * Y0[idx_explicit, :]
+        )  # rY sources
 
         return rhs
 
     def source_slow(
-        self, time: float, state_array: Array, state: FluidState, idx: Array
+        self, time: float, state0_compact: Array, state: FluidState, idx: Array
     ) -> Array:
         """Area change contributions to RHS."""
-        rhs = np.zeros((idx.shape[0], 3))
+        rhs_compact = np.zeros((idx.shape[0], 3))
 
         if self.dlnA_dt is not None:
             dlnA_dt = self.dlnA_dt(self.x, time)[idx]
-            rhs -= state_array[idx, :3] * dlnA_dt
+            rhs_compact -= state0_compact[idx, :] * dlnA_dt
 
         if self.dlnA_dx is not None:
             dlnA_dx = self.dlnA_dx(self.x, time)[idx]
-            rhs[:, 0] -= state_array[idx, 1] * dlnA_dx
-            rhs[:, 1] -= (state_array[idx, 1] ** 2.0 / state_array[idx, 0]) * dlnA_dx
-            rhs[:, 2] -= (
-                state.velocity[idx] * (state_array[idx, 2] + state.pressure[idx])
+            rhs_compact[:, 0] -= state0_compact[idx, 1] * dlnA_dx
+            rhs_compact[:, 1] -= (
+                state0_compact[idx, 1] ** 2.0 / state0_compact[idx, 0]
+            ) * dlnA_dx
+            rhs_compact[:, 2] -= (
+                state.velocity[idx] * (state0_compact[idx, 2] + state.pressure[idx])
             ) * dlnA_dx
 
-        return rhs
+        return rhs_compact
 
     def source_fast(self, time: float, y: Array, args: tuple[float, float]):
         """Fast source terms for quasi-1D geometry."""
         # Unpack the input and initialize
         x, gamma = args
-        r, ru, E = y
-        p = (gamma - 1.0) * (E - 0.5 * ru**2.0 / r)
-        rhs = np.zeros(3)
+        r, ru, rE = y
+        p = (gamma - 1.0) * (rE - 0.5 * ru**2.0 / r)
+        rhs_compact = np.zeros(3)
 
         # create quasi-1D right hand side
         if self.dlnA_dt is not None:
             dlnA_dt = self.dlnA_dt([x], time)[0]
-            rhs[0] -= r * dlnA_dt
-            rhs[1] -= ru * dlnA_dt
-            rhs[2] -= E * dlnA_dt
+            rhs_compact[0] -= r * dlnA_dt
+            rhs_compact[1] -= ru * dlnA_dt
+            rhs_compact[2] -= rE * dlnA_dt
 
         if self.dlnA_dx is not None:
             dlnA_dx = self.dlnA_dx([x], time)[0]
-            rhs[0] -= ru * dlnA_dx
-            rhs[1] -= (ru**2.0 / r) * dlnA_dx
-            rhs[2] -= (ru / r * (E + p)) * dlnA_dx
+            rhs_compact[0] -= ru * dlnA_dx
+            rhs_compact[1] -= (ru**2.0 / r) * dlnA_dx
+            rhs_compact[2] -= (ru / r * (rE + p)) * dlnA_dx
 
-        return rhs
+        return rhs_compact

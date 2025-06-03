@@ -999,11 +999,11 @@ class JICModel:
         mdot[Z_target < 1e-6] = 0.0
 
         # Compute the source term
-        rhs[:, 0] = mdot
-        rhs[:, 1] = 0.0
-        rhs[:, 2] = mdot * self.E_inj
-        rhs[:, 3] = mdot
-        rhs[:, 4] = 0.0
+        rhs[:, 0] = 0.0  # momentum
+        rhs[:, 1] = mdot * self.E_inj  # total non-chemical energy
+        rhs[:, 2] = mdot  # density
+        rhs[:, 3] = mdot  # mixture fraction
+        rhs[:, 4] = 0.0  # progress variable
 
         return rhs
 

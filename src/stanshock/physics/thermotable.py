@@ -181,8 +181,7 @@ class ThermoTable(CanteraInterface):
         """
         This method computes the specific heat ratio, gamma.
             inputs:
-                T: vector of temperatures [n]
-                Y: matrix of mass fractions [n,nSp]
+                state: FluidState object
             outputs:
                 gamma: vector of specific heat ratios [n]
         """
@@ -194,9 +193,7 @@ class ThermoTable(CanteraInterface):
         """
         This method applies the ideal gas law to compute the temperature
             inputs:
-                r: vector of densities [n]
-                p: vector of pressures [n]
-                Y: matrix of mass fractions [n,nSp]
+                state: FluidState object
             outputs:
                 T: vector of temperatures
         """

@@ -315,22 +315,22 @@ class Combustor:
         """
         # Using mixed-is-burned (MIB)
         # (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.state.gamma)
-        # Z = rY[:, 0] / r
+        # Z = rY[:, 1] / r
         # Q = np.zeros(self.n)
-        # C = rY[:, 1] / r
+        # C = rY[:, 2] / r
         # L = self.physics.get_normalized_progress_variable(Z, C)
         # e_chem0 = r * self.physics.lookup('E0_CHEM', Z, Q, L)
         # C1, e_chem1 = self.injector.get_MIB_profiles()
         # e_chem1 *= r
         # E1 = E + e_chem0 - e_chem1
         # rY1 = rY
-        # rY1[:, 1] = r * C1
+        # rY1[:, 2] = r * C1
         # (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E1,rY1,self.state.gamma)
 
         # Using FPV
         # initialize
         y = self.physics.primitive_to_conservative(self.state)
-        (r, rZ, rC) = y[:, 0], y[:, 3], y[:, 4]
+        (r, rZ, rC) = y[:, 2], y[:, 3], y[:, 4]
         Z = rZ / r
         C = rC / r
         Q = np.zeros(self.geometry.n)
@@ -344,7 +344,7 @@ class Combustor:
         C1 = y1[:, 4] / r
         L1 = self.physics.get_normalized_progress_variable(Z, C1)
         e_chem1 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L1)
-        y1[:, 2] += e_chem0 - e_chem1
+        y1[:, 1] += e_chem0 - e_chem1
         state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
         state1.gamma = self.state.gamma
 
@@ -356,7 +356,7 @@ class Combustor:
         rC = y[:, 4] = 0.5 * (y[:, 4] + y1[:, 4] + dt * omegaC1)
         L = self.physics.get_normalized_progress_variable(Z, rC / r)
         e_chem2 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
-        y[:, 2] += e_chem0 - e_chem2
+        y[:, 1] += e_chem0 - e_chem2
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
 
         # update properties
@@ -435,8 +435,7 @@ class Combustor:
             integrator.integrate(dt)
             # clip and normalize
             Y = integrator.y[:-1]
-            Y[Y > 1.0] = 1.0
-            Y[Y < 0.0] = 0.0
+            Y = np.clip(Y, 0.0, 1.0)
             Y /= np.sum(Y)
             # update
             state_temp.composition[TIndex, :] = Y
@@ -460,8 +459,7 @@ class Combustor:
         dydt = self.geometry.source(self.t, y, self.physics, self.state.gamma, dt)
 
         # Update
-        y[:, :3] += dt * dydt
-        y[:, 3:] = y[:, [0]] * self.state.composition
+        y += dt * dydt
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
@@ -474,13 +472,10 @@ class Combustor:
         """
         y = self.physics.primitive_to_conservative(self.state)
 
-        # Get RHS
         dydt = self.boundary_layer.source(self.t, y, self.physics, self.state.gamma)
 
-        # Single forward-Euler step
-        y += dydt * dt
-
         # Update
+        y += dydt * dt
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
         self.state.temperature = self.physics.get_temperature(self.state)
         self.state.gamma = self.physics.get_gamma(self.state)
@@ -515,23 +510,26 @@ class Combustor:
             inputs
                 dt=time step
         """
+        if type(self.physics) is not ct.FPVTable:
+            msg = "JIC injector model requires FPVTable physics."
+            raise Exception(msg)
+
         # initialize
-        mn = self.mn
         y = self.physics.primitive_to_conservative(self.state)
-        (r, ru, E, rY) = y[:, 0], y[:, 1], y[:, 2], y[:, mn:]
+        (ru, rE, r, rZ, rC) = y[:, 0], y[:, 1], y[:, 2], y[:, 3], y[:, 4]
         self.injector.update_fluid_tip_positions(dt, self.t, self.state.velocity)
 
         # 1st stage of RK2
         dydt = self.injector.get_injector_sources(
-            r, ru, E, rY[:, 0], rY[:, 1], self.state.gamma, self.t
+            r, ru, rE, rZ, rC, self.state.gamma, self.t
         )
         y1 = y + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
-        (r1, ru1, E1, rY1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, mn:]
+        (ru1, rE1, r1, rZ1, rC1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, 3], y1[:, 4]
         dydt = self.injector.get_injector_sources(
-            r1, ru1, E1, rY1[:, 0], rY1[:, 1], self.state.gamma, self.t + dt
+            r1, ru1, rE1, rZ1, rC1, self.state.gamma, self.t + dt
         )
         y = 0.5 * (y + y1 + dt * dydt)
 

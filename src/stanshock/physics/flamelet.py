@@ -5,6 +5,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.backend import Array
 
 
 class TableVariable:
@@ -39,9 +40,9 @@ class FPVTable(FluidPhysics):
         Initialize the FPVTable object by reading the HDF5 file.
         """
         self.gas = gas
-        self.n_scalars = 2
+        self.n_scalars = 3
+        self.n_scalars_rho_sum = 1
         self.scalar_names = ["mixture fraction", "progress variable"]
-        self.normalize_scalars = False
         self.is_flamelet = True
         self.filename = filename
         with h5py.File(filename, "r") as f:
@@ -96,8 +97,8 @@ class FPVTable(FluidPhysics):
 
     def set_state(self, state: FluidState) -> FluidState:
         """Get the flamelet table coordinates from the composition."""
-        Z = state.mixture_fraction = state.composition[:, 0]
-        C = state.progress_variable = state.composition[:, 1]
+        Z = state.mixture_fraction = state.composition[:, 1]
+        C = state.progress_variable = state.composition[:, 2]
         state.normalized_progress_variable = self.get_normalized_progress_variable(Z, C)
         return state
 
@@ -229,6 +230,39 @@ class FPVTable(FluidPhysics):
             self.get_pressure(state)
         state.sound_speed = np.sqrt(state.gamma * state.pressure / state.density)
         return state.sound_speed
+
+    def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
+        """Transform conservative variables into primitives, accounting for chemical contributions."""
+        ru = state_array[..., 0]
+        rE = state_array[..., 1]
+        rY = state_array[..., 2:]
+
+        r = rY[..., : self.n_scalars_rho_sum].sum(axis=-1)
+
+        u = ru / r
+        Y = rY / r[..., None]
+        # ^ By definition, Y[..., 0] = 1.0 such that the first conservative scalar is the density.
+
+        # Get Z, C, and L
+        Z = Y[..., 1]
+        C = Y[..., 2]
+        L = self.get_normalized_progress_variable(Z, C)
+
+        # Now get velocity and pressure
+        u = ru / r
+        p = (gamma - 1.0) * (rE - 0.5 * r * u**2.0)
+        # TODO - ^ update this: use Saghafian to get temperature, then use P = rho * R * T
+
+        return FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            pressure=p,
+            composition=Y,
+            mixture_fraction=Z,
+            progress_variable=C,
+            normalized_progress_variable=L,
+        )
 
     def get_source_terms(self, state):
         return self.lookup("SRC_PROG", state)
