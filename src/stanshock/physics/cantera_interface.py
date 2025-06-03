@@ -40,7 +40,7 @@ class CanteraInterface(FluidPhysics):
                         state.mass_fractions,
                     )
                 state.density = self.sol.density_mass
-            elif (state.pressure is not None) and (state.temperature is not None):
+            else:
                 self.sol.TPY = state.temperature, state.pressure, state.mass_fractions
                 state.temperature = self.sol.T
 
