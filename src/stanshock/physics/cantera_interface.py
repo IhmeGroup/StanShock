@@ -107,8 +107,9 @@ class CanteraInterface(FluidPhysics):
         p = (gamma - 1.0) * (rE - 0.5 * r * u**2.0)
         Y = rY / r[..., None]
 
-        # Bound mass fractions
-        Y = np.clip(Y, 0.0, 1.0)
+        # Enforce non-negativity
+        # (Limit of 1 is enforced by construction Y = rY / sum(rY))
+        np.clip(Y, 0, None, out=Y)
 
         return FluidState(
             shape=r.shape,

@@ -7,6 +7,7 @@ from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.numerics.face_extrapolation import FifthOrderWeno, FirstOrder
 from stanshock.numerics.inviscid_flux import InviscidFlux, hllc_flux
 from stanshock.numerics.viscous_flux import ViscousFlux
+from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.processing.initialize import (
     initialize_constant,
@@ -510,7 +511,7 @@ class Combustor:
             inputs
                 dt=time step
         """
-        if type(self.physics) is not ct.FPVTable:
+        if not isinstance(self.physics, FPVTable):
             msg = "JIC injector model requires FPVTable physics."
             raise Exception(msg)
 
