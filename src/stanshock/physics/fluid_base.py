@@ -13,23 +13,23 @@ from stanshock.system.backend import Array
 class FluidState:
     shape: tuple[int, ...]
 
-    density: np.ndarray | None = None
-    temperature: np.ndarray | None = None
-    pressure: np.ndarray | None = None
-    mass_fractions: np.ndarray | None = None
-    mole_fractions: np.ndarray | None = None
-    mixture_fraction: np.ndarray | None = None
-    progress_variable: np.ndarray | None = None
-    normalized_progress_variable: np.ndarray | None = None
-    composition: np.ndarray | None = None
+    density: Array | None = None
+    temperature: Array | None = None
+    pressure: Array | None = None
+    mass_fractions: Array | None = None
+    mole_fractions: Array | None = None
+    mixture_fraction: Array | None = None
+    progress_variable: Array | None = None
+    normalized_progress_variable: Array | None = None
+    composition: Array | None = None
 
-    cp: np.ndarray | None = None
-    gamma: np.ndarray | None = None
-    viscosity: np.ndarray | None = None
-    thermal_conductivity: np.ndarray | None = None
-    sound_speed: np.ndarray | None = None
+    cp: Array | None = None
+    gamma: Array | None = None
+    viscosity: Array | None = None
+    thermal_conductivity: Array | None = None
+    sound_speed: Array | None = None
 
-    velocity: np.ndarray | None = None
+    velocity: Array | None = None
 
     _cache_valid: bool = False
 
