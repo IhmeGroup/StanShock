@@ -119,7 +119,9 @@ class Combustor:
 
         # Initialize the key physics
         self.inviscid_flux = InviscidFlux(
-            face_extrapolator=FifthOrderWeno(),
+            face_extrapolator=FifthOrderWeno(
+                n_scalars_rho_sum=self.physics.n_scalars_rho_sum
+            ),
             boundary_conditions=self.apply_boundary_conditions,
             riemann_solver=self.flux_function,
             dx=self.geometry.dx,
@@ -127,7 +129,9 @@ class Combustor:
 
         if self.include_diffusion:
             self.viscous_flux = ViscousFlux(
-                face_extrapolator=FirstOrder(),
+                face_extrapolator=FirstOrder(
+                    n_scalars_rho_sum=self.physics.n_scalars_rho_sum
+                ),
                 boundary_conditions=self.apply_boundary_conditions,
                 dx=self.geometry.dx,
             )
