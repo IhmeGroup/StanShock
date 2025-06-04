@@ -124,7 +124,7 @@ class BoundaryLayer(RightHandSide):
             msg = "Combustor improperly initialized for boundary layer terms"
             raise Exception(msg)
 
-        rhs = np.zeros((*state.shape, 3 + physics.n_scalars))
+        rhs = np.zeros((*state.shape, 2 + physics.n_scalars))
 
         # Compute gas properties
         T = state.temperature = physics.get_temperature(state)
@@ -136,7 +136,7 @@ class BoundaryLayer(RightHandSide):
         shear = (
             cf * (0.5 * state.density * state.velocity**2.0) * np.sign(state.velocity)
         )
-        rhs[:, 1] = -4.0 / self.hydraulic_diameter * shear
+        rhs[:, 0] = -4.0 / self.hydraulic_diameter * shear
 
         # Stanton number and heat transfer to wall
         if self.wall_temperature is not None:
@@ -146,6 +146,6 @@ class BoundaryLayer(RightHandSide):
             Nu = self.get_nusselt_number(Re, Pr, cf)
             qloss = Nu * k / self.characteristic_length * (T - self.wall_temperature)
 
-            rhs[:, 2] = -4.0 / self.hydraulic_diameter * qloss
+            rhs[:, 1] = -4.0 / self.hydraulic_diameter * qloss
 
         return rhs

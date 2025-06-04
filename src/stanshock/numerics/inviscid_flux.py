@@ -9,7 +9,7 @@ from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
 
 # Global variables (parameters) used by the solver
-mn = 3  # number of 1D Euler equations
+mn = 2  # number of 1D Euler equations
 
 # Type signatures for numba
 double1D = double[:]
@@ -50,9 +50,8 @@ def lax_friedrichs_flux(rLR, uLR, pLR, YLR, gamma):
     FLR = np.empty((2, nFaces, nDim))
     for K in range(nLR):
         for iFace in range(nFaces):
-            FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace]
-            FLR[K, iFace, 1] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
-            FLR[K, iFace, 2] = uLR[K, iFace] * (
+            FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
+            FLR[K, iFace, 1] = uLR[K, iFace] * (
                 gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace]
                 + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
             )
@@ -66,9 +65,8 @@ def lax_friedrichs_flux(rLR, uLR, pLR, YLR, gamma):
     U = np.empty((nLR, mn + nSc))
     for iFace in range(nFaces):
         for K in range(nLR):
-            U[K, 0] = rLR[K, iFace]
-            U[K, 1] = rLR[K, iFace] * uLR[K, iFace]
-            U[K, 2] = (
+            U[K, 0] = rLR[K, iFace] * uLR[K, iFace]
+            U[K, 1] = (
                 pLR[K, iFace] / (gamma[iFace] - 1.0)
                 + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
             )
@@ -145,14 +143,13 @@ def hllc_flux(rLR, uLR, pLR, YLR, gamma):
     FLR = np.empty((2, nFaces, nDim))
     for K in range(nLR):
         for iFace in range(nFaces):
-            FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace]
-            FLR[K, iFace, 1] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
-            FLR[K, iFace, 2] = uLR[K, iFace] * (
+            FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
+            FLR[K, iFace, 1] = uLR[K, iFace] * (
                 gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace]
                 + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
             )
             for kSc in range(nSc):
-                FLR[K, iFace, 3 + kSc] = (
+                FLR[K, iFace, mn + kSc] = (
                     rLR[K, iFace] * uLR[K, iFace] * YLR[K, iFace, kSc]
                 )
 
@@ -179,17 +176,15 @@ def hllc_flux(rLR, uLR, pLR, YLR, gamma):
             gammaFace = gamma[iFace]
             SFace = SLR[K, iFace]
             # conservative variable vector
-            U[0] = rFace
-            U[1] = rFace * uFace
-            U[2] = pFace / (gammaFace - 1.0) + 0.5 * rFace * uFace**2.0
+            U[0] = rFace * uFace
+            U[1] = pFace / (gammaFace - 1.0) + 0.5 * rFace * uFace**2.0
             for kSc in range(nSc):
                 U[mn + kSc] = rFace * YFace[kSc]
             # star conservative variable vector
             prefactor = rFace * (SFace - uFace) / (SFace - SStarFace)
-            UStar[0] = prefactor
-            UStar[1] = prefactor * SStarFace
-            UStar[2] = prefactor * (
-                U[2] / rFace
+            UStar[0] = prefactor * SStarFace
+            UStar[1] = prefactor * (
+                U[1] / rFace
                 + (SStarFace - uFace) * (SStarFace + pFace / (rFace * (SFace - uFace)))
             )
             for iSp in range(nSc):

@@ -53,7 +53,6 @@ class ViscousFlux(RightHandSide):
         # Compute the fluxes
         face_flux = np.concatenate(
             (
-                np.zeros((face_states.shape[1], 1)),
                 (4.0 / 3.0 * viscosity * dudx)[:, None],
                 (conductivity * dTdx)[:, None],
                 density[:, None] * diffusivities * dYdx,

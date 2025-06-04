@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import numpy as np
 
-from stanshock.numerics.face_extrapolation import mt, weno5
+from stanshock.numerics.face_extrapolation import weno5
 
 weno5 = weno5.__wrapped__  # unwrap for test coverage
+
+mt = 3
 
 
 def test_weno_interpolates_constant():
@@ -23,6 +25,8 @@ def test_weno_interpolates_constant():
         p=p * np.ones(num_cells),
         Y=Y * np.ones((num_cells, num_species)),
         gamma=gamma * np.ones(num_cells),
+        mt=mt,
+        n_scalars_rho_sum=num_species,
     )
     num_sides = 2
     num_faces = num_interior_cells + 1
@@ -60,6 +64,8 @@ def test_weno_interpolates_discontinuity():
             ]
         ),
         gamma=gamma * np.ones(num_cells),
+        mt=mt,
+        n_scalars_rho_sum=num_species,
     )
     num_sides = 2
     num_faces = num_interior_cells + 1

@@ -4,6 +4,7 @@ import cantera as ct
 import numpy as np
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.backend import Array
 
 
 class CanteraInterface(FluidPhysics):
@@ -93,6 +94,30 @@ class CanteraInterface(FluidPhysics):
         """Compute mixture-averaged diffusion coefficients."""
         self.set_state(state)
         return self.sol.mix_diff_coeffs
+
+    def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
+        """Transform conservative variables into primitives, accounting for chemical contributions."""
+        ru = state_array[..., 0]
+        rE = state_array[..., 1]
+        rY = state_array[..., 2:]
+
+        r = rY[..., : self.n_scalars_rho_sum].sum(axis=-1)
+
+        u = ru / r
+        p = (gamma - 1.0) * (rE - 0.5 * r * u**2.0)
+        Y = rY / r[..., None]
+
+        # Enforce non-negativity
+        # (Limit of 1 is enforced by construction Y = rY / sum(rY))
+        np.clip(Y, 0, None, out=Y)
+
+        return FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            pressure=p,
+            composition=Y,
+        )
 
     def get_source_terms(self, state: FluidState):
         """Compute reaction source terms corresponding to transported scalars."""
