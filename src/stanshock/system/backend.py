@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import sys
 from typing import Union
 
 import numpy as np
-from typing_extensions import TypeAlias
+
+if sys.version_info >= (3, 13):
+    from typing import TypeAlias
+else:
+    from typing_extensions import TypeAlias
 
 __all__ = ["Array", "Index", "np"]
 
