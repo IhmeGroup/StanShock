@@ -107,7 +107,7 @@ class FPVTable(FluidPhysics):
         Z = self.get_bilger_mixture_fraction(Y)
         C = self.get_progress_variable(Y)
 
-        return np.stack([Z, C], axis=1)
+        return np.stack([np.ones_like(Z), Z, C], axis=1)
 
     def get_normalized_progress_variable(self, Z, C):
         """
