@@ -10,7 +10,7 @@ if sys.version_info >= (3, 13):
 else:
     from typing_extensions import TypeAlias
 
-__all__ = ["Array", "Index", "np"]
+__all__ = ["Array", "Index", "TypeAlias", "np"]
 
 # Define the Array type for use in type hints to make future changes easier
 Array: TypeAlias = np.ndarray[tuple[int, ...], np.dtype[np.float64]]
