@@ -10,7 +10,6 @@ from matplotlib import pyplot as plt
 
 from stanshock.components.combustor import Combustor
 from stanshock.physics.cantera_interface import CanteraInterface
-from stanshock.physics.fluid_base import FluidState
 from stanshock.physics.thermotable import ThermoTable
 
 
@@ -83,7 +82,9 @@ def main(
         Y[ss.idx_cells, iSp] = np.interp(ss.geometry.x, flame.grid, flame.Y[iSp, :])
 
     ss.state.density[ss.idx_cells] = np.interp(ss.geometry.x, flame.grid, flame.density)
-    ss.state.velocity[ss.idx_cells] = np.interp(ss.geometry.x, flame.grid, flame.velocity)
+    ss.state.velocity[ss.idx_cells] = np.interp(
+        ss.geometry.x, flame.grid, flame.velocity
+    )
     ss.state.pressure[ss.idx_cells] = flame.P * np.ones(ss.geometry.n)
     ss.state.composition = Y
 
