@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from typing import Generic, Literal, TypeVar, Union
 
 from stanshock.physics.fluid_base import FluidState
@@ -139,7 +140,7 @@ class Inflow(Extrapolate):
 
     def __init__(
         self,
-        reference_state: list[float | None],
+        reference_state: Sequence[float | Sequence[float] | None],
         location: Literal["left", "right"] = "left",
     ) -> None:
         super().__init__(location)
@@ -245,7 +246,7 @@ BCNamesType: TypeAlias = Literal[
 
 
 def set_boundary_conditions(
-    boundary_conditions: BoundaryConditions | list[BCNamesType | BCType],
+    boundary_conditions: BoundaryConditions | Sequence[BCNamesType | BCType],
     mt: int = 3,
 ) -> BoundaryConditions:
     """Convenience function to initialize different boundary conditions."""
