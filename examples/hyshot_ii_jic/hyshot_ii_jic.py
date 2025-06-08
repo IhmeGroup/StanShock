@@ -9,6 +9,7 @@ import numpy as np
 from scipy import interpolate, optimize
 
 from stanshock.components.combustor import Combustor
+from stanshock.numerics.boundary_conditions import Inflow
 from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.jicf import JICModel
 from stanshock.processing.plot import XTDiagram
@@ -244,7 +245,7 @@ gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
 initState = gas_init, U_in
 
 # Define the boundary conditions
-BC_inlet = gas_init.density, U_in, gas_init.P, (0.0, 0.0)
+BC_inlet = Inflow(reference_state=(gas_init.density, U_in, gas_init.P, (1.0, 0.0, 0.0)))
 BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
