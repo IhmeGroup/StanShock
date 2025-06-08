@@ -129,8 +129,7 @@ class AdiabaticWall(Extrapolate):
     def update(self, time: float, target: FluidState) -> FluidState:
         target = super().update(time, target)
         assert target.velocity is not None
-        # face_states.velocity[self.idx_external] = -face_states.velocity[self.idx_external]
-        target.velocity[self.idx_external] = 0.0
+        target.velocity[self.idx_external] = -target.velocity[self.idx_external]
 
         return target
 
