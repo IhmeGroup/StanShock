@@ -109,9 +109,7 @@ initState = gas_init, U_in
 W_in = gas_init.mean_molecular_weight
 
 # Define the boundary conditions
-BC_inlet = Inflow(
-    reference_state=(gas_init.density, U_in, gas_init.P, (1.0, *gas_init.Y))
-)
+BC_inlet = Inflow(reference_state=(gas_init.density, U_in, gas_init.P, gas_init.Y))
 BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
