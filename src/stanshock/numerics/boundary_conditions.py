@@ -262,7 +262,9 @@ def set_boundary_conditions(
                     bcs += [Periodic(mt, location=bc_loc)]
                 elif bc_specification == "outflow":
                     bcs += [Extrapolate(location=bc_loc)]
-                elif bc_specification in ["symmetry", "reflecting", "wall"]:
+                elif bc_specification in ["symmetry"]:
+                    bcs += [Symmetry(mt, location=bc_loc)]
+                elif bc_specification in ["reflecting", "wall"]:
                     bcs += [AdiabaticWall(location=bc_loc)]
             elif isinstance(bc_specification, BoundaryCondition):
                 bcs += [bc_specification]
