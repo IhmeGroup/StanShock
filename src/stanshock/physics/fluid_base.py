@@ -16,6 +16,7 @@ class FluidState:
     density: Array | None = None
     temperature: Array | None = None
     pressure: Array | None = None
+    internal_energy: Array | None = None
     mass_fractions: Array | None = None
     mole_fractions: Array | None = None
     mixture_fraction: Array | None = None
@@ -64,6 +65,10 @@ class FluidPhysics(ABC):
     @abstractmethod
     def get_gamma(self, state: FluidState):
         """Compute specific heat ratio, gamma."""
+
+    def get_gamma_star(self, state: FluidState):
+        """Compute effective specific heat ratio, gamma*."""
+        return 1 + state.pressure / (state.density * state.internal_energy)
 
     @abstractmethod
     def get_mu(self, state: FluidState):
@@ -179,9 +184,9 @@ class FluidPhysics(ABC):
 
     def primitive_to_conservative(self, state: FluidState):
         """Transform primitive variables into vector of conservatives, accounting for chemical contributions."""
-        # Compute total non-chemical energy
-        sensible_energy = state.pressure / (state.density * (state.gamma - 1.0))
-        total_energy = sensible_energy + 0.5 * state.velocity**2
+        # Compute total energy including chemical contributions
+        self.set_state(state)
+        total_energy = state.internal_energy + 0.5 * state.velocity**2
 
         return np.concatenate(
             (

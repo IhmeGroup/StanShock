@@ -100,6 +100,7 @@ class FPVTable(FluidPhysics):
         Z = state.mixture_fraction = state.composition[:, 1]
         C = state.progress_variable = state.composition[:, 2]
         state.normalized_progress_variable = self.get_normalized_progress_variable(Z, C)
+        # TODO - logic for setting energy or pressure for double flux compatibility
         return state
 
     def get_composition(self, Y):
@@ -214,9 +215,14 @@ class FPVTable(FluidPhysics):
         return state.thermal_conductivity
 
     def get_temperature(self, state: FluidState):
+        T0 = self.lookup("T0", state)
+        e0 = self.lookup("E0", state)
+        gamma0 = self.lookup("GAMMA0", state)
+        ag = self.lookup("AGAMMA", state)
         R = self.get_specific_gas_constant(state)
-        state.temperature = state.pressure / (R * state.density)
-        return state.temperature
+        return T0 + ((gamma0 - 1) / ag) * (
+            np.exp(ag * (state.internal_energy - e0) / R) - 1
+        )
 
     def get_pressure(self, state: FluidState):
         R = self.get_specific_gas_constant(state)
@@ -234,12 +240,14 @@ class FPVTable(FluidPhysics):
     def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
         """Transform conservative variables into primitives, accounting for chemical contributions."""
         ru = state_array[..., 0]
-        rE = state_array[..., 1]
+        re_t = state_array[..., 1]
         rY = state_array[..., 2:]
 
         r = rY[..., : self.n_scalars_rho_sum].sum(axis=-1)
 
         u = ru / r
+        e_int = (re_t / r) - 0.5 * u**2.0
+        gamma += 1.0  # Modify gamma to silence unused argument warning
         Y = rY / r[..., None]
         # ^ By definition, Y[..., 0] = 1.0 such that the first conservative scalar is the density.
 
@@ -248,16 +256,24 @@ class FPVTable(FluidPhysics):
         C = Y[..., 2]
         L = self.get_normalized_progress_variable(Z, C)
 
-        # Now get velocity and pressure
-        u = ru / r
-        p = (gamma - 1.0) * (rE - 0.5 * r * u**2.0)
-        # TODO - ^ update this: use Saghafian to get temperature, then use P = rho * R * T
+        temp_state = FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            internal_energy=e_int,
+            composition=Y,
+        )
+
+        temp_state.temperature = self.get_temperature(temp_state)
+        temp_state.pressure = self.get_pressure(temp_state)
 
         return FluidState(
             shape=r.shape,
             density=r,
             velocity=u,
-            pressure=p,
+            pressure=temp_state.pressure,
+            temperature=temp_state.temperature,
+            internal_energy=e_int,
             composition=Y,
             mixture_fraction=Z,
             progress_variable=C,

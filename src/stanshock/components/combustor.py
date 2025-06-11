@@ -242,7 +242,9 @@ class Combustor:
         mt = face_extrapolator.mt
         state = face_extrapolator.add_ghost_layers(self.state)
         y = self.physics.primitive_to_conservative(state)
-        gamma_star = state.gamma  # Double-flux gamma* held constant over time step
+        gamma_star = self.physics.get_gamma_star(
+            state
+        )  # Double-flux gamma* held constant over time step
 
         # 1st stage of RK3
         dydt = self.inviscid_flux.source(self.t, y, self.physics, gamma_star)
@@ -274,7 +276,9 @@ class Combustor:
         mt = face_extrapolator.mt
         state = face_extrapolator.add_ghost_layers(self.state)
         y = self.physics.primitive_to_conservative(state)
-        gamma_star = state.gamma  # Double-flux gamma* held constant over time step
+        gamma_star = self.physics.get_gamma_star(
+            state
+        )  # Double-flux gamma* held constant over time step
 
         if self.thickening is not None:
             self.F = self.thickening(self)
@@ -521,20 +525,20 @@ class Combustor:
 
         # initialize
         y = self.physics.primitive_to_conservative(self.state)
-        (ru, rE, r, rZ, rC) = y[:, 0], y[:, 1], y[:, 2], y[:, 3], y[:, 4]
+        (ru, re_t, r, rZ, rC) = y[:, 0], y[:, 1], y[:, 2], y[:, 3], y[:, 4]
         self.injector.update_fluid_tip_positions(dt, self.t, self.state.velocity)
 
         # 1st stage of RK2
         dydt = self.injector.get_injector_sources(
-            r, ru, rE, rZ, rC, self.state.gamma, self.t
+            r, ru, re_t, rZ, rC, self.state.gamma, self.t
         )
         y1 = y + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
-        (ru1, rE1, r1, rZ1, rC1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, 3], y1[:, 4]
+        (ru1, re_t1, r1, rZ1, rC1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, 3], y1[:, 4]
         dydt = self.injector.get_injector_sources(
-            r1, ru1, rE1, rZ1, rC1, self.state.gamma, self.t + dt
+            r1, ru1, re_t1, rZ1, rC1, self.state.gamma, self.t + dt
         )
         y = 0.5 * (y + y1 + dt * dydt)
 

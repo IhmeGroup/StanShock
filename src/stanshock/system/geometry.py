@@ -58,14 +58,22 @@ class Geometry(RightHandSide):
         gamma_star: Array,
         dt: float,
     ):
+        state = physics.conservative_to_primitive(state_array, gamma_star)
+        state.gamma = gamma_star
+
         # Compute the density from the state array
+        ru0 = state_array[:, 0]
         rY0 = state_array[:, 2:]
         r0 = rY0[..., : physics.n_scalars_rho_sum].sum(axis=-1)
         Y0 = rY0 / r0[..., None]
 
+        rE0 = r0 * state.internal_energy + 0.5 * r0 * state.velocity**2
+
         state0_compact = np.zeros((state_array.shape[0], 3))
         state0_compact[:, 0] = r0
-        state0_compact[:, 1:] = state_array[:, :2]  # ru and rE
+        state0_compact[:, 1] = ru0
+        state0_compact[:, 2] = rE0
+        state0_compact[:, 3] = state.pressure
 
         # Divide domain between explicit and implicit source terms
         idx_explicit = np.arange(self.x.shape[0])
@@ -89,13 +97,13 @@ class Geometry(RightHandSide):
 
             # Store RHS source term
             rhs_compact = (self.integrator.y - state0_compact[i, :]) / dt
-            rhs[i, 0:2] += rhs_compact[1:]  # ru and rE
+            rhs[i, 0:2] += rhs_compact[1:]  # ru and re_t
             rhs[i, 2:] += rhs_compact[0] * Y0[i, :]  # rY sources
 
         # Add slow source terms
         state = physics.conservative_to_primitive(state_array, gamma_star)
         rhs_compact = self.source_slow(time, state0_compact, state, idx_explicit)
-        rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:]  # ru and rE
+        rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:]  # ru and re_t
         rhs[idx_explicit, 2:] += (
             rhs_compact[idx_explicit, 0:1] * Y0[idx_explicit, :]
         )  # rY sources
@@ -128,8 +136,7 @@ class Geometry(RightHandSide):
         """Fast source terms for quasi-1D geometry."""
         # Unpack the input and initialize
         x, gamma = args
-        r, ru, rE = y
-        p = (gamma - 1.0) * (rE - 0.5 * ru**2.0 / r)
+        r, ru, rE, p = y
         rhs_compact = np.zeros(3)
 
         # create quasi-1D right hand side
