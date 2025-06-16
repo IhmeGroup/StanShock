@@ -41,7 +41,7 @@ class ViscousFlux(RightHandSide):
         face_states = self.boundary_conditions.update_face_states(time, face_states)
 
         state.temperature = physics.get_temperature(state)
-        face_gradients = self.gradient.face_gradients(state, self.geometry)
+        face_gradients: FluidState = self.gradient.face_gradients(state, self.geometry)
 
         return self.source_implementation(physics, face_states, face_gradients)
 

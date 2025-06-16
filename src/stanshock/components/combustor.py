@@ -261,9 +261,7 @@ class Combustor:
             self.viscous_flux.F = np.pad(self.F, mt, mode="edge")
 
         # 1st stage of RK2
-        dydt = self.viscous_flux.source(
-            self.t, y, self.geometry, self.physics, gamma_star
-        )
+        dydt = self.viscous_flux.source(self.t, y, self.physics, gamma_star)
         y1 = y.copy()
         y1[self.idx_cells] += dt * dydt
 
