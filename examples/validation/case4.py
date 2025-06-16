@@ -177,6 +177,7 @@ def main(
     VNorms = V / VDriver
     # get gas properties
     iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
+    mt = ssbl.n_ghost_layers
     for iX, VNorm in enumerate(VNorms):
         if VNorm <= 1.0:
             # nitrogen and helium
@@ -185,9 +186,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssbl.state.density[iX] = gas4.density
-            ssbl.state.composition[iX, :] = gas4.Y
-            ssbl.state.gamma[iX] = gas4.cp / gas4.cv
+            ssbl.state.density[iX + mt] = gas4.density
+            ssbl.state.composition[iX + mt, :] = gas4.Y
+            ssbl.state.gamma[iX + mt] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()
@@ -234,6 +235,7 @@ def main(
     VNorms = V / VDriver
     # get gas properties
     iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
+    mt = ssnbl.n_ghost_layers
     for iX, VNorm in enumerate(VNorms):
         if VNorm <= 1.0:
             # nitrogen and helium
@@ -242,9 +244,9 @@ def main(
             XHE = 1.0 - XN2
             X[[iHE, iN2]] = XHE, XN2
             gas4.TPX = T4, p4, X
-            ssnbl.state.density[iX] = gas4.density
-            ssnbl.state.composition[iX, :] = gas4.Y
-            ssnbl.state.gamma[iX] = gas4.cp / gas4.cv
+            ssnbl.state.density[iX + mt] = gas4.density
+            ssnbl.state.composition[iX + mt, :] = gas4.Y
+            ssnbl.state.gamma[iX + mt] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()

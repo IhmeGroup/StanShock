@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from typing import Callable, cast
+
 import numpy as np
 from numba import double, njit
 
+from stanshock.numerics.boundary_conditions import BoundaryConditions
 from stanshock.numerics.face_extrapolation import FaceExtrapolator
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array
+from stanshock.system.backend import Array, TypeAlias
 from stanshock.system.base import RightHandSide
 
 # Global variables (parameters) used by the solver
@@ -16,9 +19,14 @@ double1D = double[:]
 double2D = double[:, :]
 double3D = double[:, :, :]
 
+# Signature for Riemann solvers
+RiemannSolver: TypeAlias = Callable[[Array, Array, Array, Array, Array], Array]
+
 
 @njit(double2D(double2D, double2D, double2D, double3D, double1D))
-def lax_friedrichs_flux(rLR, uLR, pLR, YLR, gamma):
+def lax_friedrichs_flux(
+    rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array
+) -> Array:
     """
     This method computes the flux at each interface
         inputs:
@@ -79,7 +87,7 @@ def lax_friedrichs_flux(rLR, uLR, pLR, YLR, gamma):
 
 
 @njit(double2D(double2D, double2D, double2D, double3D, double1D))
-def hllc_flux(rLR, uLR, pLR, YLR, gamma):
+def hllc_flux(rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array) -> Array:
     """
     This method computes the flux at each interface
         inputs:
@@ -200,9 +208,9 @@ class InviscidFlux(RightHandSide):
     def __init__(
         self,
         face_extrapolator: FaceExtrapolator,
-        boundary_conditions,
-        riemann_solver,
-        dx,
+        boundary_conditions: BoundaryConditions,
+        riemann_solver: RiemannSolver,
+        dx: float,
     ) -> None:
         self.face_extrapolator = face_extrapolator
         self.boundary_conditions = boundary_conditions
@@ -210,27 +218,35 @@ class InviscidFlux(RightHandSide):
         self.dx = dx
 
     def source(
-        self, _time: float, state_array: Array, physics: FluidPhysics, gamma_star: Array
+        self, time: float, state_array: Array, physics: FluidPhysics, gamma_star: Array
     ) -> Array:
-        state = physics.conservative_to_primitive(state_array, gamma_star)
+        state_array = self.boundary_conditions.update_ghost_layers(time, state_array)
+
+        state: FluidState = physics.conservative_to_primitive(state_array, gamma_star)
         state.gamma = gamma_star
 
-        face_states = self.face_extrapolator(state)
-        face_states = self.boundary_conditions(face_states)
+        face_states: FluidState = self.face_extrapolator(state)
+        face_states = self.boundary_conditions.update_face_states(time, face_states)
 
-        return self.source_from_primitives(_time, face_states, physics)
+        return self.source_from_primitives(time, face_states, physics)
 
     def source_from_primitives(
         self, _time: float, face_states: FluidState, _physics: FluidPhysics
     ) -> Array:
-        left_face_flux = self.riemann_solver(
+        assert face_states.density is not None
+        assert face_states.velocity is not None
+        assert face_states.pressure is not None
+        assert face_states.composition is not None
+        assert face_states.gamma is not None
+
+        left_face_flux: Array = self.riemann_solver(
             face_states.density,
             face_states.velocity,
             face_states.pressure,
             face_states.composition,
             face_states.gamma[1, :],
         )
-        right_face_flux = self.riemann_solver(
+        right_face_flux: Array = self.riemann_solver(
             face_states.density,
             face_states.velocity,
             face_states.pressure,
@@ -238,6 +254,8 @@ class InviscidFlux(RightHandSide):
             face_states.gamma[0, :],
         )
 
-        return (
-            left_face_flux[:-1, :] - right_face_flux[1:, :]
-        ) / self.dx  # Central difference
+        return cast(
+            Array,
+            (left_face_flux[:-1, :] - right_face_flux[1:, :])
+            / self.dx,  # Central difference
+        )
