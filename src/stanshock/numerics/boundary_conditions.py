@@ -101,11 +101,11 @@ class Extrapolate(RiemannFlux):
     def __init__(self, location: Literal["left", "right"] = "left") -> None:
         super().__init__(location)
         if self.location == "left":
-            self.idx_internal: tuple[int, int] = (1, 0)
-            self.idx_external: tuple[int, int] = (0, 0)
+            self.idx_interior: tuple[int, int] = (1, 0)
+            self.idx_exterior: tuple[int, int] = (0, 0)
         elif location == "right":
-            self.idx_internal = (0, -1)
-            self.idx_external = (1, -1)
+            self.idx_interior = (0, -1)
+            self.idx_exterior = (1, -1)
 
     def update(self, time: float, target: FluidState) -> FluidState:
         _: float = time
@@ -114,11 +114,11 @@ class Extrapolate(RiemannFlux):
         assert target.pressure is not None
         assert target.composition is not None
 
-        target.density[self.idx_external] = target.density[self.idx_internal]
-        target.velocity[self.idx_external] = target.velocity[self.idx_internal]
-        target.pressure[self.idx_external] = target.pressure[self.idx_internal]
-        target.composition[self.idx_external, :] = target.composition[
-            self.idx_internal, :
+        target.density[self.idx_exterior] = target.density[self.idx_interior]
+        target.velocity[self.idx_exterior] = target.velocity[self.idx_interior]
+        target.pressure[self.idx_exterior] = target.pressure[self.idx_interior]
+        target.composition[self.idx_exterior, :] = target.composition[
+            self.idx_interior, :
         ]
 
         return target
@@ -130,7 +130,7 @@ class AdiabaticWall(Extrapolate):
     def update(self, time: float, target: FluidState) -> FluidState:
         target = super().update(time, target)
         assert target.velocity is not None
-        target.velocity[self.idx_external] = -target.velocity[self.idx_external]
+        target.velocity[self.idx_exterior] = -target.velocity[self.idx_exterior]
 
         return target
 
@@ -152,16 +152,16 @@ class Inflow(Extrapolate):
 
         if self.reference_state[0] is not None:
             assert target.density is not None
-            target.density[self.idx_external] = self.reference_state[0]
+            target.density[self.idx_exterior] = self.reference_state[0]
         if self.reference_state[1] is not None:
             assert target.velocity is not None
-            target.velocity[self.idx_external] = self.reference_state[1]
+            target.velocity[self.idx_exterior] = self.reference_state[1]
         if self.reference_state[2] is not None:
             assert target.pressure is not None
-            target.pressure[self.idx_external] = self.reference_state[2]
+            target.pressure[self.idx_exterior] = self.reference_state[2]
         if self.reference_state[3] is not None:
             assert target.composition is not None
-            target.composition[self.idx_external, :] = self.reference_state[3]
+            target.composition[self.idx_exterior, :] = self.reference_state[3]
 
         return target
 
