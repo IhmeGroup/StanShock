@@ -117,11 +117,11 @@ class ShockTube(Combustor):
             )
             p5 = p5op1 * self.state.pressure[-1]
         # Get initial state for reinitialization
-        rInitial = np.copy(self.state.density)
-        uInitial = np.copy(self.state.velocity)
-        pInitial = np.copy(self.state.pressure)
-        YInitial = np.copy(self.state.composition)
-        gammaInitial = np.copy(self.state.gamma)
+        rInitial = np.copy(self.state.density[self.idx_cells])
+        uInitial = np.copy(self.state.velocity[self.idx_cells])
+        pInitial = np.copy(self.state.pressure[self.idx_cells])
+        YInitial = np.copy(self.state.composition[self.idx_cells])
+        gammaInitial = np.copy(self.state.gamma[self.idx_cells])
         dlnA_dx_initial = geometry.dlnA_dx
 
         def dd_outerdx(x):
@@ -215,6 +215,9 @@ class ShockTube(Combustor):
                 pressure=np.copy(pInitial),
                 composition=np.copy(YInitial),
                 gamma=np.copy(gammaInitial),
+            )
+            self.state = self.inviscid_flux.face_extrapolator.add_ghost_layers(
+                self.state
             )
             # delete previous probes and create an endwall probe
             self.probes = [
