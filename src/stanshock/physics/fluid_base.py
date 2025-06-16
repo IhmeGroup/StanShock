@@ -13,23 +13,23 @@ from stanshock.system.backend import Array
 class FluidState:
     shape: tuple[int, ...]
 
-    density: np.ndarray | None = None
-    temperature: np.ndarray | None = None
-    pressure: np.ndarray | None = None
-    mass_fractions: np.ndarray | None = None
-    mole_fractions: np.ndarray | None = None
-    mixture_fraction: np.ndarray | None = None
-    progress_variable: np.ndarray | None = None
-    normalized_progress_variable: np.ndarray | None = None
-    composition: np.ndarray | None = None
+    density: Array | None = None
+    temperature: Array | None = None
+    pressure: Array | None = None
+    mass_fractions: Array | None = None
+    mole_fractions: Array | None = None
+    mixture_fraction: Array | None = None
+    progress_variable: Array | None = None
+    normalized_progress_variable: Array | None = None
+    composition: Array | None = None
 
-    cp: np.ndarray | None = None
-    gamma: np.ndarray | None = None
-    viscosity: np.ndarray | None = None
-    thermal_conductivity: np.ndarray | None = None
-    sound_speed: np.ndarray | None = None
+    cp: Array | None = None
+    gamma: Array | None = None
+    viscosity: Array | None = None
+    thermal_conductivity: Array | None = None
+    sound_speed: Array | None = None
 
-    velocity: np.ndarray | None = None
+    velocity: Array | None = None
 
     _cache_valid: bool = False
 
@@ -38,9 +38,9 @@ class FluidPhysics(ABC):
     def __init__(self, gas: ct.Solution, ox_def=None, fuel_def=None, prog_def=None):
         self.gas = gas
         self.n_scalars = self.gas.n_species
+        self.n_scalars_rho_sum = self.n_scalars
         self.scalar_names = [species.lower() for species in self.gas.species_names]
 
-        self.normalize_scalars = True
         self.is_flamelet = False
 
         # For mixture fraction and progress variable definitions (optional):
@@ -177,48 +177,25 @@ class FluidPhysics(ABC):
         )
         raise NotImplementedError(msg)
 
-    @abstractmethod
-    def get_source_terms(self, state: FluidState):
-        """Compute reaction source terms corresponding to transported scalars."""
-
     def primitive_to_conservative(self, state: FluidState):
-        """Transform primitive variables into vector of conservatives."""
+        """Transform primitive variables into vector of conservatives, accounting for chemical contributions."""
+        # Compute total non-chemical energy
+        sensible_energy = state.pressure / (state.density * (state.gamma - 1.0))
+        total_energy = sensible_energy + 0.5 * state.velocity**2
+
         return np.concatenate(
             (
-                state.density[..., None],
                 (state.density * state.velocity)[..., None],
-                (
-                    state.pressure / (state.gamma - 1.0)
-                    + 0.5 * state.density * state.velocity**2
-                )[..., None],
+                (state.density * total_energy)[..., None],
                 state.density[..., None] * state.composition,
             ),
             axis=-1,
         )
 
+    @abstractmethod
     def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
         """Transform conservative variables into primitives."""
-        r = state_array[..., 0]
-        ru = state_array[..., 1]
-        E = state_array[..., 2]
-        rY = state_array[..., 3:]
 
-        u = ru / r
-        p = (gamma - 1.0) * (E - 0.5 * r * u**2.0)
-        Y = rY / r[..., None]
-
-        # Bound
-        Y[Y > 1.0] = 1.0
-        Y[Y < 0.0] = 0.0
-
-        # Scale
-        if self.normalize_scalars:
-            Y = Y / np.sum(Y, axis=-1, keepdims=True)
-
-        return FluidState(
-            shape=r.shape,
-            density=r,
-            velocity=u,
-            pressure=p,
-            composition=Y,
-        )
+    @abstractmethod
+    def get_source_terms(self, state: FluidState):
+        """Compute reaction source terms corresponding to transported scalars."""

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from stanshock.numerics.boundary_conditions import BoundaryConditions
 from stanshock.numerics.face_extrapolation import FaceExtrapolator
 from stanshock.numerics.gradient import Gradient
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
@@ -13,38 +14,39 @@ from stanshock.system.geometry import Geometry
 class ViscousFlux(RightHandSide):
     def __init__(
         self,
+        boundary_conditions: BoundaryConditions,
         face_extrapolator: FaceExtrapolator,
-        boundary_conditions,
+        geometry: Geometry,
         gradient: Gradient,
     ) -> None:
         self.face_extrapolator = face_extrapolator
         self.boundary_conditions = boundary_conditions
+        self.geometry = geometry
         self.gradient = gradient
         self.F = 1.0
 
     def source(
         self,
-        _time: float,
+        time: float,
         state_array: Array,
-        geometry: Geometry,
         physics: FluidPhysics,
         gamma_star: Array,
     ) -> Array:
-        state = physics.conservative_to_primitive(state_array, gamma_star)
+        state_array = self.boundary_conditions.update_ghost_layers(time, state_array)
+
+        state: FluidState = physics.conservative_to_primitive(state_array, gamma_star)
         state.gamma = gamma_star
 
-        face_states = self.face_extrapolator(state)
-        face_states = self.boundary_conditions(face_states)
+        face_states: FluidState = self.face_extrapolator(state)
+        face_states = self.boundary_conditions.update_face_states(time, face_states)
 
         state.temperature = physics.get_temperature(state)
-        face_gradients = self.gradient.face_gradients(state, geometry)
+        face_gradients = self.gradient.face_gradients(state, self.geometry)
 
-        return self.source_from_primitives(_time, geometry, physics, face_states, face_gradients)
+        return self.source_implementation(physics, face_states, face_gradients)
 
-    def source_from_primitives(
+    def source_implementation(
         self,
-        _time: float,
-        geometry: Geometry,
         physics: FluidPhysics,
         face_states: FluidState,
         face_gradients: FluidState,
@@ -68,7 +70,6 @@ class ViscousFlux(RightHandSide):
         # Compute the fluxes
         face_flux = np.concatenate(
             (
-                np.zeros((face_states.shape[1], 1)),
                 (4.0 / 3.0 * viscosity * dudx)[:, None],
                 (conductivity * dTdx)[:, None],
                 density[:, None] * diffusivities * dYdx,
@@ -77,4 +78,4 @@ class ViscousFlux(RightHandSide):
         )
 
         # Apply central difference
-        return (face_flux[1:, :] - face_flux[:-1, :]) / geometry.dx
+        return (face_flux[1:, :] - face_flux[:-1, :]) / self.geometry.dx

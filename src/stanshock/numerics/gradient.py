@@ -17,7 +17,7 @@ class Gradient(ABC):
 
 
 class CentralDifference:
-    def __init__(self, mt: int=1) -> None:
+    def __init__(self, mt: int = 1) -> None:
         self.mt = mt
 
     def face_gradients(
@@ -37,9 +37,7 @@ class CentralDifference:
 
         for var_name in only:
             var = getattr(cell_states, var_name)
-            grad_var = (
-                var[index_face_right] - var[index_face_left]
-            ) / geometry.dx
+            grad_var = (var[index_face_right] - var[index_face_left]) / geometry.dx
             setattr(face_gradients, var_name, grad_var)
 
         return face_gradients
