@@ -162,7 +162,7 @@ class Combustor:
                     n_ghost_layers=self.n_ghost_layers,
                 ),
                 geometry=self.geometry,
-                gradient=CentralDifference(),
+                gradient=CentralDifference(n_ghost_layers=self.n_ghost_layers),
             )
 
         if self.include_boundary_layer:

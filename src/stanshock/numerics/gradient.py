@@ -17,8 +17,8 @@ class Gradient(ABC):
 
 
 class CentralDifference:
-    def __init__(self, mt: int = 1) -> None:
-        self.mt = mt
+    def __init__(self, n_ghost_layers: int = 1) -> None:
+        self.n_ghost_layers = n_ghost_layers
 
     def face_gradients(
         self, cell_states: FluidState, geometry: Geometry, only: list[str] | None = None
@@ -27,7 +27,7 @@ class CentralDifference:
         if only is None:
             only = ["velocity", "temperature", "composition"]
 
-        mt = self.mt
+        mt: int = self.n_ghost_layers
 
         index_face_left = np.s_[mt - 1 : -mt]
         right = cell_states.shape[0] if mt == 1 else -mt + 1
