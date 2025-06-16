@@ -230,8 +230,12 @@ class Combustor:
 
         # 3rd stage of RK3
         dydt = self.inviscid_flux.source(self.t, y2, self.physics, gamma_star)
-        y[self.idx_cells] /= 3.0
-        y[self.idx_cells] += (2.0 / 3.0) * y2[self.idx_cells] + (2.0 / 3.0) * dt * dydt
+
+        y[self.idx_cells] = (
+            (1.0 / 3.0) * y[self.idx_cells]
+            + (2.0 / 3.0) * y2[self.idx_cells]
+            + (2.0 / 3.0) * dt * dydt
+        )
 
         # Remove ghost layers and update gamma
         self.state = self.physics.conservative_to_primitive(y, gamma_star)
@@ -261,8 +265,7 @@ class Combustor:
 
         # 2nd stage of RK2
         dydt = self.viscous_flux.source(self.t, y1, self.physics, gamma_star)
-        y[self.idx_cells] *= 0.5
-        y[self.idx_cells] += 0.5 * (y1[self.idx_cells] + dt * dydt)
+        y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1[self.idx_cells] + dt * dydt)
 
         # Remove ghost layers and update gamma
         self.state = self.physics.conservative_to_primitive(y, gamma_star)
@@ -331,10 +334,11 @@ class Combustor:
         omegaC1 = state1.density * self.injector.get_chemical_sources(
             state1.Z, state1.C
         )
-        rC = y[:, 4] = 0.5 * (
+        y[self.idx_cells, 4] = 0.5 * (
             y[self.idx_cells, 4] + y1[self.idx_cells, 4] + dt * omegaC1
         )
-        L = self.physics.get_normalized_progress_variable(Z, rC / r)
+        C = y[self.idx_cells, 4] / r
+        L = self.physics.get_normalized_progress_variable(Z, C)
         e_chem2 = r * self.physics.lookup_direct("E0_CHEM", Z, Q, L)
         y[self.idx_cells, 1] += e_chem0 - e_chem2
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
