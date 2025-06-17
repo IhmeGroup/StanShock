@@ -15,6 +15,7 @@ from stanshock.numerics.face_extrapolation import (
     FifthOrderWeno,
     FirstOrder,
 )
+from stanshock.numerics.gradient import CentralDifference
 from stanshock.numerics.inviscid_flux import InviscidFlux, RiemannSolver, hllc_flux
 from stanshock.numerics.viscous_flux import ViscousFlux
 from stanshock.physics.flamelet import FPVTable
@@ -155,12 +156,13 @@ class Combustor:
 
         if self.include_diffusion:
             self.viscous_flux = ViscousFlux(
+                boundary_conditions=self.boundary_conditions,
                 face_extrapolator=self.viscous_face_extrapolator(
                     n_scalars_rho_sum=self.physics.n_scalars_rho_sum,
                     n_ghost_layers=self.n_ghost_layers,
                 ),
-                boundary_conditions=self.boundary_conditions,
-                dx=self.geometry.dx,
+                geometry=self.geometry,
+                gradient=CentralDifference(n_ghost_layers=self.n_ghost_layers),
             )
 
         if self.include_boundary_layer:
