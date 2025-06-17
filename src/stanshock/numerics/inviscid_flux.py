@@ -6,12 +6,9 @@ from typing import cast
 import numpy as np
 from numba import double, njit
 
-from stanshock.numerics.boundary_conditions import BoundaryConditions
-from stanshock.numerics.face_extrapolation import FaceExtrapolator
-from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array, TypeAlias
-from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import Geometry
+from stanshock.physics.fluid_base import FluidState
+from stanshock.system.backend import Array, TypeAlias, Unpack
+from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHandSide
 
 # Global variables (parameters) used by the solver
 mn = 2  # number of 1D Euler equations
@@ -278,45 +275,36 @@ def hllc_flux_vectorized(
 
 
 class InviscidFlux(RightHandSide):
+    PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = (
+        "boundary_conditions",
+        "face_extrapolator",
+        "geometry",
+        "physics",
+    )
+
     def __init__(
         self,
-        face_extrapolator: FaceExtrapolator,
-        boundary_conditions: BoundaryConditions,
         riemann_solver: RiemannSolver,
-        geometry: Geometry,
+        **precompute_steps: Unpack[PrecomputeSteps],
     ) -> None:
-        self.face_extrapolator = face_extrapolator
-        self.boundary_conditions = boundary_conditions
+        super().__init__(**precompute_steps)
+        assert self.geometry is not None
         self.riemann_solver = riemann_solver
-        self.dx: Array | float = geometry.dx
+        self.dx: Array | float = self.geometry.dx
         if isinstance(self.dx, np.ndarray):
-            self.dx = self.dx[geometry.idx_cells]
+            self.dx = self.dx[self.geometry.idx_cells]
 
-    def source(
+    def source_implementation(
         self,
         time: float,
-        state_array: Array,
-        physics: FluidPhysics,
-        gamma_star: Array | None = None,
-        e0_star: Array | None = None,
+        state_array: Array | None,
+        state: FluidState | None,
+        face_states: FluidState | None,
+        avg_face_states: FluidState | None,
+        face_gradients: FluidState | None,
     ) -> Array:
-        state_array = self.boundary_conditions.update_ghost_layers(time, state_array)
-
-        state: FluidState = physics.conservative_to_primitive(
-            state_array, gamma_star, e0_star
-        )
-        state.gamma_star = gamma_star
-        state.e0_star = e0_star
-        state = self.boundary_conditions.update_ghost_states(time, state)
-
-        face_states: FluidState = self.face_extrapolator(state)
-        face_states = self.boundary_conditions.update_face_states(time, face_states)
-
-        return self.source_from_primitives(time, face_states, physics)
-
-    def source_from_primitives(
-        self, time: float, face_states: FluidState, _physics: FluidPhysics
-    ) -> Array:
+        _ = state_array, state, avg_face_states, face_gradients
+        assert face_states is not None
         assert face_states.density is not None
         assert face_states.velocity is not None
         assert face_states.pressure is not None
@@ -345,8 +333,14 @@ class InviscidFlux(RightHandSide):
             face_states.e0_star[0, :],
         )
 
-        self.boundary_conditions.update_face_flux(time, left_face_flux)
-        self.boundary_conditions.update_face_flux(time, right_face_flux)
+        # Allow any SpecifiedFlux BCs to directly override face fluxes
+        if self.boundary_conditions is not None:
+            left_face_flux = self.boundary_conditions.update_face_flux(
+                time, left_face_flux
+            )
+            right_face_flux = self.boundary_conditions.update_face_flux(
+                time, right_face_flux
+            )
 
         return cast(
             Array,

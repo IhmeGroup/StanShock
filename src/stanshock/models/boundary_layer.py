@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+from typing import cast
+
 import numpy as np
 from scipy.optimize import root
 
-from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array
-from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import Geometry
+from stanshock.physics.fluid_base import FluidState
+from stanshock.system.backend import Array, Index, Unpack
+from stanshock.system.base import PrecomputeSteps, RightHandSide
 
 
 class SkinFriction:
@@ -21,19 +22,19 @@ class SkinFriction:
             cf = numpy array of the skin friction coefficient
     """
 
-    def __init__(self, ReCrit=2300, ReMax=1e9):
+    def __init__(self, ReCrit: float = 2300, ReMax: float = 1e9) -> None:
         # store the values and compute the Reynolds number table
         self.ReMax = ReMax
         self.ReCrit = ReCrit
         self.ReTable = np.logspace(np.log10(self.ReCrit), np.log10(ReMax))
 
         # define the residual of the Karman-Nikuradse function and its derivative
-        def f(x):
-            return 2.46 * x * np.log(self.ReTable * x) + 0.3 * x - 1.0
+        def f(x: Array) -> Array:
+            return cast(Array, 2.46 * x * np.log(self.ReTable * x) + 0.3 * x - 1.0)
 
-        def jac(x):
+        def jac(x: Array) -> Array:
             dx = 2.46 * (np.log(self.ReTable * x) + 1.0) + 0.3
-            return np.diagflat(dx)
+            return cast(Array, np.diagflat(dx))
 
         # use the scipy root finding method
         x0 = 1.0 / (2.236 * np.log(self.ReTable) - 4.639)  # use fit for initial value
@@ -41,7 +42,7 @@ class SkinFriction:
             root(f, x0, jac=jac).x
         ) ** 2.0 * 2.0  # grid of values for interpolation
 
-    def __call__(self, Re):
+    def __call__(self, Re: Array) -> Array:
         cf = np.zeros_like(Re)
         laminarIndices = np.logical_and(Re > 0.0, Re <= self.ReCrit)
         cf[laminarIndices] = 16.0 / Re[laminarIndices]
@@ -58,18 +59,22 @@ class SkinFriction:
 class BoundaryLayer(RightHandSide):
     def __init__(
         self,
-        geometry: Geometry,
-        wall_temperature=None,
-        skin_friction_coefficient=None,
+        wall_temperature: Array | float | None = None,
+        skin_friction_coefficient: SkinFriction | None = None,
+        **precompute_steps: Unpack[PrecomputeSteps],
     ) -> None:
-        self.geometry = geometry
+        super().__init__(**precompute_steps)
         self.wall_temperature = wall_temperature
-        self.skin_friction_coefficient = skin_friction_coefficient
 
-        if self.skin_friction_coefficient is None:
+        if skin_friction_coefficient is None:
             self.skin_friction_coefficient = SkinFriction()  # initialize the functor
+        else:
+            self.skin_friction_coefficient = skin_friction_coefficient
 
-    def get_nusselt_number(self, Re, Pr, cf):
+        # Provides momentum and energy source terms
+        self.idx_source: Index = np.array([0, 1])
+
+    def get_nusselt_number(self, Re: Array, Pr: Array, cf: Array) -> Array:
         """
         This function defines the nusselt Number as a function of the
         Reynolds number. These functions are empirical correlations taken
@@ -88,11 +93,11 @@ class BoundaryLayer(RightHandSide):
         Nu = np.zeros_like(Re)
 
         # laminar portion of the flow
-        laminarIndices = np.logical_and(Re > 0.0, Re <= ReCrit)
+        laminarIndices: Index = np.logical_and(Re > 0.0, Re <= ReCrit)
         Nu[laminarIndices] = 3.657  # from the analytical solution
 
         # low turbulent portion of the flow (accounts for isothermal wall)
-        lowTurbulentIndices = np.logical_and(Re > ReCrit, Re <= ReLowTurbulent)
+        lowTurbulentIndices: Index = np.logical_and(Re > ReCrit, Re <= ReLowTurbulent)
         ReLT, PrLT = Re[lowTurbulentIndices], Pr[lowTurbulentIndices]
         Nu[lowTurbulentIndices] = (
             0.021 * PrLT**0.5 * ReLT**0.8
@@ -115,18 +120,30 @@ class BoundaryLayer(RightHandSide):
         )
         return Nu
 
-    def source_from_primitives(
-        self, time: float, state: FluidState, physics: FluidPhysics
+    def source_implementation(
+        self,
+        time: float,
+        state_array: Array | None,
+        state: FluidState | None,
+        face_states: FluidState | None,
+        avg_face_states: FluidState | None,
+        face_gradients: FluidState | None,
     ) -> Array:
         """Boundary layer contribution to RHS."""
-        hydraulic_diameter = self.geometry.hydraulic_diameter(time)
-        characteristic_length = self.geometry.characteristic_length(time)
+        _ = time, state_array, face_states, avg_face_states, face_gradients
+        assert self.physics is not None
+        assert state is not None
+        assert state.density is not None
+        assert state.velocity is not None
+        rhs = np.zeros((*state.shape, 2))
 
-        rhs = np.zeros((*state.shape, 2 + physics.n_scalars))
+        x = self.geometry.xc[self.idx_domain]
+        characteristic_length = self.geometry.characteristic_length(time, x)
+        hydraulic_diameter = self.geometry.hydraulic_diameter(time, x)
 
         # Compute gas properties
-        T = state.temperature = physics.get_temperature(state)
-        mu = physics.get_mu(state)
+        T = state.temperature = self.physics.get_temperature(state)
+        mu = self.physics.get_mu(state)
 
         # Shear stress on wall
         Re = abs(state.density * state.velocity * characteristic_length / mu)
@@ -138,8 +155,8 @@ class BoundaryLayer(RightHandSide):
 
         # Stanton number and heat transfer to wall
         if self.wall_temperature is not None:
-            cp = physics.get_cp(state)
-            k = physics.get_thermal_conductivity(state)
+            cp = self.physics.get_cp(state)
+            k = self.physics.get_thermal_conductivity(state)
             Pr = cp * mu / k
             Nu = self.get_nusselt_number(Re, Pr, cf)
             qloss = Nu * k / characteristic_length * (T - self.wall_temperature)

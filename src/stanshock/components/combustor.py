@@ -9,6 +9,7 @@ from stanshock.numerics.boundary_conditions import (
     BoundaryConditions,
     set_boundary_conditions,
 )
+from stanshock.numerics.face_average import SimpleAverage
 from stanshock.numerics.face_extrapolation import (
     FaceExtrapolator,
     FifthOrderWeno,
@@ -159,6 +160,7 @@ class Combustor:
             boundary_conditions=self.boundary_conditions,
             riemann_solver=self.flux_function,
             geometry=self.geometry,
+            physics=self.physics,
         )
 
         # Set up time integrators
@@ -179,12 +181,14 @@ class Combustor:
 
         if self.include_diffusion:
             self.viscous_flux = ViscousFlux(
+                geometry=self.geometry,
+                physics=self.physics,
                 boundary_conditions=self.boundary_conditions,
                 face_extrapolator=self.viscous_face_extrapolator(
                     n_scalars_rho_sum=self.physics.n_scalars_rho_sum,
                     n_ghost_layers=self.geometry.n_ghost_layers,
                 ),
-                geometry=self.geometry,
+                face_average=SimpleAverage(),
                 gradient=CentralDifference(n_ghost_layers=self.geometry.n_ghost_layers),
             )
             integrators += [HeunsMethod(self.viscous_flux)]
@@ -195,9 +199,9 @@ class Combustor:
         if self.include_boundary_layer:
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
-                geometry=self.geometry,
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
+                geometry=self.geometry,
             )
             integrators += [ForwardEuler(self.boundary_layer)]
 

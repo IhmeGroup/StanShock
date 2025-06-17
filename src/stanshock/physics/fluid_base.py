@@ -7,6 +7,7 @@ import cantera as ct
 import numpy as np
 
 from stanshock.system.backend import Array, Composition
+from stanshock.system.base import RightHandSide
 
 
 @dataclass
@@ -283,15 +284,20 @@ class FluidPhysics(ABC):
         """Compute reaction source terms corresponding to transported scalars."""
 
 
-class ChemistrySource:
-    def source(
+class ChemistrySource(RightHandSide):
+    PRECOMPUTE_STEPS = ("geometry", "physics")
+
+    def source_implementation(
         self,
-        _time: float,
-        state_array: Array,
-        physics: FluidPhysics,
-        gamma_star: Array | None = None,
-        e0_star: Array | None = None,
+        time: float,
+        state_array: Array | None,
+        state: FluidState | None,
+        face_states: FluidState | None,
+        avg_face_states: FluidState | None,
+        face_gradients: FluidState | None,
     ) -> Array:
         """Compute the temporal gradient of the current state of the system."""
-        state = physics.conservative_to_primitive(state_array, gamma_star, e0_star)
-        return physics.get_source_terms(state)
+        _ = time, state_array, face_states, avg_face_states, face_gradients
+        assert self.physics is not None
+        assert state is not None
+        return self.physics.get_source_terms(state)
