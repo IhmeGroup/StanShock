@@ -22,7 +22,7 @@ def test_lax_friedrich_predicts_constant_flux():
         gamma=np.array([gamma]),
     )[0]
     H = gamma * p / (gamma - 1.0) + 0.5 * r * u**2.0
-    expected_flux = np.array([r * u, r * u**2 + p, H * u, r * Y * u])
+    expected_flux = np.array([r * u**2 + p, H * u, r * Y * u])
     assert np.allclose(flux, expected_flux)
 
 
@@ -43,6 +43,6 @@ def test_hllc_predicts_constant_flux():
         gamma=gamma * np.ones(num_faces),
     )
     H = gamma * p / (gamma - 1.0) + 0.5 * r * u**2.0
-    expected_flux = np.array([r * u, r * u**2 + p, H * u, r * Y * u])[np.newaxis, ...]
+    expected_flux = np.array([r * u**2 + p, H * u, r * Y * u])[np.newaxis, ...]
     expected_flux = np.repeat(expected_flux, num_faces, axis=0)
     assert np.allclose(flux, expected_flux)

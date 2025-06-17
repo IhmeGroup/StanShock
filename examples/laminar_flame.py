@@ -10,7 +10,6 @@ from matplotlib import pyplot as plt
 
 from stanshock.components.combustor import Combustor
 from stanshock.physics.cantera_interface import CanteraInterface
-from stanshock.physics.fluid_base import FluidState
 from stanshock.physics.thermotable import ThermoTable
 
 
@@ -80,15 +79,15 @@ def main(
     # interpolate flame solution
     Y = ss.state.composition
     for iSp in range(gas.n_species):
-        Y[:, iSp] = np.interp(ss.geometry.x, flame.grid, flame.Y[iSp, :])
+        Y[ss.idx_cells, iSp] = np.interp(ss.geometry.x, flame.grid, flame.Y[iSp, :])
 
-    ss.state = FluidState(
-        shape=(nX,),
-        density=np.interp(ss.geometry.x, flame.grid, flame.density),
-        velocity=np.interp(ss.geometry.x, flame.grid, flame.velocity),
-        pressure=flame.P * np.ones(ss.geometry.n),
-        composition=Y,
+    ss.state.density[ss.idx_cells] = np.interp(ss.geometry.x, flame.grid, flame.density)
+    ss.state.velocity[ss.idx_cells] = np.interp(
+        ss.geometry.x, flame.grid, flame.velocity
     )
+    ss.state.pressure[ss.idx_cells] = flame.P * np.ones(ss.geometry.n)
+    ss.state.composition = Y
+
     T = ss.state.temperature = ss.physics.get_temperature(ss.state)
     ss.state.gamma = ss.physics.get_gamma(ss.state)
 
@@ -104,7 +103,7 @@ def main(
 
     # plot setup
     if plot_results:
-        T = ss.physics.get_temperature(ss.state)
+        T = ss.physics.get_temperature(ss.state)[ss.idx_cells]
         state = ss.physics.set_state(ss.state)
 
         plt.close("all")
@@ -131,7 +130,7 @@ def main(
         )
         plt.plot(
             (ss.geometry.x - flame_center) / flameThickness,
-            state.mass_fractions[:, iOH] * 10,
+            state.mass_fractions[ss.idx_cells, iOH] * 10,
             "k--s",
         )
         iO2 = gas.species_index("O2")
@@ -143,7 +142,7 @@ def main(
         )
         plt.plot(
             (ss.geometry.x - flame_center) / flameThickness,
-            state.mass_fractions[:, iO2],
+            state.mass_fractions[ss.idx_cells, iO2],
             "g--s",
         )
         iH2 = gas.species_index("H2")
@@ -155,7 +154,7 @@ def main(
         )
         plt.plot(
             (ss.geometry.x - flame_center) / flameThickness,
-            state.mass_fractions[:, iH2],
+            state.mass_fractions[ss.idx_cells, iH2],
             "b--s",
         )
         plt.xlabel(r"$x/\delta_\mathrm{F}$")
@@ -169,7 +168,7 @@ def main(
 
     results = {
         "position": ss.geometry.x,
-        "temperature": T,
+        "temperature": T[ss.idx_cells],
     }
     if results_location is not None:
         results_location = Path(results_location)
