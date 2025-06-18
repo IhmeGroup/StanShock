@@ -7,7 +7,7 @@ from scipy.optimize import root
 
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, Unpack
-from stanshock.system.base import PrecomputeSteps, RightHandSide
+from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHandSide
 
 
 class SkinFriction:
@@ -57,6 +57,8 @@ class SkinFriction:
 
 
 class BoundaryLayer(RightHandSide):
+    PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ("geometry", "physics")
+
     def __init__(
         self,
         wall_temperature: Array | float | None = None,
@@ -136,6 +138,8 @@ class BoundaryLayer(RightHandSide):
         assert state.density is not None
         assert state.velocity is not None
         rhs = np.zeros((*state.shape, 2))
+        hydraulic_diameter = self.geometry.hydraulic_diameter(time)
+        characteristic_length = self.geometry.characteristic_length(time)
 
         x = self.geometry.xc[self.idx_domain]
         characteristic_length = self.geometry.characteristic_length(time, x)

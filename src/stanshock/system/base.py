@@ -36,10 +36,7 @@ class PrecomputeSteps(TypedDict):
 class RightHandSide:
     REQUIRED_PRECOMPUTE_STEPS: ClassVar[tuple[PrecomputeStepName, ...]] = ("geometry",)
 
-    def __init__(
-        self,
-        **precompute_steps: Unpack[PrecomputeSteps],
-    ) -> None:
+    def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         # Any precompute steps not provided will default to None
         self.geometry = precompute_steps.get("geometry")
         self.physics = precompute_steps.get("physics")
@@ -57,6 +54,24 @@ class RightHandSide:
                 msg: str = f"Must provide {step} for {self.__class__.__name__}."
                 raise ValueError(msg)
 
+        if self.physics is not None:
+            self.shape: tuple[int, int] = (
+                self.geometry.n_cells,
+                self.physics.n_scalars + 2,
+            )
+        else:
+            self.shape = (self.geometry.n_cells, -1)
+
+    def update_indices(self, time: float) -> None:
+        """Hook to update time-varying domain indices."""
+        _ = time
+
+    def add_source(self, y: Array, dy: Array) -> Array:
+        """Add (2D) source term to the (1D) state array."""
+        state_array = y.reshape(self.shape)
+        state_array[self.idx_domain, self.idx_source] += dy
+        return np.ravel(state_array)
+
     def precompute(
         self,
         time: float,
@@ -71,6 +86,9 @@ class RightHandSide:
         FluidState | None,
     ]:
         """Perform all calculations which must occur prior to source term evaluation."""
+        assert self.physics is not None
+        state_array = state_array.reshape(self.shape)
+
         if self.boundary_conditions is not None:
             state_array = self.boundary_conditions.update_ghost_layers(
                 time, state_array
@@ -122,6 +140,16 @@ class RightHandSide:
             time, state_array, state, face_states, avg_face_states, face_gradients
         )
 
+    def source_full(
+        self, time: float, state_array: Array, gamma_star: Array, e0_star: Array
+    ) -> Array:
+        """Reshape the source term to match the state array."""
+        dydt = np.zeros_like(state_array)
+
+        return self.add_source(
+            dydt, self.source(time, state_array, gamma_star, e0_star)
+        )
+
     @abstractmethod
     def source_implementation(
         self,
@@ -134,10 +162,75 @@ class RightHandSide:
     ) -> Array:
         """Concrete implementation of the source term calculation."""
 
+    def postcompute(self, state_array: Array, state: FluidState) -> Array:
+        """Undo any transforms to the state array during precompute steps."""
+        _ = state
+        return np.ravel(state_array)
+
+
+FastSlowMode: TypeAlias = Literal["fast", "slow"]
+
+
+class FastSlowSource(RightHandSide):
+    _mode: FastSlowMode
+    idx_implicit: Index
+    idx_explicit: Index
+
+    def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
+        """Split RHS into fast and slow source terms accessed by setting the mode."""
+        super().__init__(**precompute_steps)
+        self.idx_implicit = np.array([], dtype=np.int64)
+        self.idx_explicit = self.geometry.idx_cells
+        self._mode = "slow"
+
+    @property
+    def mode(self) -> FastSlowMode:
+        return self._mode
+
+    @mode.setter
+    def mode(self, mode: FastSlowMode) -> None:
+        self._mode = mode
+        if mode == "fast":
+            self.idx_domain = self.idx_implicit
+            self.source_implementation = self.source_fast
+        elif mode == "slow":
+            self.idx_domain = self.idx_explicit
+            self.source_implementation = self.source_slow
+
+    @abstractmethod
+    def source_slow(
+        self,
+        time: float,
+        state_array: Array | None,
+        state: FluidState | None,
+        face_states: FluidState | None,
+        avg_face_states: FluidState | None,
+        face_gradients: FluidState | None,
+    ) -> Array:
+        """Slow source terms to be integrated explicitly."""
+
+    @abstractmethod
+    def source_fast(
+        self,
+        time: float,
+        state_array: Array | None,
+        state: FluidState | None,
+        face_states: FluidState | None,
+        avg_face_states: FluidState | None,
+        face_gradients: FluidState | None,
+    ) -> Array:
+        """Fast source terms to be integrated implicitly."""
+
 
 class CombinedSource(RightHandSide):
     def __init__(self, sources: list[RightHandSide]) -> None:
         self.sources = sources
+
+        # Dynamically determine the set of unique precompute steps required
+        required_steps: set[PrecomputeStepName] = {
+            x for source in self.sources for x in source.REQUIRED_PRECOMPUTE_STEPS
+        }
+        self.REQUIRED_PRECOMPUTE_STEPS = tuple(required_steps)
 
     def source(
         self,
@@ -146,14 +239,21 @@ class CombinedSource(RightHandSide):
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
-        rhs = np.zeros_like(state_array)
+        rhs: Array = np.zeros_like(state_array)
+
+        state_array, state, face_states, avg_face_states, face_gradients = (
+            self.precompute(time, state_array, gamma_star, e0_star)
+        )
 
         for source in self.sources:
-            rhs[source.idx_domain, source.idx_source] += source.source(
+            dydt = source.source_implementation(
                 time=time,
                 state_array=state_array,
-                gamma_star=gamma_star,
-                e0_star=e0_star,
+                state=state,
+                face_states=face_states,
+                avg_face_states=avg_face_states,
+                face_gradients=face_gradients,
             )
+            rhs = source.add_source(rhs, dydt)
 
         return rhs

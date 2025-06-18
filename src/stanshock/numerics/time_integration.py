@@ -6,7 +6,7 @@ import numpy as np
 
 from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.system.backend import Array
-from stanshock.system.base import RightHandSide
+from stanshock.system.base import FastSlowSource, RightHandSide
 
 
 class TimeIntegrator(ABC):
@@ -19,7 +19,6 @@ class TimeIntegrator(ABC):
         dt: float,
         time: float,
         state_array: Array,
-        physics: FluidPhysics,
         gamma_star: Array,
         e0_star: Array,
     ) -> tuple[float, Array]:
@@ -27,7 +26,7 @@ class TimeIntegrator(ABC):
 
 
 class ScipyIVP(TimeIntegrator):
-    def __init__(self, rhs: RightHandSide, method: str = "LSODA", **kwargs) -> None:
+    def __init__(self, rhs: RightHandSide, method: str = "LSODA", **kwargs) -> None:  # type: ignore[no-untyped-def]
         """Interface to SciPy's IVP solvers.
 
         The specific solver can be selected with the `method` input, and additional
@@ -49,25 +48,26 @@ class ScipyIVP(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        physics: FluidPhysics,
         gamma_star: Array,
         e0_star: Array,
     ) -> tuple[float, Array]:
-        # integrator = self.integrator(self.rhs.source).set_integrator("lsoda")
-        # integrator.set_initial_value(y=state_array, t=time)
-        # integrator.set_f_params(args=(physics, gamma_star))
-        # integrator.integrate(t=time + dt)
+        y0, state0, _, _, _ = self.rhs.precompute(
+            time, state_array, gamma_star, e0_star
+        )
+        assert state0 is not None
 
         results = self.integrator(
             fun=self.rhs.source,
             t_span=(time, time + dt),
-            y0=state_array.flatten(),
+            y0=y0,
             method=self.method,
-            args=(physics, gamma_star, e0_star),
+            args=(gamma_star, e0_star),
             **self.solver_options,
         )
 
-        return results.t[-1], results.y[:, -1]
+        state_array = self.rhs.postcompute(results.y[:, -1], state0)
+
+        return results.t[-1], state_array
 
 
 class RungeKuttaBase(TimeIntegrator):
@@ -79,12 +79,11 @@ class RungeKuttaBase(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        physics: FluidPhysics,
         gamma_star: Array,
         e0_star: Array,
     ) -> tuple[float, Array]:
         t = time
-        y = state_array.flatten()
+        y: Array = np.ravel(state_array)
 
         t0 = t + 0
         y0 = y.copy()
@@ -94,8 +93,7 @@ class RungeKuttaBase(TimeIntegrator):
 
             dydt = self.rhs.source(
                 time=t,
-                state_array=state_array,
-                physics=physics,
+                state_array=y,
                 gamma_star=gamma_star,
                 e0_star=e0_star,
             )
@@ -106,7 +104,7 @@ class RungeKuttaBase(TimeIntegrator):
             if a != 0.0:
                 y += a * y0
 
-            y += c * dt * dydt
+            y = self.rhs.add_source(y, c * dt * dydt)
 
             t = t0 + d * dt
 
@@ -173,7 +171,6 @@ class StrangSplitting(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        physics: FluidPhysics,
         gamma_star: Array,
         e0_star: Array,
     ) -> tuple[float, Array]:
@@ -184,7 +181,6 @@ class StrangSplitting(TimeIntegrator):
             dt=0.5 * dt,
             time=time,
             state_array=y,
-            physics=physics,
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
@@ -194,7 +190,6 @@ class StrangSplitting(TimeIntegrator):
             dt=dt,
             time=time,
             state_array=y,
-            physics=physics,
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
@@ -204,7 +199,6 @@ class StrangSplitting(TimeIntegrator):
             dt=0.5 * dt,
             time=time + 0.5 * dt,
             state_array=y,
-            physics=physics,
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
@@ -219,12 +213,19 @@ class LieSplitting(TimeIntegrator):
         self.operators = operators
         self.update_double_flux = update_double_flux
 
+        # Get fluid physics from any of the operators
+        self.physics: FluidPhysics | None = None
+        if self.update_double_flux:
+            for operator in operators:
+                if operator.rhs.physics is not None:
+                    self.physics = operator.rhs.physics
+                    break
+
     def advance(
         self,
         dt: float,
         time: float,
         state_array: Array,
-        physics: FluidPhysics,
         gamma_star: Array,
         e0_star: Array,
     ) -> tuple[float, Array]:
@@ -235,15 +236,56 @@ class LieSplitting(TimeIntegrator):
                 dt=dt,
                 time=time,
                 state_array=y,
-                physics=physics,
                 gamma_star=gamma_star,
                 e0_star=e0_star,
             )
 
             # Optionally: Update the double flux variables
             if self.update_double_flux:
-                state = physics.conservative_to_primitive(y, gamma_star, e0_star)
-                state.temperature = physics.get_temperature(state)
-                gamma_star, e0_star = physics.get_double_flux_variables(state)
+                assert self.physics is not None
+                state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
+                state.temperature = self.physics.get_temperature(state)
+                gamma_star, e0_star = self.physics.get_double_flux_variables(state)
 
         return time + dt, y
+
+
+class FastSlowIntegrator(TimeIntegrator):
+    def __init__(
+        self,
+        rhs: RightHandSide,
+        fast_integrator: type[TimeIntegrator] = ScipyIVP,
+        slow_integrator: type[TimeIntegrator] = ForwardEuler,
+    ) -> None:
+        """Apply different integrators to stiff and non-stiff terms."""
+        self.rhs = rhs
+        self.fast_integrator = fast_integrator(self.rhs)
+        self.slow_integrator = slow_integrator(self.rhs)
+
+    def advance(
+        self,
+        dt: float,
+        time: float,
+        state_array: Array,
+        gamma_star: Array,
+        e0_star: Array,
+    ) -> tuple[float, Array]:
+        assert isinstance(self.rhs, FastSlowSource)
+        y_full = np.zeros_like(state_array)
+        self.rhs.update_indices(time)
+
+        # Integrate fast terms
+        self.rhs.mode = "fast"
+        _, y_fast = self.fast_integrator.advance(
+            dt, time, state_array, gamma_star, e0_star
+        )
+        y_full = self.rhs.add_source(y_full, y_fast)
+
+        # Integrate slow terms
+        self.rhs.mode = "slow"
+        _, y_slow = self.slow_integrator.advance(
+            dt, time, state_array, gamma_star, e0_star
+        )
+        y_full = self.rhs.add_source(y_full, y_slow)
+
+        return time + dt, y_full

@@ -24,6 +24,7 @@ from stanshock.numerics.time_integration import (
     LieSplitting,
     ScipyIVP,
     StrangSplitting,
+    TimeIntegrator,
 )
 from stanshock.numerics.viscous_flux import ViscousFlux
 from stanshock.physics.fluid_base import ChemistrySource, FluidPhysics
@@ -33,7 +34,8 @@ from stanshock.processing.initialize import (
     initialize_isentropic,
     initialize_riemann_problem,
 )
-from stanshock.processing.plot import plot_state
+from stanshock.processing.plot import XTDiagram, plot_state
+from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
 from stanshock.system.geometry import Geometry, initialize_geometry
@@ -45,13 +47,13 @@ class Combustor:
     1D gasdynamics solver.
     """
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         physics: FluidPhysics,
         n_cells: int = 10,
         geometry: Geometry | None = None,
         **kwargs,
-    ):
+    ) -> None:
         """
         initialization of the object with default values. The keyword arguments
         allow the user to initialize the state
@@ -81,8 +83,8 @@ class Combustor:
         self.inviscid_face_extrapolator: type[FaceExtrapolator] = FifthOrderWeno
         self.viscous_face_extrapolator: type[FaceExtrapolator] = FirstOrder
         self.initialization = None  # initialization options
-        self.probes = []  # list of probe objects
-        self.xt_diagrams = []  # list of XT diagram objects
+        self.probes: list[Probe] = []  # list of probe objects
+        self.xt_diagrams: list[XTDiagram] = []  # list of XT diagram objects
         self.skin_friction_coefficient = None  # skin friction functor
         self.optimization_iteration = 0  # counter to keep track of optimization
         self.physics = physics  # Model handling all fluid property evaluations
@@ -164,7 +166,7 @@ class Combustor:
         )
 
         # Set up time integrators
-        integrators = []
+        integrators: list[TimeIntegrator] = []
         advection = SSPRK3(self.inviscid_flux)
         if self.physics.is_flamelet:
             integrators += [
@@ -262,9 +264,9 @@ class Combustor:
         This method updates all the XT Diagrams to the current value.
         """
         # update diagrams
-        for XTDiagram in self.xt_diagrams:
-            if iters % (XTDiagram.skipSteps + 1) == 0:
-                XTDiagram.update(self)
+        for diagram in self.xt_diagrams:
+            if iters % (diagram.skipSteps + 1) == 0:
+                diagram.update(self)
 
     def advance_simulation(self, tFinal, res_p_target=-1.0):
         """

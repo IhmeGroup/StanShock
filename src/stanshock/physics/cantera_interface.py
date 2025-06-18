@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import numpy as np
-from cantera import Solution, SolutionArray
+from cantera import Solution, SolutionArray, gas_constant
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array, Composition
+from stanshock.system.backend import Array, Composition, Index, Unpack
+from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHandSide
 
 
 class CanteraInterface(FluidPhysics):
@@ -143,3 +144,107 @@ class CanteraInterface(FluidPhysics):
         """Compute reaction source terms corresponding to transported scalars."""
         state = self.set_state(state)
         return self.sol.net_production_rates
+
+
+class ConstantVolumeChemistry(RightHandSide):
+    PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ("geometry", "physics")
+
+    def __init__(
+        self,
+        **precompute_steps: Unpack[PrecomputeSteps],
+    ) -> None:
+        super().__init__(**precompute_steps)
+        assert self.physics is not None
+        self.idx_source: Index = np.arange(1, self.physics.n_scalars + 2)
+
+        # Define some parameters to be set during precompute step
+        self.density0: Array = np.zeros((0,))
+        self.shape_initial: tuple[int, ...] = (0, 0)
+        self.shape_subset: tuple[int, ...] = (0, 0)
+
+    def precompute(
+        self,
+        time: float,
+        state_array: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> tuple[
+        Array,
+        FluidState | None,
+        FluidState | None,
+        FluidState | None,
+        FluidState | None,
+    ]:
+        """Store temperature and mass fractions in the state array."""
+        _ = time
+        assert self.physics is not None
+        n_species = self.physics.n_scalars
+        state_array = state_array.reshape((-1, n_species + 2))
+        self.shape_initial = state_array.shape
+
+        state_array = state_array[self.idx_domain]
+        self.shape_subset = state_array.shape
+
+        state: FluidState = self.physics.conservative_to_primitive(
+            state_array, gamma_star, e0_star
+        )
+
+        assert state.density is not None
+        self.density0 = state.density
+
+        state_array_new: Array = np.zeros((self.shape_subset[0], n_species + 1))
+        state_array_new[:, :-1] = state.composition
+        state_array_new[:, -1] = self.physics.get_temperature(state)
+
+        return state_array_new, state, None, None, None
+
+    def source(
+        self,
+        time: float,
+        state_array: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        _ = time, gamma_star, e0_star
+        assert self.physics is not None
+
+        temperature = state_array[:, -1]
+
+        state: FluidState = FluidState(
+            shape=(self.shape_subset[0],),
+            density=self.density0,
+            temperature=temperature,
+            composition=state_array[:, :-1],
+        )
+        wdot: Array = self.physics.get_source_terms(state)
+
+        eRT = self.physics.sol.standard_int_energies_RT
+        cv = self.physics.get_cp(state) / self.physics.get_gamma(state)
+
+        dydt: Array = np.zeros(self.shape_subset)
+        dydt[:, :-1] = (
+            wdot * self.physics.gas.molecular_weights[None, :] / self.density0[:, None]
+        )
+        dydt[:, -1] = (
+            -np.sum(eRT * wdot, axis=-1, keepdims=True)
+            * (gas_constant * temperature / (self.density0 * cv))[:, None]
+        )
+
+        return np.ravel(dydt)
+
+    def postcompute(self, state_array: Array, y: Array, state: FluidState) -> Array:
+        # Compute state from initial density and updated mass fractions + temperature
+        assert self.physics is not None
+        state._cache_valid = False
+        state.pressure = None
+        state.composition = y[:, :-1]
+        state.temperature = y[:, -1]
+        state.pressure = self.physics.get_pressure(state)
+
+        y = self.physics.primitive_to_conservative(state)
+
+        # Update the state array
+        state_array = state_array.reshape(self.shape_initial)
+        state_array[self.idx_domain, self.idx_source] = y[:, self.idx_source]
+
+        return np.ravel(state_array)
