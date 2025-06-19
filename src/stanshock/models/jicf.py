@@ -765,7 +765,7 @@ class JICModel(RightHandSide):
         for i_m in range(len(self.mdot_inj_unique)):
             if np.isnan(self.rho_inj_unique[i_m]):
                 C_avg[i_m] = self.fpv_table.lookup_direct("PROG", 0.0, 0.0, 0.0)
-                E_CHEM_avg[i_m] = self.fpv_table.lookup_direct("E0_CHEM", 0.0, 0.0, 0.0)
+                E_CHEM_avg[i_m] = self.fpv_table.lookup_direct("E_CHEM", 0.0, 0.0, 0.0)
                 continue
 
             def integrand(z, y, i_m=i_m):
@@ -784,7 +784,7 @@ class JICModel(RightHandSide):
             def integrand(z, y, i_m=i_m):
                 # Z = self.Z_3D_adjusted(x, y, z)[i_m]
                 Z = self.Z_3D_interp[i_m]((x, y, z))
-                return self.fpv_table.lookup_direct("E0_CHEM", Z, 0.0, 1.0)
+                return self.fpv_table.lookup_direct("E_CHEM", Z, 0.0, 1.0)
 
             E_CHEM_avg[i_m] = (
                 2.0
@@ -802,7 +802,7 @@ class JICModel(RightHandSide):
 
         # Debugging way
         C = self.fpv_table.lookup_direct("PROG", self.Z_3D_data, 0.0, 1.0)
-        E_CHEM = self.fpv_table.lookup_direct("E0_CHEM", self.Z_3D_data, 0.0, 1.0)
+        E_CHEM = self.fpv_table.lookup_direct("E_CHEM", self.Z_3D_data, 0.0, 1.0)
 
         C_profile = np.mean(C, axis=(2, 3))
         E_CHEM_profile = np.mean(E_CHEM, axis=(2, 3))
@@ -819,7 +819,7 @@ class JICModel(RightHandSide):
         #     if self.x[i] < self.x_inj:
         #         # Assume no fuel in the domain
         #         self.C_profile[:, i] = self.fpv_table.lookup_direct('PROG', 0.0, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E0_CHEM', 0.0, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E_CHEM', 0.0, 0.0, 0.0)
         #     elif self.x[i] > self.x_noz:
         #         # Freeze the profiles in the nozzle
         #         self.C_profile[:, i] = self.C_profile[:, i-1]
@@ -828,7 +828,7 @@ class JICModel(RightHandSide):
         #         # DEBUG: Assume nearly no mixing, so no burning
         #         Z_avg = self.Z_avg_profile[:, i]
         #         self.C_profile[:, i] = self.fpv_table.lookup_direct('PROG', Z_avg, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E0_CHEM', Z_avg, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E_CHEM', Z_avg, 0.0, 0.0)
         #     else:
         #         self.C_profile[:,i], self.E_CHEM_profile[:, i] = self.C_E_CHEM_avg_MIB(self.x[i])
 
