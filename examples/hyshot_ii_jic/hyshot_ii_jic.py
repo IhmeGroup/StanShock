@@ -9,9 +9,8 @@ import numpy as np
 from scipy import interpolate, optimize
 
 from stanshock.components.combustor import Combustor
-from stanshock.models.jicf import JICModel
-from stanshock.numerics.boundary_conditions import Inflow
 from stanshock.physics.flamelet import FPVTable
+from stanshock.physics.jicf import JICModel
 from stanshock.processing.plot import XTDiagram
 
 XSMALL_SIZE = 12
@@ -57,8 +56,8 @@ figdir.mkdir(exist_ok=True)
 (figdir / "anim").mkdir(exist_ok=True)
 
 # Chemistry
-mech = "ohn.yaml"
-table_file = "./flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5"
+mech = "h2_boivin_9sp_12r_mod.yaml"
+table_file = "./H2_O2_p01_3_tf0250_to1367_200x2x200.h5"
 gas = ct.Solution(mech)
 X_ox = "O2:0.21,N2:0.79"
 X_f = "H2:1"
@@ -193,8 +192,8 @@ t_phi_gl_schedule = np.array(
         [0.1 * tau, 0.0],
         [8.0 * tau, 0.35],
         [10.0 * tau, 0.35],
-        [14.0 * tau, 0.6],
-        [16.0 * tau, 0.6],
+        [14.0 * tau, 0.45],
+        [16.0 * tau, 0.45],
     ]
 )
 # t_phi_gl_schedule = np.array(
@@ -243,12 +242,20 @@ gas_init = ct.Solution(mech)
 gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
 
 # Define the boundary conditions
-BC_inlet = Inflow(reference_state=(gas_init.density, U_in, gas_init.P, (1.0, 0.0, 0.0)))
+BC_inlet = gas_init.density, U_in, gas_init.P, (0.0, 0.0)
 BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
 # Load the FPV table
-fpv_table = FPVTable(table_file, gas, ox_def=X_ox, fuel_def=X_f, prog_def={"H2O": 1.0})
+fpv_table = FPVTable(
+    table_file,
+    gas,
+    ox_def=X_ox,
+    fuel_def=X_f,
+    prog_def={"H2O": 1.0},
+    p_correction=False,
+    T_correction=False,
+)
 
 # #################################################################
 
