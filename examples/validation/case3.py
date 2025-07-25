@@ -15,6 +15,7 @@ from stanshock.processing.initialize import (
     smoothing_function_gradient,
 )
 from stanshock.processing.probe import Probe
+from stanshock.system.backend import Array
 from stanshock.utils.csv_loader import get_pressure_data
 
 
@@ -77,10 +78,10 @@ def main(
     # dd_outerInsertdx = (d_outerInsertFront - d_outerInsertBack) / LOuterInsert
     DeltaSmoothingFunction = (xUpper - xLower) / float(nX) * 10.0
 
-    def d_outer(x):
+    def d_outer(time: float, x: Array) -> Array:
         return DDriven * np.ones(nX)
 
-    def d_inner(x):
+    def d_inner(time: float, x: Array) -> Array:
         diameter = np.zeros(nX)
         diameter += smoothing_function(
             x, xLower + LInnerInsert, DeltaSmoothingFunction, d_innerInsert, 0.0
@@ -101,10 +102,10 @@ def main(
         )
         return diameter
 
-    def dd_outerdx(x):
+    def dd_outerdx(time: float, x: Array) -> Array:
         return np.zeros(nX)
 
-    def dd_innerdx(x):
+    def dd_innerdx(time: float, x: Array) -> Array:
         dDiameterdx = np.zeros(nX)
         dDiameterdx += smoothing_function_gradient(
             x, xLower + LInnerInsert, DeltaSmoothingFunction, d_innerInsert, 0.0
@@ -125,14 +126,21 @@ def main(
         )
         return dDiameterdx
 
-    def A(x):
-        return np.pi / 4.0 * (d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
+    def A(time: float, x: Array) -> Array:
+        return np.pi / 4.0 * (d_outer(time, x) ** 2.0 - d_inner(time, x) ** 2.0)
 
-    def dA_dx(x):
-        return np.pi / 2.0 * (d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
+    def dA_dx(time: float, x: Array) -> Array:
+        return (
+            np.pi
+            / 2.0
+            * (
+                d_outer(time, x) * dd_outerdx(time, x)
+                - d_inner(time, x) * dd_innerdx(time, x)
+            )
+        )
 
-    def dlnA_dx(x, t):
-        return dA_dx(x) / A(x)
+    def dlnA_dx(time: float, x: Array) -> Array:
+        return dA_dx(time, x) / A(time, x)
 
     # set up solver parameters
     print("Solving with boundary layer terms")

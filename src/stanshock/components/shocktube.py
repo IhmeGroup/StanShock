@@ -5,6 +5,8 @@ import numpy as np
 from stanshock.components.combustor import Combustor
 from stanshock.physics.fluid_base import FluidState
 from stanshock.processing.probe import Probe
+from stanshock.system.backend import Array
+from stanshock.system.geometry import ConstantValue, Cylinder
 
 
 class ShockTube(Combustor):
@@ -78,12 +80,14 @@ class ShockTube(Combustor):
             if self.verbose:
                 print("WARNING: Boundary Layer Terms Included")
 
-        geometry = self.geometry
+        assert isinstance(self.geometry, Cylinder)
+        geometry: Cylinder = self.geometry
         msg = None
         if geometry.d_outer is None or geometry.dlnA_dx is None:
             msg = "Driver optimization must have d_outer and dlnA_dx defined"
-        if geometry.d_inner is not None:
+        if not isinstance(geometry.d_inner, ConstantValue) or geometry.d_inner.constant != 0:
             msg = "Driver optimization cannot have an inner diameter"
+        assert self.state.pressure is not None
         if self.state.pressure[0] < self.state.pressure[-1]:
             msg = "Optimization routine requires the driver gas to be on the left."
         if msg is not None:
@@ -124,9 +128,9 @@ class ShockTube(Combustor):
         gammaInitial = np.copy(self.state.gamma[self.idx_cells])
         dlnA_dx_initial = geometry.dlnA_dx
 
-        def dd_outerdx(x):
+        def dd_outerdx(time: float, x: Array) -> Array:
             return (
-                geometry.d_outer(x) / 2.0 * dlnA_dx_initial(x, 0.0)
+                geometry.d_outer(time, x) / 2.0 * dlnA_dx_initial(0.0, x)
             )  # assume temporally constant area
 
         # Determine geometry from pressure
@@ -137,7 +141,7 @@ class ShockTube(Combustor):
         (xMin, xMax, probeLocation) = (geometry.x[0], xShock, geometry.x[-1])
         LMax = xMax - xMin  # maximum length of constrained optimization
         DMax = min(
-            geometry.d_outer(np.linspace(xMin, xMax))
+            geometry.d_outer(0.0, np.linspace(xMin, xMax))
         )  # maximum diameter of constrained optimization
         smoothingLength = 10 * geometry.dx
         if LMax <= smoothingLength:
@@ -169,44 +173,44 @@ class ShockTube(Combustor):
             xIns0, xIns1 = xMin + LInsert * alpha, xMin + LInsert
             AIns0 = np.pi * DInsert**2.0 / 4.0
 
-            def AInsert(x):
+            def AInsert(time: float, x: Array) -> Array:
                 AIns = np.zeros_like(x)
                 inds = np.logical_and(x >= xIns0, x < xIns1)
                 AIns[inds] = AIns0 * (1.0 - (x[inds] - xIns0) / (xIns1 - xIns0))
                 AIns[x < xIns0] = AIns0
                 return AIns
 
-            def dAInsertdx(x):
+            def dAInsertdx(time: float, x: Array) -> Array:
                 dAInsdx = np.zeros_like(x)
                 inds = np.logical_and(x >= xIns0, x < xIns1)
                 dAInsdx[inds] = -AIns0 / (xIns1 - xIns0)
                 return dAInsdx
 
-            def d_inner(x):
-                return np.sqrt(4.0 * AInsert(x) / np.pi)
+            def d_inner(time: float, x: Array) -> Array:
+                return np.sqrt(4.0 * AInsert(time, x) / np.pi)
 
-            def dd_innerdx(x):
+            def dd_innerdx(time: float, x: Array) -> Array:
                 dDIndx = np.zeros_like(x)
                 inds = np.logical_and(x >= xIns0, x < xIns1)
                 dDIndx[inds] = (
                     0.5
-                    * (4.0 * AInsert(x[inds]) / np.pi) ** -0.5
-                    * (4.0 * dAInsertdx(x[inds]) / np.pi)
+                    * (4.0 * AInsert(time, x[inds]) / np.pi) ** -0.5
+                    * (4.0 * dAInsertdx(time, x[inds]) / np.pi)
                 )
                 return dDIndx
 
-            def A(x):
-                return np.pi / 4.0 * (geometry.d_outer(x) ** 2.0 - d_inner(x) ** 2.0)
+            def A(time: float, x: Array) -> Array:
+                return np.pi / 4.0 * (geometry.d_outer(time, x) ** 2.0 - d_inner(time, x) ** 2.0)
 
-            def dA_dx(x):
+            def dA_dx(time: float, x: Array) -> Array:
                 return (
                     np.pi
                     / 2.0
-                    * (geometry.d_outer(x) * dd_outerdx(x) - d_inner(x) * dd_innerdx(x))
+                    * (geometry.d_outer(time, x) * dd_outerdx(time, x) - d_inner(time, x) * dd_innerdx(time, x))
                 )
 
             # initialize (may be at a previous state in the optimization)
-            geometry.dlnA_dx = lambda x, _t: dA_dx(x) / A(x)
+            geometry.dlnA_dx = lambda t, x: dA_dx(t, x) / A(t, x)
             geometry.d_inner = d_inner
             self.state = FluidState(
                 shape=(geometry.n,),

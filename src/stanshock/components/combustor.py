@@ -26,9 +26,9 @@ from stanshock.processing.initialize import (
     initialize_riemann_problem,
 )
 from stanshock.processing.plot import plot_state
-from stanshock.system.backend import Index
+from stanshock.system.backend import Array, Index
 from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import Geometry
+from stanshock.system.geometry import AreaChange, Box, Cylinder, Geometry
 
 
 class Combustor:
@@ -55,7 +55,7 @@ class Combustor:
             "outflow",
             "outflow",
         ]
-        self.x = np.linspace(0.0, self.dx * (self.n - 1), self.n)
+        self.x: Array = np.linspace(0.0, self.dx * (self.n - 1), self.n, dtype=np.float64)
         self.F = np.ones(self.n)  # thickening
         self.t = 0.0  # time
         self.verbose = True  # console output switch
@@ -72,6 +72,7 @@ class Combustor:
         )
         self.dlnA_dt = None  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
         self.dlnA_dx = None  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
+        self.area_change: RightHandSide | None = None
         self.include_boundary_layer = False  # flag to include boundary layer terms
         self.wall_temperature = None  # wall temperature (needed for BL)
         self.source_terms: RightHandSide | None = None  # source term function
@@ -98,15 +99,35 @@ class Combustor:
                 self.__dict__[key] = item
 
         # Initialize the geometry of the domain
-        self.geometry = Geometry(
-            self.x,
-            self.h,
-            self.w,
-            self.d_inner,
-            self.d_outer,
-            self.dlnA_dt,
-            self.dlnA_dx,
-        )
+        self.geometry: Geometry
+        if self.h and self.w:
+            self.geometry = Box(
+                x=self.x,
+                h=self.h,
+                w=self.w,
+                dlnA_dt=self.dlnA_dt,
+                dlnA_dx=self.dlnA_dx,
+            )
+        elif self.d_outer:
+            self.geometry = Cylinder(
+                x=self.x,
+                d_outer=self.d_outer,
+                d_inner=self.d_inner,
+                dlnA_dt=self.dlnA_dt,
+                dlnA_dx=self.dlnA_dx,
+            )
+        else:
+            self.geometry = Geometry(
+                x=self.x,
+                area=1.0,
+                perimeter=1.0,
+                dlnA_dx=self.dlnA_dx,
+                dlnA_dt=self.dlnA_dt,
+            )
+
+        # Add area-change related source terms
+        if self.dlnA_dt is not None or self.dlnA_dx is not None:
+            self.area_change = AreaChange(geometry=self.geometry)
 
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
@@ -168,8 +189,7 @@ class Combustor:
         if self.include_boundary_layer:
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
-                hydraulic_diameter=self.geometry.hydraulic_diameter,
-                characteristic_length=self.geometry.characteristic_length,
+                geometry=self.geometry,
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
@@ -442,7 +462,7 @@ class Combustor:
         """
         y = self.physics.primitive_to_conservative(self.state)
 
-        dydt = self.geometry.source(
+        dydt = self.area_change.source(
             self.t,
             y[self.idx_cells],
             self.physics,
@@ -584,7 +604,7 @@ class Combustor:
             # advance other terms
             if self.include_diffusion:
                 self.advance_diffusion(dt)
-            if self.dlnA_dt is not None or self.dlnA_dx is not None:
+            if self.area_change is not None:
                 self.advance_quasi_1d(dt)
             if self.include_boundary_layer:
                 self.advance_boundary_layer(dt)
