@@ -85,7 +85,10 @@ class ShockTube(Combustor):
         msg = None
         if geometry.d_outer is None or geometry.dlnA_dx is None:
             msg = "Driver optimization must have d_outer and dlnA_dx defined"
-        if not isinstance(geometry.d_inner, ConstantValue) or geometry.d_inner.constant != 0:
+        if (
+            not isinstance(geometry.d_inner, ConstantValue)
+            or geometry.d_inner.constant != 0
+        ):
             msg = "Driver optimization cannot have an inner diameter"
         assert self.state.pressure is not None
         if self.state.pressure[0] < self.state.pressure[-1]:
@@ -200,13 +203,20 @@ class ShockTube(Combustor):
                 return dDIndx
 
             def A(time: float, x: Array) -> Array:
-                return np.pi / 4.0 * (geometry.d_outer(time, x) ** 2.0 - d_inner(time, x) ** 2.0)
+                return (
+                    0.25
+                    * np.pi
+                    * (geometry.d_outer(time, x) ** 2.0 - d_inner(time, x) ** 2.0)
+                )
 
             def dA_dx(time: float, x: Array) -> Array:
                 return (
-                    np.pi
-                    / 2.0
-                    * (geometry.d_outer(time, x) * dd_outerdx(time, x) - d_inner(time, x) * dd_innerdx(time, x))
+                    0.5
+                    * np.pi
+                    * (
+                        geometry.d_outer(time, x) * dd_outerdx(time, x)
+                        - d_inner(time, x) * dd_innerdx(time, x)
+                    )
                 )
 
             # initialize (may be at a previous state in the optimization)

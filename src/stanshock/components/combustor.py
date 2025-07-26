@@ -3,6 +3,7 @@ from __future__ import annotations
 import cantera as ct
 import numpy as np
 
+from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.numerics.boundary_conditions import (
     BCNamesType,
@@ -28,7 +29,7 @@ from stanshock.processing.initialize import (
 from stanshock.processing.plot import plot_state
 from stanshock.system.backend import Array, Index
 from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import AreaChange, Box, Cylinder, Geometry
+from stanshock.system.geometry import Box, Cylinder, Geometry
 
 
 class Combustor:
@@ -55,7 +56,9 @@ class Combustor:
             "outflow",
             "outflow",
         ]
-        self.x: Array = np.linspace(0.0, self.dx * (self.n - 1), self.n, dtype=np.float64)
+        self.x: Array = np.linspace(
+            0.0, self.dx * (self.n - 1), self.n, dtype=np.float64
+        )
         self.F = np.ones(self.n)  # thickening
         self.t = 0.0  # time
         self.verbose = True  # console output switch

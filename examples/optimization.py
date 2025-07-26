@@ -67,7 +67,14 @@ def main(
         return np.pi / 4.0 * (d_outer(time, x) ** 2.0 - d_inner(time, x) ** 2.0)
 
     def dA_dx(time: float, x: Array) -> Array:
-        return np.pi / 2.0 * (d_outer(time, x) * dd_outer_dx(time, x) - d_inner(time, x) * dd_inner_dx(time, x))
+        return (
+            0.5
+            * np.pi
+            * (
+                d_outer(time, x) * dd_outer_dx(time, x)
+                - d_inner(time, x) * dd_inner_dx(time, x)
+            )
+        )
 
     def dlnA_dx(time: float, x: Array) -> Array:
         return dA_dx(time, x) / A(time, x)
