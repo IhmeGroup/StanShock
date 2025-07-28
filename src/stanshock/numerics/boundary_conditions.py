@@ -256,7 +256,7 @@ def set_boundary_conditions(
         bc_locs: list[Literal["left", "right"]] = ["left", "right"]
         bcs: list[BCType] = []
 
-        for bc_loc, bc_specification in zip(bc_locs, boundary_conditions):
+        for bc_loc, bc_specification in zip(bc_locs, boundary_conditions, strict=False):
             if isinstance(bc_specification, str):
                 if bc_specification == "periodic":
                     bcs += [Periodic(mt, location=bc_loc)]

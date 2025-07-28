@@ -131,7 +131,7 @@ class ShockTube(Combustor):
 
         # Determine geometry from pressure
         dpAbs = np.abs(pInitial[1:] - pInitial[:-1])
-        xShock = max(zip(dpAbs, geometry.x[1:]))[
+        xShock = max(zip(dpAbs, geometry.x[1:], strict=False))[
             1
         ]  # maximum pressure gradient corresponds to shock
         (xMin, xMax, probeLocation) = (geometry.x[0], xShock, geometry.x[-1])

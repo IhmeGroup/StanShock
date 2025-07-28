@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-import sys
+from typing import TypeAlias
 
 import numpy as np
-
-if sys.version_info >= (3, 13):
-    from typing import TypeAlias
-else:
-    from typing_extensions import TypeAlias
 
 __all__: list[str] = ["Array", "Index", "TypeAlias", "np"]
 
