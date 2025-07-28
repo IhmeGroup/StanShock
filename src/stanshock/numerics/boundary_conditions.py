@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Generic, Literal, TypeVar, Union
+from typing import Generic, Literal, TypeVar
 
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, TypeAlias, np
@@ -187,7 +187,7 @@ class DirichletInflow(SpecifiedFlux):
         return target
 
 
-BCType: TypeAlias = Union[BoundaryCondition[FluidState], BoundaryCondition[Array]]
+BCType: TypeAlias = BoundaryCondition[FluidState] | BoundaryCondition[Array]
 
 
 class BoundaryConditions:
