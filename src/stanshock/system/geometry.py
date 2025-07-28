@@ -12,28 +12,19 @@ SpatioTemporalFunction: TypeAlias = Callable[[float, Array], Array | float]
 
 # Classes which turn scalars and arrays into spatiotemporal functions
 class ConstantValue:
-    def __init__(self, constant: float | None) -> None:
-        if constant is None:
-            constant = 0.0
+    def __init__(self, constant: float) -> None:
         self.constant: float = constant
 
-    def __call__(self, _time: float = 0.0, _x: Array | None = None) -> float:
+    def __call__(self, _time: float, _x: Array) -> float:
         return self.constant
 
 
 class LinearInterpolator:
-    def __init__(self, xp: Array, fp: Array, x_default: Array | None = None) -> None:
-        self.xp = xp
-        self.fp = fp
+    def __init__(self, xp: Array, fp: Array) -> None:
+        self.xp: Array = xp
+        self.fp: Array = fp
 
-        if x_default is None:
-            self.x = xp
-        else:
-            self.x = x_default
-
-    def __call__(self, _time: float = 0.0, x: Array | None = None) -> Array:
-        if x is None:
-            x = self.x
+    def __call__(self, _time: float, x: Array) -> Array:
         return np.interp(x=x, xp=self.xp, fp=self.fp)
 
 
@@ -58,22 +49,8 @@ class Geometry:
         self._region_indices: dict[str, Index] = {}
 
         # Turn constant-value areas+perimeters into functions of t and x
-        self.area: SpatioTemporalFunction
-        self.perimeter: SpatioTemporalFunction
-
-        if isinstance(area, float | int):
-            self.area = ConstantValue(constant=area)
-        elif isinstance(area, np.ndarray):
-            self.area = LinearInterpolator(xp=self.x, fp=area)
-        else:
-            self.area = area
-
-        if isinstance(perimeter, float | int):
-            self.perimeter = ConstantValue(constant=perimeter)
-        elif isinstance(perimeter, np.ndarray):
-            self.perimeter = LinearInterpolator(xp=self.x, fp=perimeter)
-        else:
-            self.perimeter = perimeter
+        self.area: SpatioTemporalFunction = self.to_spatiotemporal(value=area)
+        self.perimeter: SpatioTemporalFunction = self.to_spatiotemporal(value=perimeter)
 
         # Set up area derivatives
         self.dlnA_dx: SpatioTemporalFunction | None
@@ -86,14 +63,28 @@ class Geometry:
                 x_midpoint: Array = 0.5 * (self.x[1:] + self.x[:-1])
                 area_midpoint: Array = 0.5 * (area[1:] + area[:-1])
                 dlnA_dx_fd: Array = np.diff(area) / (np.diff(self.x) * area_midpoint)
-                self.dlnA_dx = LinearInterpolator(
-                    xp=x_midpoint, fp=dlnA_dx_fd, x_default=self.x
-                )
+                self.dlnA_dx = LinearInterpolator(xp=x_midpoint, fp=dlnA_dx_fd)
             else:
                 msg = "Cannot (yet) automatically determine dlnA_dx from callable area."
                 raise NotImplementedError(msg)
         else:
             self.dlnA_dx = dlnA_dx
+
+    def to_spatiotemporal(
+        self, value: SpatioTemporalFunction | Array | float | None
+    ) -> SpatioTemporalFunction:
+        if value is None:
+            value = 0.0
+
+        func: SpatioTemporalFunction
+        if isinstance(value, float | int):
+            func = ConstantValue(constant=value)
+        elif isinstance(value, np.ndarray):
+            func = LinearInterpolator(xp=self.x, fp=value)
+        else:
+            func = value
+
+        return func
 
     def hydraulic_diameter(
         self, time: float = 0.0, x: Array | None = None
@@ -136,25 +127,8 @@ class Cylinder(Geometry):
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         # Set up functional form of inner and outer diameters
-        self.d_outer: SpatioTemporalFunction
-        self.d_inner: SpatioTemporalFunction
-
-        if isinstance(d_outer, float | int):
-            self.d_outer = ConstantValue(constant=d_outer)
-        elif isinstance(d_outer, np.ndarray):
-            self.d_outer = LinearInterpolator(xp=self.x, fp=d_outer)
-        else:
-            self.d_outer = d_outer
-
-        if d_inner is None:
-            d_inner = 0.0
-
-        if isinstance(d_inner, float | int):
-            self.d_inner = ConstantValue(constant=d_inner)
-        elif isinstance(d_inner, np.ndarray):
-            self.d_inner = LinearInterpolator(xp=self.x, fp=d_inner)
-        else:
-            self.d_inner = d_inner
+        self.d_outer: SpatioTemporalFunction = self.to_spatiotemporal(value=d_outer)
+        self.d_inner: SpatioTemporalFunction = self.to_spatiotemporal(value=d_inner)
 
         # Set up functional forms of area and perimeter
         area: SpatioTemporalFunction | Array | float = self._area
@@ -212,22 +186,8 @@ class Box(Geometry):
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         # Set up functional forms of height and width
-        self.h: SpatioTemporalFunction
-        self.w: SpatioTemporalFunction
-
-        if isinstance(h, float | int):
-            self.h = ConstantValue(constant=h)
-        elif isinstance(h, np.ndarray):
-            self.h = LinearInterpolator(xp=self.x, fp=h)
-        else:
-            self.h = h
-
-        if isinstance(w, float | int):
-            self.w = ConstantValue(constant=w)
-        elif isinstance(w, np.ndarray):
-            self.w = LinearInterpolator(xp=self.x, fp=w)
-        else:
-            self.w = w
+        self.h: SpatioTemporalFunction = self.to_spatiotemporal(value=h)
+        self.w: SpatioTemporalFunction = self.to_spatiotemporal(value=w)
 
         # Set up functional forms of area and perimeter
         area: SpatioTemporalFunction | Array | float = self._area
