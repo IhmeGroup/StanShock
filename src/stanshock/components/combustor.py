@@ -94,6 +94,7 @@ class Combustor:
             lambda _x, _t: True
         )  # the reacting region of the shock tube.
         self.include_diffusion = False  # exclude diffusion
+        self.regions: dict[str, tuple[float, float]] | None = None
         self.thickening = None  # thickening function
         self.plot_state_interval = -1  # plot the state every n iterations
         # overwrite the default data
@@ -110,6 +111,7 @@ class Combustor:
                 w=self.w,
                 dlnA_dt=self.dlnA_dt,
                 dlnA_dx=self.dlnA_dx,
+                regions=self.regions,
             )
         elif self.d_outer:
             self.geometry = Cylinder(
@@ -118,6 +120,7 @@ class Combustor:
                 d_inner=self.d_inner,
                 dlnA_dt=self.dlnA_dt,
                 dlnA_dx=self.dlnA_dx,
+                regions=self.regions,
             )
         else:
             self.geometry = Geometry(
@@ -126,10 +129,11 @@ class Combustor:
                 perimeter=1.0,
                 dlnA_dx=self.dlnA_dx,
                 dlnA_dt=self.dlnA_dt,
+                regions=self.regions,
             )
 
         # Add area-change related source terms
-        if self.dlnA_dt is not None or self.dlnA_dx is not None:
+        if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None:
             self.area_change = AreaChange(geometry=self.geometry)
 
         # set the number of scalars

@@ -5,7 +5,7 @@ from typing import TypeAlias
 
 import numpy as np
 
-from stanshock.system.backend import Array
+from stanshock.system.backend import Array, Index
 
 SpatioTemporalFunction: TypeAlias = Callable[[float, Array], Array | float]
 
@@ -45,10 +45,17 @@ class Geometry:
         perimeter: SpatioTemporalFunction | Array | float,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
+        regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         self.x: Array = x
         self.n: int = len(self.x)
         self.dx: float = self.x[1] - self.x[0]
+
+        # Denote distinct regions by their x-range, mapping them to the mesh index
+        if regions is None:
+            regions = {"domain": (x[0], x[-1])}
+        self.regions: dict[str, tuple[float, float]] = regions
+        self._region_indices: dict[str, Index] = {}
 
         # Turn constant-value areas+perimeters into functions of t and x
         self.area: SpatioTemporalFunction
@@ -104,6 +111,19 @@ class Geometry:
 
         return self.hydraulic_diameter(time, x)
 
+    def get_region_index(self, region_name: str) -> Index:
+        if region_name not in self.regions:
+            return np.s_[:0]
+
+        if region_name not in self._region_indices:
+            x_region_start, x_region_end = self.regions[region_name]
+            start_index: np.intp = np.argmin(np.abs(self.x - x_region_start))
+            end_index: np.intp = np.argmin(np.abs(self.x - x_region_end))
+
+            self._region_indices[region_name] = np.s_[start_index:end_index]
+
+        return self._region_indices[region_name]
+
 
 class Cylinder(Geometry):
     def __init__(
@@ -113,6 +133,7 @@ class Cylinder(Geometry):
         d_inner: SpatioTemporalFunction | Array | float | None = None,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
+        regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         # Set up functional form of inner and outer diameters
         self.d_outer: SpatioTemporalFunction
@@ -145,7 +166,7 @@ class Cylinder(Geometry):
             area = 0.25 * np.pi * (d_outer**2 - d_inner**2)
             perimeter = 0.5 * np.pi * (d_outer + d_inner)
 
-        super().__init__(x, area, perimeter, dlnA_dt, dlnA_dx)
+        super().__init__(x, area, perimeter, dlnA_dt, dlnA_dx, regions)
 
     def _area(self, t: float, x: Array) -> Array | float:
         return 0.25 * np.pi * (self.d_outer(t, x) ** 2 - self.d_inner(t, x) ** 2)
@@ -188,6 +209,7 @@ class Box(Geometry):
         w: SpatioTemporalFunction | Array | float,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
+        regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
         # Set up functional forms of height and width
         self.h: SpatioTemporalFunction
@@ -217,7 +239,7 @@ class Box(Geometry):
             area = h * w
             perimeter = 2 * (h + w)
 
-        super().__init__(x, area, perimeter, dlnA_dt, dlnA_dx)
+        super().__init__(x, area, perimeter, dlnA_dt, dlnA_dx, regions)
 
     def _area(self, t: float, x: Array) -> Array | float:
         return self.h(t, x) * self.w(t, x)
