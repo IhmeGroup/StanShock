@@ -29,7 +29,7 @@ from stanshock.processing.initialize import (
 from stanshock.processing.plot import plot_state
 from stanshock.system.backend import Array, Index
 from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import Box, Cylinder, Geometry
+from stanshock.system.geometry import Geometry, initialize_geometry
 
 
 class Combustor:
@@ -42,6 +42,7 @@ class Combustor:
         self,
         physics: FluidPhysics,
         n: int = 10,
+        geometry: Geometry | None = None,
         **kwargs,
     ):
         """
@@ -65,16 +66,6 @@ class Combustor:
         self.output_every = (
             1  # number of iterations of simulation advancement between logging updates
         )
-        self.h = None  # height of the channel
-        self.w = None  # width of the channel
-        self.d_inner = (
-            None  # Inner diameter of the shock tube as a function of x (needed for BL)
-        )
-        self.d_outer = (
-            None  # Outer diameter of the shock tube as a function of x (needed for BL)
-        )
-        self.dlnA_dt = None  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
-        self.dlnA_dx = None  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
         self.area_change: RightHandSide | None = None
         self.include_boundary_layer = False  # flag to include boundary layer terms
         self.wall_temperature = None  # wall temperature (needed for BL)
@@ -94,7 +85,6 @@ class Combustor:
             lambda _x, _t: True
         )  # the reacting region of the shock tube.
         self.include_diffusion = False  # exclude diffusion
-        self.regions: dict[str, tuple[float, float]] | None = None
         self.thickening = None  # thickening function
         self.plot_state_interval = -1  # plot the state every n iterations
         # overwrite the default data
@@ -103,34 +93,11 @@ class Combustor:
                 self.__dict__[key] = item
 
         # Initialize the geometry of the domain
-        self.geometry: Geometry
-        if self.h and self.w:
-            self.geometry = Box(
-                x=self.x,
-                h=self.h,
-                w=self.w,
-                dlnA_dt=self.dlnA_dt,
-                dlnA_dx=self.dlnA_dx,
-                regions=self.regions,
-            )
-        elif self.d_outer:
-            self.geometry = Cylinder(
-                x=self.x,
-                d_outer=self.d_outer,
-                d_inner=self.d_inner,
-                dlnA_dt=self.dlnA_dt,
-                dlnA_dx=self.dlnA_dx,
-                regions=self.regions,
-            )
+        if geometry is None:
+            kwargs.pop("x")
+            self.geometry: Geometry = initialize_geometry(x=self.x, **kwargs)
         else:
-            self.geometry = Geometry(
-                x=self.x,
-                area=1.0,
-                perimeter=1.0,
-                dlnA_dx=self.dlnA_dx,
-                dlnA_dt=self.dlnA_dt,
-                regions=self.regions,
-            )
+            self.geometry = geometry
 
         # Add area-change related source terms
         if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None:

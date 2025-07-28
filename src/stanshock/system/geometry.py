@@ -246,3 +246,68 @@ class AsymmetricBox(Box):
 
     def _h(self, time: float, x: Array) -> Array | float:
         return self.upper_wall(time, x) - self.lower_wall(time, x)
+
+
+def initialize_geometry(
+    x: Array,
+    area: SpatioTemporalLike = 1.0,  # Cross-sectional area of flow
+    perimeter: SpatioTemporalLike = 1.0,  # Perimeter of the flow cross section
+    d_outer: SpatioTemporalLike | None = None,  # Outer diameter of the cylinder/annulus
+    d_inner: SpatioTemporalLike | None = None,  # Inner diameter of the cylinder/annulus
+    h: SpatioTemporalLike | None = None,  # height of the channel
+    w: SpatioTemporalLike | None = None,  # width of the channel
+    upper_wall: SpatioTemporalLike
+    | None = None,  # Input: 2 x N list: 1st row is x_locs, 2nd row either "wall" or "open". Used for simulating freestream or internal flow (ceiling)
+    lower_wall: SpatioTemporalLike
+    | None = None,  # Same format and meaning as upper_wall, but for floor
+    dlnA_dt: SpatioTemporalFunction
+    | None = None,  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
+    dlnA_dx: SpatioTemporalFunction
+    | None = None,  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
+    regions: dict[str, tuple[float, float]] | None = None,
+    **_kwargs: float,
+) -> Geometry:
+    geometry: Geometry
+
+    if w is None:
+        w = 1.0
+
+    if upper_wall is not None:
+        geometry = AsymmetricBox(
+            x=x,
+            upper_wall=upper_wall,
+            lower_wall=lower_wall,
+            w=w,
+            dlnA_dt=dlnA_dt,
+            dlnA_dx=dlnA_dx,
+            regions=regions,
+        )
+    elif h is not None:
+        geometry = Box(
+            x=x,
+            h=h,
+            w=w,
+            dlnA_dt=dlnA_dt,
+            dlnA_dx=dlnA_dx,
+            regions=regions,
+        )
+    elif d_outer is not None:
+        geometry = Cylinder(
+            x=x,
+            d_outer=d_outer,
+            d_inner=d_inner,
+            dlnA_dt=dlnA_dt,
+            dlnA_dx=dlnA_dx,
+            regions=regions,
+        )
+    else:
+        geometry = Geometry(
+            x=x,
+            area=area,
+            perimeter=perimeter,
+            dlnA_dx=dlnA_dx,
+            dlnA_dt=dlnA_dt,
+            regions=regions,
+        )
+
+    return geometry
