@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TypeAlias
 
 import numpy as np
 
-from stanshock.system.backend import Array, Index
+from stanshock.system.backend import Array, Index, TypeAlias
 
 SpatioTemporalFunction: TypeAlias = Callable[[float, Array], Array | float]
 SpatioTemporalLike: TypeAlias = (
