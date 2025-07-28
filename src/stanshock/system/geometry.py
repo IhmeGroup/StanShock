@@ -62,14 +62,18 @@ class Geometry:
         if dlnA_dx is None:
             if isinstance(area, float | int):
                 self.dlnA_dx = None
-            elif isinstance(area, np.ndarray):
-                x_midpoint: Array = 0.5 * (self.x[1:] + self.x[:-1])
-                area_midpoint: Array = 0.5 * (area[1:] + area[:-1])
-                dlnA_dx_fd: Array = np.diff(area) / (np.diff(self.x) * area_midpoint)
-                self.dlnA_dx = LinearInterpolator(xp=x_midpoint, fp=dlnA_dx_fd)
             else:
-                msg = "Cannot (yet) automatically determine dlnA_dx from callable area."
-                raise NotImplementedError(msg)
+                if isinstance(area, np.ndarray):
+                    x_tmp, y_tmp = self.x, area
+                elif isinstance(area, tuple):
+                    x_tmp, y_tmp = area
+                else:
+                    msg = "Cannot (yet) automatically determine dlnA_dx from callable area."
+                    raise NotImplementedError(msg)
+                x_midpoint: Array = 0.5 * (x_tmp[1:] + x_tmp[:-1])
+                area_midpoint: Array = 0.5 * (y_tmp[1:] + y_tmp[:-1])
+                dlnA_dx_fd: Array = np.diff(y_tmp) / (np.diff(x_tmp) * area_midpoint)
+                self.dlnA_dx = LinearInterpolator(xp=x_midpoint, fp=dlnA_dx_fd)
         else:
             self.dlnA_dx = dlnA_dx
 
