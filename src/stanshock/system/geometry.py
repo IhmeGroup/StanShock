@@ -201,11 +201,11 @@ class Box(Geometry):
 
         super().__init__(x, area, perimeter, dlnA_dt, dlnA_dx, regions)
 
-    def _area(self, t: float, x: Array) -> Array | float:
-        return self.h(t, x) * self.w(t, x)
+    def _area(self, time: float, x: Array) -> Array | float:
+        return self.h(time, x) * self.w(time, x)
 
-    def _perimeter(self, t: float, x: Array) -> Array | float:
-        return 2.0 * (self.h(t, x) + self.w(t, x))
+    def _perimeter(self, time: float, x: Array) -> Array | float:
+        return 2.0 * (self.h(time, x) + self.w(time, x))
 
     def hydraulic_diameter(
         self, time: float = 0.0, x: Array | None = None
@@ -216,3 +216,28 @@ class Box(Geometry):
         h: Array | float = self.h(time, x)
         w: Array | float = self.w(time, x)
         return 2 * h * w / (h + w)
+
+
+class AsymmetricBox(Box):
+    def __init__(
+        self,
+        x: Array,
+        upper_wall: SpatioTemporalFunction | Array | float,
+        w: SpatioTemporalFunction | Array | float,
+        lower_wall: SpatioTemporalFunction | Array | float | None = None,
+        dlnA_dt: SpatioTemporalFunction | None = None,
+        dlnA_dx: SpatioTemporalFunction | None = None,
+        regions: dict[str, tuple[float, float]] | None = None,
+    ) -> None:
+        # Set up functional forms of height and width
+        self.upper_wall: SpatioTemporalFunction = self.to_spatiotemporal(
+            value=upper_wall
+        )
+        self.lower_wall: SpatioTemporalFunction = self.to_spatiotemporal(
+            value=lower_wall
+        )
+
+        super().__init__(x, self._h, w, dlnA_dt, dlnA_dx, regions)
+
+    def _h(self, time: float, x: Array) -> Array | float:
+        return self.upper_wall(time, x) - self.lower_wall(time, x)
