@@ -8,6 +8,9 @@ import numpy as np
 from stanshock.system.backend import Array, Index
 
 SpatioTemporalFunction: TypeAlias = Callable[[float, Array], Array | float]
+SpatioTemporalLike: TypeAlias = (
+    SpatioTemporalFunction | tuple[Array, Array] | Array | float
+)
 
 
 # Classes which turn scalars and arrays into spatiotemporal functions
@@ -32,8 +35,8 @@ class Geometry:
     def __init__(
         self,
         x: Array,
-        area: SpatioTemporalFunction | Array | float,
-        perimeter: SpatioTemporalFunction | Array | float,
+        area: SpatioTemporalLike = 1.0,
+        perimeter: SpatioTemporalLike = 1.0,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
@@ -71,7 +74,7 @@ class Geometry:
             self.dlnA_dx = dlnA_dx
 
     def to_spatiotemporal(
-        self, value: SpatioTemporalFunction | Array | float | None
+        self, value: SpatioTemporalLike | None
     ) -> SpatioTemporalFunction:
         if value is None:
             value = 0.0
@@ -79,6 +82,8 @@ class Geometry:
         func: SpatioTemporalFunction
         if isinstance(value, float | int):
             func = ConstantValue(constant=value)
+        elif isinstance(value, tuple):
+            func = LinearInterpolator(xp=value[0], fp=value[1])
         elif isinstance(value, np.ndarray):
             func = LinearInterpolator(xp=self.x, fp=value)
         else:
@@ -120,8 +125,8 @@ class Cylinder(Geometry):
     def __init__(
         self,
         x: Array,
-        d_outer: SpatioTemporalFunction | Array | float,
-        d_inner: SpatioTemporalFunction | Array | float | None = None,
+        d_outer: SpatioTemporalLike,
+        d_inner: SpatioTemporalLike | None = None,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
@@ -131,8 +136,8 @@ class Cylinder(Geometry):
         self.d_inner: SpatioTemporalFunction = self.to_spatiotemporal(value=d_inner)
 
         # Set up functional forms of area and perimeter
-        area: SpatioTemporalFunction | Array | float = self._area
-        perimeter: SpatioTemporalFunction | Array | float = self._perimeter
+        area: SpatioTemporalLike = self._area
+        perimeter: SpatioTemporalLike = self._perimeter
 
         if isinstance(d_outer, np.ndarray | float | int) and isinstance(
             d_inner, np.ndarray | float | int
@@ -179,8 +184,8 @@ class Box(Geometry):
     def __init__(
         self,
         x: Array,
-        h: SpatioTemporalFunction | Array | float,
-        w: SpatioTemporalFunction | Array | float,
+        h: SpatioTemporalLike = 1.0,
+        w: SpatioTemporalLike = 1.0,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
@@ -190,8 +195,8 @@ class Box(Geometry):
         self.w: SpatioTemporalFunction = self.to_spatiotemporal(value=w)
 
         # Set up functional forms of area and perimeter
-        area: SpatioTemporalFunction | Array | float = self._area
-        perimeter: SpatioTemporalFunction | Array | float = self._perimeter
+        area: SpatioTemporalLike = self._area
+        perimeter: SpatioTemporalLike = self._perimeter
 
         if isinstance(h, np.ndarray | float | int) and isinstance(
             w, np.ndarray | float | int
@@ -222,9 +227,9 @@ class AsymmetricBox(Box):
     def __init__(
         self,
         x: Array,
-        upper_wall: SpatioTemporalFunction | Array | float,
-        w: SpatioTemporalFunction | Array | float,
-        lower_wall: SpatioTemporalFunction | Array | float | None = None,
+        upper_wall: SpatioTemporalLike,
+        lower_wall: SpatioTemporalLike | None = None,
+        w: SpatioTemporalLike = 1.0,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
