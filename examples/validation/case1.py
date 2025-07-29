@@ -11,6 +11,7 @@ from matplotlib import pyplot as plt
 from stanshock.components.shocktube import ShockTube
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.probe import Probe
+from stanshock.system.backend import Array
 from stanshock.utils.csv_loader import get_pressure_data
 
 
@@ -70,26 +71,26 @@ def main(
         (xUpper - xLower) / float(nX) * 10
     )  # diffuse area change for numerical stability
 
-    def D(x):
+    def D(time: float, x: Array) -> Array:
         diameter = DDriven + (DeltaD / DeltaX) * (x - xShock)
         diameter[x < (xShock - DeltaX)] = DDriver
         diameter[x > xShock] = DDriven
         return diameter
 
-    def dD_dx(x):
+    def dD_dx(time: float, x: Array) -> Array:
         dDiameterdx = np.ones(len(x)) * (DeltaD / DeltaX)
         dDiameterdx[x < (xShock - DeltaX)] = 0.0
         dDiameterdx[x > xShock] = 0.0
         return dDiameterdx
 
-    def A(x):
-        return np.pi / 4.0 * D(x) ** 2.0
+    def A(time: float, x: Array) -> Array:
+        return np.pi / 4.0 * D(time, x) ** 2.0
 
-    def dA_dx(x):
-        return np.pi / 2.0 * D(x) * dD_dx(x)
+    def dA_dx(time: float, x: Array) -> Array:
+        return np.pi / 2.0 * D(time, x) * dD_dx(time, x)
 
-    def dlnA_dx(x, t):
-        return dA_dx(x) / A(x)
+    def dlnA_dx(time: float, x: Array) -> Array:
+        return dA_dx(time, x) / A(time, x)
 
     # set up solver parameters
     print("Solving with boundary layer terms")
