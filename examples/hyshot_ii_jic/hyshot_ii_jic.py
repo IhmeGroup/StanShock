@@ -228,7 +228,7 @@ dlnA_dx_data = np.gradient(lnA, x)
 dlnA_dx_interp = interpolate.interp1d(x, dlnA_dx_data, kind="cubic")
 
 
-def dlnA_dx(x, t):
+def dlnA_dx(t, x):
     return dlnA_dx_interp(x)
 
 
