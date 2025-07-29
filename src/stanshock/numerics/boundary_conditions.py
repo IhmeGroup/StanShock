@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Generic, Literal, TypeVar, Union
+from typing import Generic, Literal, TypeVar
 
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, TypeAlias, np
@@ -187,7 +187,7 @@ class DirichletInflow(SpecifiedFlux):
         return target
 
 
-BCType: TypeAlias = Union[BoundaryCondition[FluidState], BoundaryCondition[Array]]
+BCType: TypeAlias = BoundaryCondition[FluidState] | BoundaryCondition[Array]
 
 
 class BoundaryConditions:
@@ -256,7 +256,7 @@ def set_boundary_conditions(
         bc_locs: list[Literal["left", "right"]] = ["left", "right"]
         bcs: list[BCType] = []
 
-        for bc_loc, bc_specification in zip(bc_locs, boundary_conditions):
+        for bc_loc, bc_specification in zip(bc_locs, boundary_conditions, strict=False):
             if isinstance(bc_specification, str):
                 if bc_specification == "periodic":
                     bcs += [Periodic(mt, location=bc_loc)]

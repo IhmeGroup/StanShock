@@ -28,7 +28,7 @@ def test_table_computes_correct_temperatures():
     densities = np.logspace(-1, 1)
     pressures = np.logspace(6, 4)
     actual_temperatures = []
-    for state in zip(densities, pressures, mass_fractions):
+    for state in zip(densities, pressures, mass_fractions, strict=False):
         gas.DPY = state
         actual_temperatures.append(gas.T)
     actual_temperatures = np.array(actual_temperatures)
