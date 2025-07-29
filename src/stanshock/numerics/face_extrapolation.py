@@ -6,6 +6,7 @@ import numpy as np
 from numba import double, int16, njit
 
 from stanshock.physics.fluid_base import FluidState
+from stanshock.system.backend import Array, Index
 
 # Global variables (parameters) used by the solver
 mn = 2  # number of 1D Euler equations
@@ -17,9 +18,20 @@ double3D = double[:, :, :]
 
 
 class FaceExtrapolator(ABC):
-    def __init__(self, n_scalars_rho_sum: int):
+    minimum_ghost_layers: int = 1
+
+    def __init__(
+        self, n_scalars_rho_sum: int, n_ghost_layers: int = minimum_ghost_layers
+    ) -> None:
         """Initialize the face extrapolator with the number of ghost nodes."""
         self.n_scalars_rho_sum = n_scalars_rho_sum
+        self.n_ghost_layers = n_ghost_layers
+
+        # Set up slices relating faces to the cells on their left and right
+        mt: int = n_ghost_layers
+        self.index_face_left: Index = np.s_[mt - 1 : -mt]
+        right: int | None = None if mt == 1 else -mt + 1
+        self.index_face_right: Index = np.s_[mt:right]
 
     @abstractmethod
     def __call__(self, state: FluidState) -> FluidState:
@@ -27,72 +39,87 @@ class FaceExtrapolator(ABC):
 
     def add_ghost_layers(self, state: FluidState) -> FluidState:
         """Add ghost layers to the primitive variables."""
+        assert state.density is not None
+        assert state.velocity is not None
+        assert state.pressure is not None
+        assert state.composition is not None
+        assert state.gamma is not None
+
+        mt: int = self.n_ghost_layers
         return FluidState(
-            shape=(state.shape[0] + 2 * self.mt,),
-            density=np.pad(
-                state.density, self.mt, mode="constant", constant_values=1.0
-            ),
-            velocity=np.pad(
-                state.velocity, self.mt, mode="constant", constant_values=1.0
-            ),
-            pressure=np.pad(
-                state.pressure, self.mt, mode="constant", constant_values=1.0
-            ),
+            shape=(state.shape[0] + 2 * mt,),
+            density=np.pad(state.density, mt, mode="edge"),
+            velocity=np.pad(state.velocity, mt, mode="edge"),
+            pressure=np.pad(state.pressure, mt, mode="edge"),
             composition=np.pad(
                 state.composition,
-                ((self.mt, self.mt), (0, 0)),
-                mode="constant",
-                constant_values=1.0,
+                ((mt, mt), (0, 0)),
+                mode="edge",
             ),
-            gamma=np.pad(state.gamma, self.mt, mode="edge"),
+            gamma=np.pad(state.gamma, mt, mode="edge"),
         )
 
 
 class FirstOrder(FaceExtrapolator):
-    def __init__(self, n_scalars_rho_sum: int):
-        """Initialize the face extrapolator with the number of ghost nodes."""
-        super().__init__(n_scalars_rho_sum)
-        self.mt = 1
+    minimum_ghost_layers: int = 1
 
     def __call__(self, state: FluidState) -> FluidState:
         """First order interpolation of primitive variables to the edge states."""
-        mt = self.mt
-        n = state.shape[0] - 2 * mt + 1
+        assert state.density is not None
+        assert state.velocity is not None
+        assert state.pressure is not None
+        assert state.composition is not None
+        assert state.gamma is not None
 
-        index_face_left = np.s_[mt - 1 : -mt]
-        right = state.shape[0] if mt == 1 else -mt + 1
-        index_face_right = np.s_[mt:right]
+        n_faces: int = state.shape[0] - 2 * self.n_ghost_layers + 1
 
         return FluidState(
-            shape=(2, n),
+            shape=(2, n_faces),
             density=np.stack(
-                (state.density[index_face_left], state.density[index_face_right]),
+                (
+                    state.density[self.index_face_left],
+                    state.density[self.index_face_right],
+                ),
                 axis=0,
             ),
             velocity=np.stack(
-                (state.velocity[index_face_left], state.velocity[index_face_right]),
+                (
+                    state.velocity[self.index_face_left],
+                    state.velocity[self.index_face_right],
+                ),
                 axis=0,
             ),
             pressure=np.stack(
-                (state.pressure[index_face_left], state.pressure[index_face_right]),
+                (
+                    state.pressure[self.index_face_left],
+                    state.pressure[self.index_face_right],
+                ),
                 axis=0,
             ),
             composition=np.stack(
                 (
-                    state.composition[index_face_left],
-                    state.composition[index_face_right],
+                    state.composition[self.index_face_left],
+                    state.composition[self.index_face_right],
                 ),
                 axis=0,
             ),
             gamma=np.stack(
-                (state.gamma[index_face_left], state.gamma[index_face_right]),
+                (state.gamma[self.index_face_left], state.gamma[self.index_face_right]),
                 axis=0,
             ),
         )
 
 
 @njit(double3D(double1D, double1D, double1D, double2D, double1D, int16, int16))
-def weno5(r, u, p, Y, gamma, mt, n_scalars_rho_sum):
+def weno5(
+    r: Array,
+    u: Array,
+    p: Array,
+    Y: Array,
+    gamma: Array,
+    n_ghost_layers: int,
+    n_scalars_rho_sum: int,
+) -> Array:
     """
     This method implements the fifth-order WENO interpolation. This method
     follows that of Houim and Kuo (JCP2011)
@@ -102,17 +129,17 @@ def weno5(r, u, p, Y, gamma, mt, n_scalars_rho_sum):
             p=pressure
             Y=scalar variables matrix [x,scalars]
             gamma=specific heat ratio
-            mt=number of ghost layers
+            n_ghost_layers=number of ghost layers
             n_scalars_rho_sum=number of scalars that are summed into density
         outputs:
             PLR=a matrix of the primitive variables [LR,]
     """
     nLR = 2
-    nCells = len(r) - 2 * mt
+    nCells = len(r) - 2 * n_ghost_layers
     nFaces = nCells + 1
     nSc = len(Y[0])  # number of scalars
     nVar = mn + nSc  # [rhou, rhoE, rhoY1, rhoY2, ...]
-    nStencil = 2 * mt
+    nStencil = 2 * n_ghost_layers
     epWENO = 1.0e-06
 
     # Cell weight (WL(i,j,k); i=left(1) or right(2) j=stencil#,k=weight#)
@@ -154,7 +181,7 @@ def weno5(r, u, p, Y, gamma, mt, n_scalars_rho_sum):
     B1 = 1.083333333333333
     B2 = 0.25
 
-    B = np.zeros(mt)
+    B = np.zeros(n_ghost_layers)
     PLR = np.empty((nLR, nFaces, nVar + 1))
     YAverage = np.empty(nSc)
     U = np.empty(nVar)
@@ -298,7 +325,7 @@ def weno5(r, u, p, Y, gamma, mt, n_scalars_rho_sum):
                 # Edge interpolation
                 ATOT = 0.0
                 CW = 0.0
-                for iStencil in range(mt):
+                for iStencil in range(n_ghost_layers):
                     iStencilO = NO - iStencil
                     CINT = (
                         W[N, iStencil, 0] * CStencil[0 + iStencilO, iVar]
@@ -330,14 +357,14 @@ def weno5(r, u, p, Y, gamma, mt, n_scalars_rho_sum):
 
     # First order at boundaries
     for N in range(nLR):
-        for iFace in range(mt):
+        for iFace in range(n_ghost_layers):
             iCell = iFace + 2
             PLR[N, iFace, 0] = r[iCell + N]
             PLR[N, iFace, 1] = u[iCell + N]
             PLR[N, iFace, 2] = p[iCell + N]
             for kSc in range(nSc):
                 PLR[N, iFace, 3 + kSc] = Y[iCell + N, kSc]
-        for iFace in range(nFaces - mt, nFaces):
+        for iFace in range(nFaces - n_ghost_layers, nFaces):
             iCell = iFace + 2
             PLR[N, iFace, 0] = r[iCell + N]
             PLR[N, iFace, 1] = u[iCell + N]
@@ -346,7 +373,7 @@ def weno5(r, u, p, Y, gamma, mt, n_scalars_rho_sum):
                 PLR[N, iFace, 3 + kSc] = Y[iCell + N, kSc]
 
     # Create primitive matrix for limiter
-    P = np.zeros((nCells + 2 * mt, nVar + 1))
+    P = np.zeros((nCells + 2 * n_ghost_layers, nVar + 1))
     P[:, 0] = r[:]
     P[:, 1] = u[:]
     P[:, 2] = p[:]
@@ -404,35 +431,36 @@ def weno5(r, u, p, Y, gamma, mt, n_scalars_rho_sum):
 
 
 class FifthOrderWeno(FaceExtrapolator):
-    def __init__(self, n_scalars_rho_sum: int):
-        """Initialize the face extrapolator with the number of ghost nodes."""
-        super().__init__(n_scalars_rho_sum)
-        self.mt = 3
+    minimum_ghost_layers: int = 3
 
     def __call__(self, state: FluidState) -> FluidState:
         """First order interpolation to the edge states."""
+        assert state.density is not None
+        assert state.velocity is not None
+        assert state.pressure is not None
+        assert state.composition is not None
+        assert state.gamma is not None
+
         face_states_array = weno5(
             state.density,
             state.velocity,
             state.pressure,
             state.composition,
             state.gamma,
-            self.mt,
+            self.n_ghost_layers,
             self.n_scalars_rho_sum,
         )
 
-        n = state.shape[0] - 2 * self.mt + 1
-        index_face_left = np.s_[self.mt - 1 : -self.mt]
-        index_face_right = np.s_[self.mt : -self.mt + 1]
+        n_faces: int = state.shape[0] - 2 * self.n_ghost_layers + 1
 
         return FluidState(
-            shape=(2, n),
+            shape=(2, n_faces),
             density=face_states_array[:, :, 0],
             velocity=face_states_array[:, :, 1],
             pressure=face_states_array[:, :, 2],
             composition=face_states_array[:, :, 3:],
             gamma=np.stack(
-                (state.gamma[index_face_left], state.gamma[index_face_right]),
+                (state.gamma[self.index_face_left], state.gamma[self.index_face_right]),
                 axis=0,
             ),
         )
