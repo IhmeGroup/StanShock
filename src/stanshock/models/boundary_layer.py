@@ -6,6 +6,7 @@ from scipy.optimize import root
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
+from stanshock.system.geometry import Geometry
 
 
 class SkinFriction:
@@ -57,13 +58,11 @@ class SkinFriction:
 class BoundaryLayer(RightHandSide):
     def __init__(
         self,
-        hydraulic_diameter,
-        characteristic_length,
+        geometry: Geometry,
         wall_temperature=None,
         skin_friction_coefficient=None,
     ) -> None:
-        self.hydraulic_diameter = hydraulic_diameter
-        self.characteristic_length = characteristic_length
+        self.geometry = geometry
         self.wall_temperature = wall_temperature
         self.skin_friction_coefficient = skin_friction_coefficient
 
@@ -117,12 +116,11 @@ class BoundaryLayer(RightHandSide):
         return Nu
 
     def source_from_primitives(
-        self, _time: float, state: FluidState, physics: FluidPhysics
+        self, time: float, state: FluidState, physics: FluidPhysics
     ) -> Array:
         """Boundary layer contribution to RHS."""
-        if self.hydraulic_diameter is None or self.characteristic_length is None:
-            msg = "Combustor improperly initialized for boundary layer terms"
-            raise Exception(msg)
+        hydraulic_diameter = self.geometry.hydraulic_diameter(time)
+        characteristic_length = self.geometry.characteristic_length(time)
 
         rhs = np.zeros((*state.shape, 2 + physics.n_scalars))
 
@@ -131,12 +129,12 @@ class BoundaryLayer(RightHandSide):
         mu = physics.get_mu(state)
 
         # Shear stress on wall
-        Re = abs(state.density * state.velocity * self.characteristic_length / mu)
+        Re = abs(state.density * state.velocity * characteristic_length / mu)
         cf = self.skin_friction_coefficient(Re)
         shear = (
             cf * (0.5 * state.density * state.velocity**2.0) * np.sign(state.velocity)
         )
-        rhs[:, 0] = -4.0 / self.hydraulic_diameter * shear
+        rhs[:, 0] = -4.0 / hydraulic_diameter * shear
 
         # Stanton number and heat transfer to wall
         if self.wall_temperature is not None:
@@ -144,8 +142,8 @@ class BoundaryLayer(RightHandSide):
             k = physics.get_thermal_conductivity(state)
             Pr = cp * mu / k
             Nu = self.get_nusselt_number(Re, Pr, cf)
-            qloss = Nu * k / self.characteristic_length * (T - self.wall_temperature)
+            qloss = Nu * k / characteristic_length * (T - self.wall_temperature)
 
-            rhs[:, 1] = -4.0 / self.hydraulic_diameter * qloss
+            rhs[:, 1] = -4.0 / hydraulic_diameter * qloss
 
         return rhs

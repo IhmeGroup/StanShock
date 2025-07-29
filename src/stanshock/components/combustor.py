@@ -3,6 +3,7 @@ from __future__ import annotations
 import cantera as ct
 import numpy as np
 
+from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.numerics.boundary_conditions import (
     BCNamesType,
@@ -26,9 +27,9 @@ from stanshock.processing.initialize import (
     initialize_riemann_problem,
 )
 from stanshock.processing.plot import plot_state
-from stanshock.system.backend import Index
+from stanshock.system.backend import Array, Index
 from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import Geometry
+from stanshock.system.geometry import Geometry, initialize_geometry
 
 
 class Combustor:
@@ -41,6 +42,7 @@ class Combustor:
         self,
         physics: FluidPhysics,
         n: int = 10,
+        geometry: Geometry | None = None,
         **kwargs,
     ):
         """
@@ -55,23 +57,16 @@ class Combustor:
             "outflow",
             "outflow",
         ]
-        self.x = np.linspace(0.0, self.dx * (self.n - 1), self.n)
+        self.x: Array = np.linspace(
+            0.0, self.dx * (self.n - 1), self.n, dtype=np.float64
+        )
         self.F = np.ones(self.n)  # thickening
         self.t = 0.0  # time
         self.verbose = True  # console output switch
         self.output_every = (
             1  # number of iterations of simulation advancement between logging updates
         )
-        self.h = None  # height of the channel
-        self.w = None  # width of the channel
-        self.d_inner = (
-            None  # Inner diameter of the shock tube as a function of x (needed for BL)
-        )
-        self.d_outer = (
-            None  # Outer diameter of the shock tube as a function of x (needed for BL)
-        )
-        self.dlnA_dt = None  # derivative of the natural log of the area of the shock tube with respect to time (needed for quasi-1D)
-        self.dlnA_dx = None  # derivative of the natural log of the area of the shock tube with respect to x (needed for quasi-1D)
+        self.area_change: RightHandSide | None = None
         self.include_boundary_layer = False  # flag to include boundary layer terms
         self.wall_temperature = None  # wall temperature (needed for BL)
         self.source_terms: RightHandSide | None = None  # source term function
@@ -98,15 +93,15 @@ class Combustor:
                 self.__dict__[key] = item
 
         # Initialize the geometry of the domain
-        self.geometry = Geometry(
-            self.x,
-            self.h,
-            self.w,
-            self.d_inner,
-            self.d_outer,
-            self.dlnA_dt,
-            self.dlnA_dx,
-        )
+        if geometry is None:
+            kwargs.pop("x")
+            self.geometry: Geometry = initialize_geometry(x=self.x, **kwargs)
+        else:
+            self.geometry = geometry
+
+        # Add area-change related source terms
+        if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None:
+            self.area_change = AreaChange(geometry=self.geometry)
 
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
@@ -168,8 +163,7 @@ class Combustor:
         if self.include_boundary_layer:
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
-                hydraulic_diameter=self.geometry.hydraulic_diameter,
-                characteristic_length=self.geometry.characteristic_length,
+                geometry=self.geometry,
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
@@ -427,7 +421,7 @@ class Combustor:
         """
         y = self.physics.primitive_to_conservative(self.state)
 
-        dydt = self.geometry.source(
+        dydt = self.area_change.source(
             self.t,
             y[self.idx_cells],
             self.physics,
@@ -569,7 +563,7 @@ class Combustor:
             # advance other terms
             if self.include_diffusion:
                 self.advance_diffusion(dt)
-            if self.dlnA_dt is not None or self.dlnA_dx is not None:
+            if self.area_change is not None:
                 self.advance_quasi_1d(dt)
             if self.include_boundary_layer:
                 self.advance_boundary_layer(dt)
