@@ -31,8 +31,8 @@ width_change_max = 0.1           # Maximum domain width change
 width_change_min = 0.05          # Minimum domain width change
 n_max = 5000                     # Maximum number of iterations
 initial_spacing = 0.6            # Initial control point spacing
-temperature_increment = 20.0     # Initial temperature increment
-max_increment = 100.0            # Maximum temperature increment
+delta_T = 20.0                   # Initial temperature increment
+max_delta_T = 100.0              # Maximum temperature increment
 target_delta_T_max = 20.0        # Target maximum temperature change
 max_error_count = 3              # Maximum consecutive solver errors
 strain_rate_tol = 0.01           # Minimum strain rate ratio for termination
@@ -46,6 +46,7 @@ force_monotonicity = false                # Force monotonicity in the flamelet t
 igniting_table = true                     # Whether to create an igniting table
 include_species_mass_fractions = "all"    # Species mass fractions to include in the table: "all" or list of species
 include_species_production_rates = "all"  # Species production rates to include in the table: "all" or list of species
+include_energy_enthalpy_components = true # Whether to include energy and enthalpy components in the table
 
 [plotting.s_curve]
 x_quantity = "chi_st" # x-axis quantity: "strain_rate" or "chi_st"
