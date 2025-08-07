@@ -164,6 +164,7 @@ def main(
         d_outer=d_outer,
         dlnA_dx=dlnA_dx,
     )
+    ssbl.state.gamma = ssbl.physics.get_gamma(ssbl.state)
     ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.x)))  # end wall probe
     diagram_settings = [
         ("pressure", [p1 / 101325, p4 / 101325]),
@@ -226,6 +227,7 @@ def main(
         d_outer=d_outer,
         dlnA_dx=dlnA_dx,
     )
+    ssnbl.state.gamma = ssnbl.physics.get_gamma(ssnbl.state)
     ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.x)))  # end wall probe
     ssnbl.xt_diagrams += [
         XTDiagram(ssnbl, variable=variable, limits=limits)

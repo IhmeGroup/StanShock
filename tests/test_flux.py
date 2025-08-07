@@ -14,14 +14,16 @@ def test_lax_friedrich_predicts_constant_flux():
     p = 3.0
     Y = 1.0
     gamma = 1.2
+    e0 = 10.0
     flux = lax_friedrichs_flux(
         rLR=np.array([[r], [r]]),
         uLR=np.array([[u], [u]]),
         pLR=np.array([[p], [p]]),
         YLR=np.array([[[Y]], [[Y]]]),
         gamma=np.array([gamma]),
+        e0=np.array([e0]),
     )[0]
-    H = gamma * p / (gamma - 1.0) + 0.5 * r * u**2.0
+    H = gamma * p / (gamma - 1.0) + r * (e0 + 0.5 * u**2.0)
     expected_flux = np.array([r * u**2 + p, H * u, r * Y * u])
     assert np.allclose(flux, expected_flux)
 
@@ -32,6 +34,7 @@ def test_hllc_predicts_constant_flux():
     p = 3.0
     Y = 1.0
     gamma = 1.2
+    e0 = 10.0
     num_faces = 10
     num_sides = 2
     num_species = 1
@@ -41,8 +44,9 @@ def test_hllc_predicts_constant_flux():
         pLR=p * np.ones((num_sides, num_faces)),
         YLR=Y * np.ones((num_sides, num_faces, num_species)),
         gamma=gamma * np.ones(num_faces),
+        e0=e0 * np.ones(num_faces),
     )
-    H = gamma * p / (gamma - 1.0) + 0.5 * r * u**2.0
+    H = gamma * p / (gamma - 1.0) + r * (e0 + 0.5 * u**2.0)
     expected_flux = np.array([r * u**2 + p, H * u, r * Y * u])[np.newaxis, ...]
     expected_flux = np.repeat(expected_flux, num_faces, axis=0)
     assert np.allclose(flux, expected_flux)

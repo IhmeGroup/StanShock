@@ -43,9 +43,18 @@ class FaceExtrapolator(ABC):
         assert state.velocity is not None
         assert state.pressure is not None
         assert state.composition is not None
-        assert state.gamma is not None
 
         mt: int = self.n_ghost_layers
+
+        gamma_star = (
+            None
+            if state.gamma_star is None
+            else np.pad(state.gamma_star, mt, mode="edge")
+        )
+        e0_star = (
+            None if state.e0_star is None else np.pad(state.e0_star, mt, mode="edge")
+        )
+
         return FluidState(
             shape=(state.shape[0] + 2 * mt,),
             density=np.pad(state.density, mt, mode="edge"),
@@ -56,7 +65,8 @@ class FaceExtrapolator(ABC):
                 ((mt, mt), (0, 0)),
                 mode="edge",
             ),
-            gamma=np.pad(state.gamma, mt, mode="edge"),
+            gamma_star=gamma_star,
+            e0_star=e0_star,
         )
 
 
@@ -69,9 +79,28 @@ class FirstOrder(FaceExtrapolator):
         assert state.velocity is not None
         assert state.pressure is not None
         assert state.composition is not None
-        assert state.gamma is not None
 
         n_faces: int = state.shape[0] - 2 * self.n_ghost_layers + 1
+
+        gamma_star = None
+        if state.gamma_star is not None:
+            gamma_star = np.stack(
+                (
+                    state.gamma_star[self.index_face_left],
+                    state.gamma_star[self.index_face_right],
+                ),
+                axis=0,
+            )
+
+        e0_star = None
+        if state.e0_star is not None:
+            e0_star = np.stack(
+                (
+                    state.e0_star[self.index_face_left],
+                    state.e0_star[self.index_face_right],
+                ),
+                axis=0,
+            )
 
         return FluidState(
             shape=(2, n_faces),
@@ -103,10 +132,8 @@ class FirstOrder(FaceExtrapolator):
                 ),
                 axis=0,
             ),
-            gamma=np.stack(
-                (state.gamma[self.index_face_left], state.gamma[self.index_face_right]),
-                axis=0,
-            ),
+            gamma_star=gamma_star,
+            e0_star=e0_star,
         )
 
 
@@ -439,14 +466,15 @@ class FifthOrderWeno(FaceExtrapolator):
         assert state.velocity is not None
         assert state.pressure is not None
         assert state.composition is not None
-        assert state.gamma is not None
+        assert state.gamma_star is not None
+        assert state.e0_star is not None
 
         face_states_array = weno5(
             state.density,
             state.velocity,
             state.pressure,
             state.composition,
-            state.gamma,
+            state.gamma_star,
             self.n_ghost_layers,
             self.n_scalars_rho_sum,
         )
@@ -459,8 +487,18 @@ class FifthOrderWeno(FaceExtrapolator):
             velocity=face_states_array[:, :, 1],
             pressure=face_states_array[:, :, 2],
             composition=face_states_array[:, :, 3:],
-            gamma=np.stack(
-                (state.gamma[self.index_face_left], state.gamma[self.index_face_right]),
+            gamma_star=np.stack(
+                (
+                    state.gamma_star[self.index_face_left],
+                    state.gamma_star[self.index_face_right],
+                ),
+                axis=0,
+            ),
+            e0_star=np.stack(
+                (
+                    state.e0_star[self.index_face_left],
+                    state.e0_star[self.index_face_right],
+                ),
                 axis=0,
             ),
         )

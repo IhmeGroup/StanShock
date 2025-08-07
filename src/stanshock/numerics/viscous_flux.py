@@ -31,11 +31,13 @@ class ViscousFlux(RightHandSide):
         state_array: Array,
         physics: FluidPhysics,
         gamma_star: Array,
+        e0_star: Array,
     ) -> Array:
         state_array = self.boundary_conditions.update_ghost_layers(time, state_array)
 
-        state: FluidState = physics.conservative_to_primitive(state_array, gamma_star)
-        state.gamma = gamma_star
+        state: FluidState = physics.conservative_to_primitive(
+            state_array, gamma_star, e0_star
+        )
 
         face_states: FluidState = self.face_extrapolator(state)
         face_states = self.boundary_conditions.update_face_states(time, face_states)

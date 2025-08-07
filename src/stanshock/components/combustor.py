@@ -212,22 +212,20 @@ class Combustor:
                 dt=time step
         """
         y = self.physics.primitive_to_conservative(self.state)
-        gamma_star = self.physics.get_gamma_star(
-            self.state
-        )  # Double-flux gamma* held constant over time step
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         # 1st stage of RK3
-        dydt = self.inviscid_flux.source(self.t, y, self.physics, gamma_star)
+        dydt = self.inviscid_flux.source(self.t, y, self.physics, gamma_star, e0_star)
         y1 = y.copy()
         y1[self.idx_cells] += dt * dydt
 
         # 2nd stage of RK3
-        dydt = self.inviscid_flux.source(self.t, y1, self.physics, gamma_star)
+        dydt = self.inviscid_flux.source(self.t, y1, self.physics, gamma_star, e0_star)
         y2 = 0.75 * y + 0.25 * y1
         y2[self.idx_cells] += 0.25 * dt * dydt
 
         # 3rd stage of RK3
-        dydt = self.inviscid_flux.source(self.t, y2, self.physics, gamma_star)
+        dydt = self.inviscid_flux.source(self.t, y2, self.physics, gamma_star, e0_star)
 
         y[self.idx_cells] = (
             (1.0 / 3.0) * y[self.idx_cells]
@@ -236,9 +234,7 @@ class Combustor:
         )
 
         # Remove ghost layers and update gamma
-        self.state = self.physics.conservative_to_primitive(y, gamma_star)
-        self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_diffusion(self, dt):
         """
@@ -248,9 +244,7 @@ class Combustor:
         """
         mt: int = self.n_ghost_layers
         y = self.physics.primitive_to_conservative(self.state)
-        gamma_star = self.physics.get_gamma_star(
-            self.state
-        )  # Double-flux gamma* held constant over time step
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         if self.thickening is not None:
             self.F = self.thickening(self)
@@ -259,18 +253,16 @@ class Combustor:
             self.viscous_flux.F = np.pad(self.F, mt, mode="edge")
 
         # 1st stage of RK2
-        dydt = self.viscous_flux.source(self.t, y, self.physics, gamma_star)
+        dydt = self.viscous_flux.source(self.t, y, self.physics, gamma_star, e0_star)
         y1 = y.copy()
         y1[self.idx_cells] += dt * dydt
 
         # 2nd stage of RK2
-        dydt = self.viscous_flux.source(self.t, y1, self.physics, gamma_star)
+        dydt = self.viscous_flux.source(self.t, y1, self.physics, gamma_star, e0_star)
         y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1[self.idx_cells] + dt * dydt)
 
         # Remove ghost layers and update gamma
-        self.state = self.physics.conservative_to_primitive(y, gamma_star)
-        self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_chemistry(self, dt):
         """
@@ -311,41 +303,36 @@ class Combustor:
         # Using FPV
         # initialize
         y = self.physics.primitive_to_conservative(self.state)
-        (r, rZ, rC) = y[self.idx_cells, 2], y[self.idx_cells, 3], y[self.idx_cells, 4]
-        Z = rZ / r
-        C = rC / r
-        Q = np.zeros(self.geometry.n)
-        L = self.physics.get_normalized_progress_variable(Z, C)
-        e_chem0 = r * self.physics.lookup_direct("E_CHEM", Z, Q, L)
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         # 1st stage of RK2
-        omegaC = r * self.injector.get_chemical_sources(Z, C)
+        r = y[self.idx_cells, 2]
+        omegaC = r * self.injector.get_chemical_sources(
+            self.t,
+            y[self.idx_cells],
+            self.physics,
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
+        )
         y1 = y.copy()
         y1[self.idx_cells, 4] += dt * omegaC
-        C1 = y1[self.idx_cells, 4] / r
-        L1 = self.physics.get_normalized_progress_variable(Z, C1)
-        e_chem1 = r * self.physics.lookup_direct("E_CHEM", Z, Q, L1)
-        y1[self.idx_cells, 1] += e_chem0 - e_chem1
-        state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
-        state1.gamma = self.state.gamma
 
         # 2nd stage of RK2
-        self.physics.set_state(state1)
-        omegaC1 = state1.density * self.injector.get_chemical_sources(
-            state1.Z, state1.C
+        r1 = y1[self.idx_cells, 2]
+        omegaC1 = r1 * self.injector.get_chemical_sources(
+            self.t,
+            y1[self.idx_cells],
+            self.physics,
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
         )
         y[self.idx_cells, 4] = 0.5 * (
             y[self.idx_cells, 4] + y1[self.idx_cells, 4] + dt * omegaC1
         )
-        C = y[self.idx_cells, 4] / r
-        L = self.physics.get_normalized_progress_variable(Z, C)
-        e_chem2 = r * self.physics.lookup_direct("E_CHEM", Z, Q, L)
-        y[self.idx_cells, 1] += e_chem0 - e_chem2
-        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
         # update properties
         self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_chemistry_FRC(self, dt):
         """
@@ -430,7 +417,6 @@ class Combustor:
         self.state.composition[indices, :] = state_temp.composition
         self.state.temperature = None
         self.state._cache_valid = False
-        self.state.gamma = self.physics.get_gamma(self.state)
 
     def advance_quasi_1d(self, dt):
         """
@@ -439,20 +425,20 @@ class Combustor:
         to the Combustor object.
         """
         y = self.physics.primitive_to_conservative(self.state)
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         dydt = self.area_change.source(
             self.t,
             y[self.idx_cells],
             self.physics,
-            self.state.gamma[self.idx_cells],
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
             dt,
         )
 
         # Update
         y[self.idx_cells] += dt * dydt
-        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
-        self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_boundary_layer(self, dt):
         """
@@ -461,16 +447,19 @@ class Combustor:
                 dt=time step
         """
         y = self.physics.primitive_to_conservative(self.state)
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         dydt = self.boundary_layer.source(
-            self.t, y[self.idx_cells], self.physics, self.state.gamma[self.idx_cells]
+            self.t,
+            y[self.idx_cells],
+            self.physics,
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
         )
 
         # Update
         y[self.idx_cells] += dydt * dt
-        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
-        self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_source_terms(self, dt):
         """
@@ -480,22 +469,19 @@ class Combustor:
         """
         # initialize
         y = self.physics.primitive_to_conservative(self.state)
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         # 1st stage of RK2
-        dydt = self.source_terms(
-            self.t, y[self.idx_cells], self.state.gamma, self.geometry.x
+        dydt = self.source_terms.source(
+            self.t, y[self.idx_cells], self.physics, gamma_star, e0_star
         )
         y1 = y[self.idx_cells] + dt * dydt
-        # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
+        # state1 = self.physics.conservative_to_primitive(y1, gamma_star, e0_Star)
 
         # 2nd stage of RK2
-        dydt = self.source_terms(self.t + dt, y1, self.state.gamma, self.geometry.x)
+        dydt = self.source_terms(self.t + dt, y1, self.physics, gamma_star, e0_star)
         y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1 + dt * dydt)
-        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
-
-        # update
-        self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_injector(self, dt):
         """
@@ -510,35 +496,34 @@ class Combustor:
 
         # initialize
         y = self.physics.primitive_to_conservative(self.state)
-        (ru, re_t, r, rZ, rC) = (
-            y[self.idx_cells, 0],
-            y[self.idx_cells, 1],
-            y[self.idx_cells, 2],
-            y[self.idx_cells, 3],
-            y[self.idx_cells, 4],
-        )
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
+
         self.injector.update_fluid_tip_positions(
             dt, self.t, self.state.velocity[self.idx_cells]
         )
 
         # 1st stage of RK2
-        dydt = self.injector.get_injector_sources(
-            r, ru, re_t, rZ, rC, self.state.gamma[self.idx_cells], self.t
+        dydt = self.injector.source(
+            self.t,
+            y[self.idx_cells],
+            self.physics,
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
         )
         y1 = y[self.idx_cells] + dt * dydt
-        # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
-        (ru1, re_t1, r1, rZ1, rC1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, 3], y1[:, 4]
-        dydt = self.injector.get_injector_sources(
-            r1, ru1, re_t1, rZ1, rC1, self.state.gamma[self.idx_cells], self.t + dt
+        dydt = self.injector.source(
+            self.t,
+            y1,
+            self.physics,
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
         )
         y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1 + dt * dydt)
 
         # update
-        self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
-        self.state.temperature = self.physics.get_temperature(self.state)
-        self.state.gamma = self.physics.get_gamma(self.state)
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def update_probes(self, iters):
         """
@@ -590,6 +575,9 @@ class Combustor:
                 self.advance_source_terms(dt)
             if self.injector is not None:
                 self.advance_injector(dt)
+            # update properties
+            self.state.temperature = self.physics.get_temperature(self.state)
+            self.state.gamma = self.physics.get_gamma(self.state)
             # perform other updates
             self.t += dt
             self.update_probes(iters)

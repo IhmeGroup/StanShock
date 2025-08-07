@@ -206,4 +206,7 @@ class ThermoTable(CanteraInterface):
         return state.pressure
 
     def get_sound_speed(self, state: FluidState):
-        return np.sqrt(state.gamma * state.pressure / state.density)
+        gamma = state.gamma
+        if gamma is None:
+            gamma = self.get_gamma(state)
+        return np.sqrt(gamma * state.pressure / state.density)
