@@ -38,7 +38,7 @@ def get_specific_gas_constant_compiled(Y, molecularWeights):
     return R
 
 
-# @njit(double1D(double1D, double2D, double1D, double2D, double2D))
+@njit(double1D(double1D, double2D, double1D, double2D, double2D))
 def get_cp_compiled(T, Y, TTable, a, b):
     """
     Function used by the thermoTable class to find the constant pressure
@@ -198,7 +198,12 @@ class ThermoTable(CanteraInterface):
                 T: vector of temperatures
         """
         R = self.get_specific_gas_constant(state)
-        return state.pressure / (state.density * R)
+        if state.pressure is None:
+            self.set_state(state)
+            state.temperature = self.sol.T
+        else:
+            state.temperature = state.pressure / (state.density * R)
+        return state.temperature
 
     def get_pressure(self, state: FluidState):
         R = self.get_specific_gas_constant(state)

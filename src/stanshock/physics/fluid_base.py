@@ -100,6 +100,10 @@ class FluidPhysics(ABC):
         """Compute internal energy of the gas."""
 
     @abstractmethod
+    def get_species_enthalpies(self, state: FluidState):
+        """Compute total enthalpies of each species."""
+
+    @abstractmethod
     def get_sound_speed(self, state: FluidState):
         """Compute speed of sound of the gas."""
 
@@ -240,13 +244,12 @@ class FluidPhysics(ABC):
             internal_energy=e_int,
             composition=Y,
         )
-        state = self.set_state(state)
 
         if gamma_star is not None:
             # Compute pressure using double-flux method
             state.pressure = (gamma_star - 1.0) * r * (e_int - e0_star)
 
-        return state
+        return self.set_state(state)
 
     @abstractmethod
     def get_source_terms(self, state: FluidState):

@@ -263,6 +263,10 @@ class FPVTable(FluidPhysics):
 
         return state.internal_energy
 
+    def get_species_enthalpies(self, state: FluidState):
+        state = self.set_state(state)
+        return 0.0
+
     def get_sound_speed(self, state):
         if state.gamma is None:
             self.get_gamma(state)

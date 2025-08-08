@@ -85,26 +85,34 @@ class CanteraInterface(FluidPhysics):
 
     def get_temperature(self, state: FluidState):
         """Compute temperature of the gas."""
-        state = self.set_state(state)
+        if state.temperature is None:
+            state = self.set_state(state)
+            state.temperature = self.sol.T
         return state.temperature
 
     def get_pressure(self, state: FluidState):
         """Compute pressure of the gas."""
-        state = self.set_state(state)
+        if state.pressure is None:
+            state = self.set_state(state)
+            state.pressure = self.sol.P
         return state.pressure
 
     def get_internal_energy(self, state: FluidState):
         """Compute internal energy of the gas."""
-        state = self.set_state(state)
         if state.e0_star is not None:
             state.internal_energy = (
                 state.pressure / (state.density * (state.gamma_star - 1.0))
                 + state.e0_star
             )
         else:
+            state = self.set_state(state)
             state.internal_energy = self.sol.int_energy_mass
 
         return state.internal_energy
+
+    def get_species_enthalpies(self, state: FluidState):
+        state = self.set_state(state)
+        return self.sol.partial_molar_enthalpies / self.gas.molecular_weights
 
     def get_sound_speed(self, state: FluidState):
         """Compute speed of sound of the gas."""
@@ -117,7 +125,7 @@ class CanteraInterface(FluidPhysics):
     def get_mass_diffusivity(self, state: FluidState):
         """Compute mixture-averaged diffusion coefficients."""
         self.set_state(state)
-        return self.sol.mix_diff_coeffs
+        return self.sol.mix_diff_coeffs_mass
 
     def get_source_terms(self, state: FluidState):
         """Compute reaction source terms corresponding to transported scalars."""
