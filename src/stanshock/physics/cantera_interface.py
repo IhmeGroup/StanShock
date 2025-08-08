@@ -35,24 +35,18 @@ class CanteraInterface(FluidPhysics):
             if state.density is not None:
                 if state.pressure is not None:
                     self.sol.DPY = state.density, state.pressure, state.mass_fractions
-                    state.temperature = self.sol.T
-                    state.internal_energy = self.sol.int_energy_mass
                 elif state.internal_energy is not None:
                     self.sol.UVY = (
                         state.internal_energy,
                         1 / state.density,
                         state.mass_fractions,
                     )
-                    state.temperature = self.sol.T
-                    state.pressure = self.sol.P
                 elif state.temperature is not None:
                     self.sol.TDY = (
                         state.temperature,
                         state.density,
                         state.mass_fractions,
                     )
-                    state.pressure = self.sol.P
-                    state.internal_energy = self.sol.int_energy_mass
                 else:
                     msg = "Cannot set state: need either pressure, internal energy, or temperature."
                     raise ValueError(msg)
@@ -60,8 +54,6 @@ class CanteraInterface(FluidPhysics):
             elif (state.pressure is not None) and (state.temperature is not None):
                 self.sol.TPY = state.temperature, state.pressure, state.mass_fractions
                 state.temperature = self.sol.T
-                state.density = self.sol.density_mass
-                state.internal_energy = self.sol.int_energy_mass
 
         state._cache_valid = True
 
@@ -104,6 +96,14 @@ class CanteraInterface(FluidPhysics):
     def get_internal_energy(self, state: FluidState):
         """Compute internal energy of the gas."""
         state = self.set_state(state)
+        if state.e0_star is not None:
+            state.internal_energy = (
+                state.pressure / (state.density * (state.gamma_star - 1.0))
+                + state.e0_star
+            )
+        else:
+            state.internal_energy = self.sol.int_energy_mass
+
         return state.internal_energy
 
     def get_sound_speed(self, state: FluidState):

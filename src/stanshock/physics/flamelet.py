@@ -235,25 +235,31 @@ class FPVTable(FluidPhysics):
         return state.pressure
 
     def get_internal_energy(self, state: FluidState):
-        T = state.temperature
-        if T is None:
-            if state.pressure is None:
-                msg = (
-                    "Fluid state not fully defined. "
-                    "Temperature, pressure, and internal energy are not set."
-                )
-                raise ValueError(msg)
-            T = self.get_temperature(state)
+        if state.e0_star is not None:
+            state.internal_energy = (
+                state.pressure / (state.density * (state.gamma_star - 1.0))
+                + state.e0_star
+            )
+        else:
+            T = state.temperature
+            if T is None:
+                if state.pressure is None:
+                    msg = (
+                        "Fluid state not fully defined. "
+                        "Temperature, pressure, and internal energy are not set."
+                    )
+                    raise ValueError(msg)
+                T = self.get_temperature(state)
 
-        R = self.get_specific_gas_constant(state)
-        T0 = self.lookup("T0", state)
-        e0 = self.lookup("E0", state)
-        gamma0 = self.lookup("GAMMA0", state)
-        ag = self.lookup("AGAMMA", state)
+            R = self.get_specific_gas_constant(state)
+            T0 = self.lookup("T0", state)
+            e0 = self.lookup("E0", state)
+            gamma0 = self.lookup("GAMMA0", state)
+            ag = self.lookup("AGAMMA", state)
 
-        state.internal_energy = e0 + R / ag * np.log(
-            1.0 + ag * (T - T0) / (gamma0 - 1.0)
-        )
+            state.internal_energy = e0 + R / ag * np.log(
+                1.0 + ag * (T - T0) / (gamma0 - 1.0)
+            )
 
         return state.internal_energy
 

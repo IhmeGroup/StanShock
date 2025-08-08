@@ -14,7 +14,7 @@ from stanshock.physics.thermotable import (
 get_specific_gas_constant_compiled = (
     get_specific_gas_constant_compiled.__wrapped__
 )  # unwrap for coverage
-# get_cp_compiled = get_cp_compiled.__wrapped__
+get_cp_compiled = get_cp_compiled.__wrapped__
 
 
 mech = "data/mechanisms/HeliumArgon.yaml"
