@@ -210,6 +210,22 @@ class ThermoTable(CanteraInterface):
         state.pressure = state.temperature * R * state.density
         return state.pressure
 
+    def get_species_enthalpies(self, state: FluidState):
+        T = state.temperature
+        if state.temperature is None:
+            T = self.get_temperature(state)
+
+        if any(np.logical_or(self.TMin > T, self.TMax < T)):
+            msg = "Temperature not within table"
+            raise ValueError(msg)
+
+        indices = np.floor((T - self.TMin) / self.dT, casting="unsafe", dtype=int)
+        bbar = (
+            0.5 * self.a[indices, :] * (T + self.T[indices])[..., None]
+            + self.b[indices, :]
+        )
+        return self.h[indices, :] - bbar * self.T[indices, None]
+
     def get_sound_speed(self, state: FluidState):
         gamma = state.gamma
         if gamma is None:
