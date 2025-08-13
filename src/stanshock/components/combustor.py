@@ -301,19 +301,19 @@ class Combustor:
         e_chem0 = r * self.physics.lookup_direct("E_CHEM", Z, Q, L)
 
         # 1st stage of RK2
-        omegaC = r * self.injector.get_chemical_sources(Z, C)
+        omegaC = self.injector.get_chemical_sources(
+            self.t, y[self.idx_cells], self.physics, gamma_star[self.idx_cells]
+        )
         y1 = y.copy()
         y1[self.idx_cells, 4] += dt * omegaC
         C1 = y1[self.idx_cells, 4] / r
         L1 = self.physics.get_normalized_progress_variable(Z, C1)
         e_chem1 = r * self.physics.lookup_direct("E_CHEM", Z, Q, L1)
         y1[self.idx_cells, 1] += e_chem0 - e_chem1
-        state1 = self.physics.conservative_to_primitive(y1, gamma_star)
 
         # 2nd stage of RK2
-        self.physics.set_state(state1)
-        omegaC1 = state1.density * self.injector.get_chemical_sources(
-            state1.Z, state1.C
+        omegaC1 = self.injector.get_chemical_sources(
+            self.t + dt, y1[self.idx_cells], self.physics, gamma_star[self.idx_cells]
         )
         y[self.idx_cells, 4] = 0.5 * (
             y[self.idx_cells, 4] + y1[self.idx_cells, 4] + dt * omegaC1
@@ -491,28 +491,20 @@ class Combustor:
 
         # initialize
         y = self.physics.primitive_to_conservative(self.state)
-        (ru, rE, r, rZ, rC) = (
-            y[self.idx_cells, 0],
-            y[self.idx_cells, 1],
-            y[self.idx_cells, 2],
-            y[self.idx_cells, 3],
-            y[self.idx_cells, 4],
-        )
         self.injector.update_fluid_tip_positions(
             dt, self.t, self.state.velocity[self.idx_cells]
         )
 
         # 1st stage of RK2
-        dydt = self.injector.get_injector_sources(
-            r, ru, rE, rZ, rC, self.state.gamma[self.idx_cells], self.t
+        dydt = self.injector.source(
+            self.t, y[self.idx_cells], self.physics, self.state.gamma[self.idx_cells]
         )
-        y1 = y + dt * dydt
+        y1 = y[self.idx_cells] + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
-        (ru1, rE1, r1, rZ1, rC1) = y1[:, 0], y1[:, 1], y1[:, 2], y1[:, 3], y1[:, 4]
-        dydt = self.injector.get_injector_sources(
-            r1, ru1, rE1, rZ1, rC1, self.state.gamma[self.idx_cells], self.t + dt
+        dydt = self.injector.source(
+            self.t + dt, y1, self.physics, self.state.gamma[self.idx_cells]
         )
         y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1 + dt * dydt)
 

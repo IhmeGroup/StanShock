@@ -231,17 +231,7 @@ class FPVTable(FluidPhysics):
         StanShock transports the total non-chemical energy.
         """
         R = self.get_specific_gas_constant(state)
-        if state.sensible_energy is not None:
-            e_sens = state.sensible_energy
-            T0 = self.lookup("T0", state)
-            e0_sens = self.lookup("E0_SENS", state)
-            gamma0 = self.lookup("GAMMA0", state)
-            ag = self.lookup("AGAMMA", state)
-            state.temperature = T0 + ((gamma0 - 1) / ag) * (
-                np.exp(ag * (e_sens - e0_sens) / R) - 1
-            )
-        else:
-            state.temperature = state.pressure / (R * state.density)
+        state.temperature = state.pressure / (R * state.density)
 
         return state.temperature
 
@@ -262,7 +252,7 @@ class FPVTable(FluidPhysics):
         """Transform conservative variables into primitives, accounting for chemical contributions."""
         ru = state_array[..., 0]
         rE = state_array[..., 1]
-        rY = state_array[..., 2:]
+        rY = np.clip(state_array[..., 2:], a_min=0.0, a_max=None)
 
         r = rY[..., : self.n_scalars_rho_sum].sum(axis=-1)
 
