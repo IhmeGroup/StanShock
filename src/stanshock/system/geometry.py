@@ -134,6 +134,7 @@ class Cylinder(Geometry):
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        self.x: Array = x
         # Set up functional form of inner and outer diameters
         self.d_outer: SpatioTemporalFunction = self.to_spatiotemporal(value=d_outer)
         self.d_inner: SpatioTemporalFunction = self.to_spatiotemporal(value=d_inner)
@@ -193,6 +194,7 @@ class Box(Geometry):
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        self.x: Array = x
         # Set up functional forms of height and width
         self.h: SpatioTemporalFunction = self.to_spatiotemporal(value=h)
         self.w: SpatioTemporalFunction = self.to_spatiotemporal(value=w)
@@ -237,6 +239,7 @@ class AsymmetricBox(Box):
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
+        self.x: Array = x
         # Set up functional forms of height and width
         self.upper_wall: SpatioTemporalFunction = self.to_spatiotemporal(
             value=upper_wall
