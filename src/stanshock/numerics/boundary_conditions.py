@@ -268,6 +268,8 @@ def set_boundary_conditions(
                     bcs += [AdiabaticWall(location=bc_loc)]
             elif isinstance(bc_specification, BoundaryCondition):
                 bcs += [bc_specification]
+            elif isinstance(bc_specification, tuple | list):
+                bcs += [Inflow(reference_state=bc_specification, location=bc_loc)]
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)
 

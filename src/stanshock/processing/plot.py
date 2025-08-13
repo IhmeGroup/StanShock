@@ -168,8 +168,9 @@ def add_h_plot(domain, ax, scale=1.0):
     ax.patch.set_visible(False)
 
     geometry = domain.geometry
+    t = domain.t
     x = geometry.x
-    h = geometry.h if geometry.h is not None else geometry.d_outer(x)
+    h = geometry.h(t, x) if geometry.h is not None else geometry.d_outer(t, x)
     ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
     ax1.axhline(0, color="0.8", linestyle="--")
     ax1.set_aspect("equal")
