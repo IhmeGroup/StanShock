@@ -9,33 +9,32 @@ import numpy as np
 from scipy import interpolate, optimize
 
 from stanshock.components.combustor import Combustor
+from stanshock.models.jicf import JICModel
 from stanshock.numerics.boundary_conditions import Inflow
 from stanshock.physics.flamelet import FPVTable
-from stanshock.physics.jicf import JICModel
 from stanshock.processing.plot import XTDiagram
-
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
-    }
-)
-plt.rcParams["axes.xmargin"] = 0
-plt.rcParams["axes.ymargin"] = 0
 
 XSMALL_SIZE = 12
 SMALL_SIZE = 14
 MEDIUM_SIZE = 16
 BIGGER_SIZE = 18
 
-plt.rc("font", size=SMALL_SIZE)  # controls default text sizes
-plt.rc("axes", titlesize=SMALL_SIZE)  # fontsize of the axes title
-plt.rc("axes", labelsize=MEDIUM_SIZE)  # fontsize of the x and y labels
-plt.rc("xtick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("ytick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("legend", fontsize=XSMALL_SIZE)  # legend fontsize
-plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+        "axes.xmargin": 0,
+        "axes.ymargin": 0,
+        "font.size": SMALL_SIZE,
+        "axes.titlesize": SMALL_SIZE,
+        "axes.labelsize": MEDIUM_SIZE,
+        "xtick.labelsize": SMALL_SIZE,
+        "ytick.labelsize": SMALL_SIZE,
+        "legend.fontsize": XSMALL_SIZE,
+        "figure.titlesize": BIGGER_SIZE,
+    }
+)
 
 # Plotting utilities
 scale = 1e3
@@ -58,8 +57,8 @@ figdir.mkdir(exist_ok=True)
 (figdir / "anim").mkdir(exist_ok=True)
 
 # Chemistry
-mech = "ohn.yaml"
-table_file = "./flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5"
+mech = "../../data/mechanisms/h2_boivin_9sp_12r_mod.yaml"
+table_file = "./h2_table/flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5"
 gas = ct.Solution(mech)
 X_ox = "O2:0.21,N2:0.79"
 X_f = "H2:1"
@@ -194,8 +193,8 @@ t_phi_gl_schedule = np.array(
         [0.1 * tau, 0.0],
         [8.0 * tau, 0.35],
         [10.0 * tau, 0.35],
-        [14.0 * tau, 0.6],
-        [16.0 * tau, 0.6],
+        [14.0 * tau, 0.45],
+        [16.0 * tau, 0.45],
     ]
 )
 # t_phi_gl_schedule = np.array(
@@ -230,7 +229,7 @@ dlnA_dx_data = np.gradient(lnA, x)
 dlnA_dx_interp = interpolate.interp1d(x, dlnA_dx_data, kind="cubic")
 
 
-def dlnA_dx(x, t):
+def dlnA_dx(t, x):
     return dlnA_dx_interp(x)
 
 
@@ -242,7 +241,6 @@ n_bins_Z_pdf = int(np.ceil(1.0 / dZ_pdf))
 # Initialize the state
 gas_init = ct.Solution(mech)
 gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
-initState = gas_init, U_in
 
 # Define the boundary conditions
 BC_inlet = Inflow(reference_state=(gas_init.density, U_in, gas_init.P, (1.0, 0.0, 0.0)))
@@ -250,13 +248,20 @@ BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 
 # Load the FPV table
-fpv_table = FPVTable(table_file)
+fpv_table = FPVTable(
+    table_file,
+    gas,
+    ox_def=X_ox,
+    fuel_def=X_f,
+    prog_def={"H2O": 1.0},
+    p_correction=False,
+    T_correction=False,
+)
 
 # #################################################################
 
 # Build the injector model
 jic = JICModel(
-    gas,
     "H2",
     x,
     x_inj,
@@ -403,22 +408,18 @@ jic = JICModel(
 
 # Initialize and run the simulation
 ss = Combustor(
-    gas,
+    x=x,
     h=h,
     w=w,
     dlnA_dx=dlnA_dx,
     wall_temperature=300.0,
     include_boundary_layer=True,
-    initialization=("constant", initState, x),
+    initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,
     sourceTerms=None,
     injector=jic,
-    ox_def=X_ox,
-    fuel_def=X_f,
-    prog_def={"H2O": 1.0},
     cfl=0.5,
-    physics="FPV",
-    fpv_table=fpv_table,
+    physics=fpv_table,
     reacting=True,
     include_diffusion=False,
     output_every=10,

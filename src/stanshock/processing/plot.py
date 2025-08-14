@@ -36,6 +36,7 @@ class XTDiagram:
 
         self.variable = []  # list of numpy arrays of the variable w.r.t x
         self.t = []  # list of times
+        self.mdot = []  # list of mass flow rates
 
         self.update(domain)
 
@@ -79,6 +80,8 @@ class XTDiagram:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
         self.t.append(domain.t)
+        if domain.injector is not None:
+            self.mdot.append(domain.injector.mdot_f_interp(domain.t))
 
     def plot(self, figdir="."):
         """
@@ -86,37 +89,51 @@ class XTDiagram:
             inputs:
                 figdir = directory in which to save the plot
         """
-        plt.figure()
         t = [t * 1000.0 for t in self.t]
+        mdot = [mdot * 1.0e3 for mdot in self.mdot]
         X, T = np.meshgrid(self.x, t)
         variableMatrix = np.zeros(X.shape)
         for k, variablek in enumerate(self.variable):
             variableMatrix[k, :] = variablek
         variable = self.name
         if variable in ["density", "r", "rho"]:
-            plt.title(r"$\rho~[\mathrm{kg/m^3}]$")
+            title = r"$\rho~[\mathrm{kg/m^3}]$"
         elif variable in ["velocity", "u"]:
-            plt.title(r"$u~[\mathrm{m/s}]$")
+            title = r"$u~[\mathrm{m/s}]$"
         elif variable in ["pressure", "p"]:
             variableMatrix /= 1.0e5  # convert to bar
-            plt.title(r"$p~[\mathrm{bar}]$")
+            title = r"$p~[\mathrm{bar}]$"
         elif variable in ["temperature", "t"]:
-            plt.title(r"$T~[\mathrm{K}]$")
+            title = r"$T~[\mathrm{K}]$"
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            plt.title(r"$\gamma~[\mathrm{-}]$")
+            title = r"$\gamma~[\mathrm{-}]$"
         elif variable in ["mixture fraction"]:
-            plt.title(r"$Z~[\mathrm{-}]$")
+            title = r"$Z~[\mathrm{-}]$"
         elif variable in ["progress variable"]:
-            plt.title(r"$C~[\mathrm{-}]$")
+            title = r"$C~[\mathrm{-}]$"
         elif variable in ["mach", "m"]:
-            plt.title(r"$M~[\mathrm{-}]$")
+            title = r"$M~[\mathrm{-}]$"
         else:
-            plt.title(r"$\mathrm{" + variable + "}$")
+            title = r"$\mathrm{" + variable + "}$"
+
+        has_mdot = mdot and any(mdot)
+        figsize = (6, 4) if has_mdot else (6, 3)
+
+        fig = plt.figure(figsize=figsize)
+        if has_mdot:
+            gs = fig.add_gridspec(1, 3, width_ratios=[6, 1, 0.5], wspace=0.125)
+            main_ax = fig.add_subplot(gs[0, 0])
+            mdot_ax = fig.add_subplot(gs[0, 1], sharey=main_ax)
+            cbar_ax = fig.add_subplot(gs[0, 2])
+        else:
+            main_ax = plt.gca()
+
+        fig.suptitle(title, fontsize=14)
 
         if self.limits is None:
-            plt.pcolormesh(X, T, variableMatrix, cmap="jet")
+            pcm = main_ax.pcolormesh(X, T, variableMatrix, cmap="jet")
         else:
-            plt.pcolormesh(
+            pcm = main_ax.pcolormesh(
                 X,
                 T,
                 variableMatrix,
@@ -124,10 +141,24 @@ class XTDiagram:
                 vmin=self.limits[0],
                 vmax=self.limits[1],
             )
-        plt.xlabel(r"$x~[\mathrm{m}]$")
-        plt.ylabel(r"$t~[\mathrm{ms}]$")
-        plt.axis([min(self.x), max(self.x), min(t), max(t)])
-        plt.colorbar()
+
+        main_ax.set_xlabel(r"$x~[\mathrm{m}]$")
+        main_ax.set_ylabel(r"$t~[\mathrm{ms}]$")
+        main_ax.set_xlim(min(self.x), max(self.x))
+        main_ax.set_ylim(min(t), max(t))
+
+        if has_mdot:
+            fig.colorbar(pcm, cax=cbar_ax)
+        else:
+            fig.colorbar(pcm, ax=main_ax)
+
+        if has_mdot:
+            mdot_ax.plot(mdot, t, "r-", linewidth=2)
+            mdot_ax.set_xlabel(r"$\dot{m}~[\mathrm{g/s}]$")
+            mdot_ax.set_yticklabels([])
+            mdot_ax.grid(True, axis="x", linestyle="--", alpha=0.7)
+
+        plt.tight_layout()
         plt.savefig(Path(figdir) / f"{variable}.png", bbox_inches="tight", dpi=300)
 
 

@@ -12,6 +12,9 @@ from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 
 from stanshock.physics.flamelet import FPVTable
+from stanshock.physics.fluid_base import FluidPhysics
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
 
 XSMALL_SIZE = 12
 SMALL_SIZE = 14
@@ -36,14 +39,13 @@ plt.rcParams.update(
 datadir = Path("./data")
 
 
-class JICModel:
+class JICModel(RightHandSide):
     """
     This is a class defined to encapsulate the Jet-in-Crossflow model
     """
 
     def __init__(
         self,
-        gas,
         fuel,
         x,
         x_inj,
@@ -69,8 +71,6 @@ class JICModel:
         """
         This method initializes the Jet-in-Crossflow model with the following
         parameters:
-        gas: Cantera.Solution
-            The Cantera gas object
         fuel: str
             The fuel species
         x: float
@@ -114,7 +114,7 @@ class JICModel:
         load_MIB_profile: bool
             Whether to load the MIB profile
         """
-        self.gas = gas
+        self.gas = fpv_table.gas
         self.fuel = fuel
 
         self.x = x
@@ -145,10 +145,8 @@ class JICModel:
         self.p = self.gas.P
         self.W = self.gas.mean_molecular_weight
         self.gamma = self.gas.cp / self.gas.cv
-        self.c = gas.sound_speed
+        self.c = self.gas.sound_speed
         self.M = self.u / self.c
-
-        self.__prep_zbilger()
 
         # Properties of the injected fluid
         self.t_inj = t_inj
@@ -161,10 +159,9 @@ class JICModel:
         self.E_inj = self.gas.int_energy_mass + 0.5 * self.u_inj**2
         self.W_inj = self.gas.mean_molecular_weight
         self.gamma_inj = self.gas.cp / self.gas.cv
-        self.c_inj = gas.sound_speed
+        self.c_inj = self.gas.sound_speed
         self.M_inj = 1.0
         self.mdot_inj = self.rho_inj * self.u_inj * self.A_inj
-
         self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
         self.mdot_inj_unique, self.mdot_inj_unique_idx = np.unique(
             self.mdot_inj, return_index=True
@@ -190,14 +187,15 @@ class JICModel:
 
         # Stoichiometry
         mdot_a = self.rho * self.u * self.A
-        mdot_f = self.n_inj * self.mdot_inj_unique
+        mdot_f = self.n_inj * self.mdot_inj
+        mdot_f_unique = self.n_inj * self.mdot_inj_unique
         self.phi_gl_unique = np.zeros_like(self.mdot_inj_unique)
         self.Z_gl_unique = np.zeros_like(self.mdot_inj_unique)
         for i_m in range(len(self.mdot_inj_unique)):
             self.gas.TDY = (
                 self.T,
                 self.rho,
-                f"O2:{0.233 * mdot_a},N2:{0.767 * mdot_a},{self.fuel}:{mdot_f[i_m]}",
+                f"O2:{0.233 * mdot_a},N2:{0.767 * mdot_a},{self.fuel}:{mdot_f_unique[i_m]}",
             )
             self.phi_gl_unique[i_m] = self.gas.equivalence_ratio(
                 self.fuel, "O2:0.21,N2:0.79"
@@ -205,6 +203,9 @@ class JICModel:
             self.Z_gl_unique[i_m] = self.gas.mixture_fraction(
                 self.fuel, "O2:0.21,N2:0.79"
             )
+        self.mdot_f_interp = interpolate.interp1d(
+            self.t_inj, mdot_f, bounds_error=False, fill_value=0.0
+        )
 
         # Compute the non-dimensional parameters
         self.J = (self.rho_inj * self.u_inj**2) / (
@@ -235,15 +236,6 @@ class JICModel:
                     method="cubic",
                 )
                 self.Z_3D_interp.append(interp)
-
-            # DEBUG
-            # import matplotlib.pyplot as plt
-            # fig, ax = plt.subplots()
-            # c = ax.contourf(self.x_3D_data, self.y_3D_data, self.Z_3D_data[1, :, :, 59].T, levels=50,
-            #                 vmin=0.0, vmax=0.1)
-            # ax.set_aspect('equal')
-            # # plt.colorbar(c)
-            # plt.show()
         else:
             self.calc_Z_3D_interp(write=True)
 
@@ -271,21 +263,6 @@ class JICModel:
             self.omega_C_int_interp = interpolate.RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
-
-            # fig, ax = plt.subplots()
-            # c = ax.contourf(self.Zbar_vec, self.Lbar_vec, self.omega_C_int[:, :, 50].T, levels=50)
-            # ax.set_xlabel(r"$\overline{Z}$ [-]")
-            # ax.set_ylabel(r"$\overline{C}$ [-]")
-            # fig.colorbar(c)
-            # fig.savefig("figures/omega_C_low.png", bbox_inches='tight', dpi=300)
-
-            # fig, ax = plt.subplots()
-            # c = ax.contourf(self.Zbar_vec, self.Lbar_vec, self.omega_C_int[:, :, -45].T, levels=50)
-            # ax.set_xlabel(r"$\overline{Z}$ [-]")
-            # ax.set_ylabel(r"$\overline{C}$ [-]")
-            # fig.colorbar(c)
-            # fig.savefig("figures/omega_C_hi.png", bbox_inches='tight', dpi=300)
-            # breakpoint()
         else:
             self.calc_chemical_sources(write=True)
 
@@ -296,52 +273,6 @@ class JICModel:
             self.E_CHEM_profile = np.load(datadir / "E_CHEM_profile_MIB.npy")
         else:
             self.calc_MIB_profile(write=True)
-
-    def __prep_zbilger(self):
-        #             2(Y_C - Yo_C)/W_C + (Y_H - Yo_H)/2W_H - (Y_O - Yo_O)/W_O
-        # ZBilger =  -----------------------------------------------------------
-        #            2(Yf_C - Yo_C)/W_C + (Yf_H - Yo_H)/2W_H - (Yf_O - Yo_O)/W_O
-        has_C = "C" in self.gas.element_names
-
-        i_C = self.gas.element_index("C") if has_C else 0
-        i_H = self.gas.element_index("H")
-        i_O = self.gas.element_index("O")
-
-        W_C = self.gas.atomic_weight(i_C) if has_C else 1.0
-        W_H = self.gas.atomic_weight(i_H)
-        W_O = self.gas.atomic_weight(i_O)
-
-        self.gas.X = "O2:0.21,N2:0.79"
-        Yo_C = self.gas.elemental_mass_fraction("C") if has_C else 0.0
-        Yo_H = self.gas.elemental_mass_fraction("H")
-        Yo_O = self.gas.elemental_mass_fraction("O")
-
-        self.gas.X = f"{self.fuel}:1"
-        Yf_C = self.gas.elemental_mass_fraction("C") if has_C else 0.0
-        Yf_H = self.gas.elemental_mass_fraction("H")
-        Yf_O = self.gas.elemental_mass_fraction("O")
-
-        s = 1.0 / (
-            2.0 * (Yf_C - Yo_C) / W_C
-            + 0.5 * (Yf_H - Yo_H) / W_H
-            - 1.0 * (Yf_O - Yo_O) / W_O
-        )
-
-        self.Z_weights = np.zeros(self.gas.n_species)
-        for k in range(self.gas.n_species):
-            self.Z_weights[k] = (
-                2.0 * (self.gas.n_atoms(k, i_C) if has_C else 0.0)
-                + 0.5 * self.gas.n_atoms(k, i_H)
-                - 1.0 * self.gas.n_atoms(k, i_O)
-            ) / self.gas.molecular_weights[k]
-        self.Z_offset = -(2.0 * Yo_C / W_C + 0.5 * Yo_H / W_H - 1.0 * Yo_O / W_O)
-
-        self.Z_weights *= s
-        self.Z_offset *= s
-
-        self.Z_weight_f = self.Z_weights[self.gas.species_index(self.fuel)]
-        self.Z_weight_O2 = self.Z_weights[self.gas.species_index("O2")]
-        self.Z_weight_N2 = self.Z_weights[self.gas.species_index("N2")]
 
     def y_cl(self, x_cl):
         # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
@@ -532,20 +463,6 @@ class JICModel:
                 )
             )
 
-        # max_xi_val = 0.01
-        # xi_lo = max(xi_lo, -max_xi_val)
-        # xi_hi = min(xi_hi, max_xi_val)
-        # def integrand(z, xi):
-        #     x = x_cl + xi * dn[0] + self.x_inj
-        #     y = y_cl + xi * dn[1]
-        #     # print("x = {0}, y = {1}, z = {2}".format(x, y, z))
-        #     return self.Z_3D(x, y, z)
-        # Z_int_bound = integrate.dblquad(
-        #     integrand,
-        #     xi_lo, xi_hi,
-        #     lambda xi: -self.w/2,
-        #     lambda xi: self.w/2)[0]
-
         return Z_int_nobound / Z_int_bound
 
     def get_adjustment_factor(self, x, y):
@@ -596,15 +513,6 @@ class JICModel:
         for z_inj in self.z_inj:
             grad_Z += self.grad_Z_3D_single_inj(x, y, z, z_inj)
         return grad_Z
-
-    def __Yf_to_Z(self, Yf):
-        Ya = 1 - Yf
-        YO2 = 0.23291 * Ya
-        YN2 = Ya - YO2
-        Z = (
-            self.Z_weight_f * Yf + self.Z_weight_O2 * YO2 + self.Z_weight_N2 * YN2
-        ) + self.Z_offset
-        return np.minimum(np.maximum(Z, 0.0), 1.0)
 
     def Z_3D_adjusted(self, x, y, z):
         """
@@ -856,14 +764,14 @@ class JICModel:
         E_CHEM_avg = np.zeros_like(self.mdot_inj_unique)
         for i_m in range(len(self.mdot_inj_unique)):
             if np.isnan(self.rho_inj_unique[i_m]):
-                C_avg[i_m] = self.fpv_table.lookup("PROG", 0.0, 0.0, 0.0)
-                E_CHEM_avg[i_m] = self.fpv_table.lookup("E_CHEM", 0.0, 0.0, 0.0)
+                C_avg[i_m] = self.fpv_table.lookup_direct("PROG", 0.0, 0.0, 0.0)
+                E_CHEM_avg[i_m] = self.fpv_table.lookup_direct("E_CHEM", 0.0, 0.0, 0.0)
                 continue
 
             def integrand(z, y, i_m=i_m):
                 # Z = self.Z_3D_adjusted(x, y, z)[i_m]
                 Z = self.Z_3D_interp[i_m]((x, y, z))
-                return self.fpv_table.lookup("PROG", Z, 0.0, 1.0)
+                return self.fpv_table.lookup_direct("PROG", Z, 0.0, 1.0)
 
             C_avg[i_m] = (
                 2.0
@@ -876,7 +784,7 @@ class JICModel:
             def integrand(z, y, i_m=i_m):
                 # Z = self.Z_3D_adjusted(x, y, z)[i_m]
                 Z = self.Z_3D_interp[i_m]((x, y, z))
-                return self.fpv_table.lookup("E_CHEM", Z, 0.0, 1.0)
+                return self.fpv_table.lookup_direct("E_CHEM", Z, 0.0, 1.0)
 
             E_CHEM_avg[i_m] = (
                 2.0
@@ -893,8 +801,8 @@ class JICModel:
         self.E_CHEM_profile = np.zeros([len(self.mdot_inj_unique), len(self.x)])
 
         # Debugging way
-        C = self.fpv_table.lookup("PROG", self.Z_3D_data, 0.0, 1.0)
-        E_CHEM = self.fpv_table.lookup("E_CHEM", self.Z_3D_data, 0.0, 1.0)
+        C = self.fpv_table.lookup_direct("PROG", self.Z_3D_data, 0.0, 1.0)
+        E_CHEM = self.fpv_table.lookup_direct("E_CHEM", self.Z_3D_data, 0.0, 1.0)
 
         C_profile = np.mean(C, axis=(2, 3))
         E_CHEM_profile = np.mean(E_CHEM, axis=(2, 3))
@@ -910,8 +818,8 @@ class JICModel:
         # for i in tqdm(range(len(self.x))):
         #     if self.x[i] < self.x_inj:
         #         # Assume no fuel in the domain
-        #         self.C_profile[:, i] = self.fpv_table.lookup('PROG', 0.0, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup('E_CHEM', 0.0, 0.0, 0.0)
+        #         self.C_profile[:, i] = self.fpv_table.lookup_direct('PROG', 0.0, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E_CHEM', 0.0, 0.0, 0.0)
         #     elif self.x[i] > self.x_noz:
         #         # Freeze the profiles in the nozzle
         #         self.C_profile[:, i] = self.C_profile[:, i-1]
@@ -919,8 +827,8 @@ class JICModel:
         #     elif self.x[i] < self.x_inj + 0.001:
         #         # DEBUG: Assume nearly no mixing, so no burning
         #         Z_avg = self.Z_avg_profile[:, i]
-        #         self.C_profile[:, i] = self.fpv_table.lookup('PROG', Z_avg, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup('E_CHEM', Z_avg, 0.0, 0.0)
+        #         self.C_profile[:, i] = self.fpv_table.lookup_direct('PROG', Z_avg, 0.0, 0.0)
+        #         self.E_CHEM_profile[:, i] = self.fpv_table.lookup_direct('E_CHEM', Z_avg, 0.0, 0.0)
         #     else:
         #         self.C_profile[:,i], self.E_CHEM_profile[:, i] = self.C_E_CHEM_avg_MIB(self.x[i])
 
@@ -968,13 +876,21 @@ class JICModel:
         # Drop fluid tips that have passed the end of the domain
         self.fluid_tips = self.fluid_tips[self.fluid_tips[:, 0] < self.x[-1]]
 
-    def get_injector_sources(self, rho, rhoU, E, rhoZ, rhoC, gamma, t):
+    def source(
+        self,
+        _time: float,
+        state_array: Array,
+        _physics: FluidPhysics,
+        _gamma_star: Array,
+    ) -> Array:
         """
         This method computes a fuel injector source term to target the desired
         mixture fraction profile.
         """
-        rhs = np.zeros((rho.shape[0], 5))
-        _ = (rhoU, E, rhoC, gamma, t)  # Hack to silence linter
+        rhs = np.zeros_like(state_array)
+
+        rho = state_array[:, 0]
+        rhoZ = state_array[:, 4]
 
         Z = rhoZ / rho
         mdot_inj = np.interp(
@@ -1002,66 +918,45 @@ class JICModel:
         i_Zbar,
         i_Lbar,
         i_S,
-        Z_mesh,
-        Zbar_mesh,
-        Z_vec,
-        C_mesh,
-        L_vec,
-        A_mesh,
-        omega_C_ZL,
-        alpha_Z,
-        beta_Z,
-        alpha_C,
-        beta_C,
+        Zbar_vec,
+        Lbar_vec,
+        logsigma2_vec,
+        uv_vec,
+        W_vec,
+        omega_C_interp,
     ):
-        eps = 1e-6
-        if (Zbar_mesh[i_Zbar, i_Lbar, i_S] < eps) or (
-            Zbar_mesh[i_Zbar, i_Lbar, i_S] > 1.0 - eps
-        ):
-            return (i_Zbar, i_Lbar, i_S, 0.0)
+        Zbar = Zbar_vec[i_Zbar]
+        Lbar = Lbar_vec[i_Lbar]
+        logsigma2 = logsigma2_vec[i_S]
+        sigma2 = 10**logsigma2
+
+        eps = 1.0e-6
+        if (Zbar < eps) or (Zbar > 1 - eps) or (Lbar < eps) or (Lbar > 1 - eps):
+            result = omega_C_interp((Zbar, Lbar))
+            return (i_Zbar, i_Lbar, i_S, result)
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            P_Z = stats.beta.pdf(
-                Z_mesh, alpha_Z[i_Zbar, i_Lbar, i_S], beta_Z[i_Zbar, i_Lbar, i_S]
-            )
-            P_C = stats.beta.pdf(
-                C_mesh, alpha_C[i_Zbar, i_Lbar, i_S], beta_C[i_Zbar, i_Lbar, i_S]
-            )
-            P_C = np.ones_like(C_mesh)
-            P_C /= np.sum(P_C)
-            integrand = omega_C_ZL * P_Z * P_C / A_mesh
-            integrand[np.isnan(integrand)] = 0.0
 
-            # # DEBUG
-            # integrand[Z_mesh < eps] = 0.0
-            # integrand[Z_mesh > 1.0 - eps] = 0.0
+            # Compute the shape parameters
+            alpha_Z = ((Zbar * (1 - Zbar) / sigma2) - 1) * Zbar
+            beta_Z = alpha_Z * (1 - Zbar) / Zbar
+            alpha_L = ((Lbar * (1 - Lbar) / sigma2) - 1) * Lbar
+            beta_L = alpha_L * (1 - Lbar) / Lbar
 
-            # fig, ax = plt.subplots()
-            # c = ax.contourf(P_Z.T, levels=50)
-            # ax.set_xlabel(r"$\overline{Z}$ [-]")
-            # ax.set_ylabel(r"$\overline{C}$ [-]")
-            # fig.colorbar(c)
-            # fig.savefig("figures/P_Z.png", bbox_inches='tight', dpi=300)
+            # Compute the quadrature points and weights
+            Z_int_vec = stats.beta.ppf(uv_vec, alpha_Z, beta_Z)
+            L_int_vec = stats.beta.ppf(uv_vec, alpha_L, beta_L)
 
-            # fig, ax = plt.subplots()
-            # c = ax.contourf(np.log10(P_C.T), levels=50)
-            # ax.set_xlabel(r"$\overline{Z}$ [-]")
-            # ax.set_ylabel(r"$\overline{C}$ [-]")
-            # fig.colorbar(c)
-            # fig.savefig("figures/P_C.png", bbox_inches='tight', dpi=300)
+            # Evaluate the integrand at the quadrature points
+            W_Z_mesh, W_L_mesh = np.meshgrid(W_vec, W_vec, indexing="ij")
+            W_mesh = W_Z_mesh * W_L_mesh
+            Z_int_mesh, L_int_mesh = np.meshgrid(Z_int_vec, L_int_vec, indexing="ij")
+            integrand = omega_C_interp((Z_int_mesh, L_int_mesh))
 
-            # fig, ax = plt.subplots()
-            # c = ax.contourf(np.log10(integrand.T), levels=50)
-            # ax.set_xlabel(r"$\overline{Z}$ [-]")
-            # ax.set_ylabel(r"$\overline{C}$ [-]")
-            # fig.colorbar(c)
-            # fig.savefig("figures/integrand.png", bbox_inches='tight', dpi=300)
+            # Perform the integration
+            result = np.sum(integrand * W_mesh)
 
-            # breakpoint()
-            result = integrate.simpson(
-                integrate.simpson(integrand, x=L_vec, axis=-1), x=Z_vec, axis=-1
-            )
         return (i_Zbar, i_Lbar, i_S, result)
 
     def calc_chemical_sources(self, write=False):
@@ -1070,61 +965,36 @@ class JICModel:
         """
         print("Precomputing chemical sources...")
 
-        # Grid in Z, L dimensions (to be integrated over)
-        n_ZL = 100
-        Z_vec = np.linspace(0.0, 1.0, n_ZL)
-        L_vec = np.linspace(0.0, 1.0, n_ZL)
-        Z_mesh, L_mesh = np.meshgrid(Z_vec, L_vec, indexing="ij")
-        Cmin_mesh = self.fpv_table.lookup("PROG", Z_mesh, 0.0, 0.0)
-        Cmax_mesh = self.fpv_table.lookup("PROG", Z_mesh, 0.0, 1.0)
-        A_mesh = 1 / (Cmax_mesh - Cmin_mesh)
-        B_mesh = -Cmin_mesh / (Cmax_mesh - Cmin_mesh)
-        C_mesh = (L_mesh - B_mesh) / A_mesh
+        # Build omega_C interpolator
+        Z_sample = np.linspace(0.0, 1.0, 100)
+        L_sample = np.linspace(0.0, 1.0, 100)
+        Z_sample_mesh, L_sample_mesh = np.meshgrid(Z_sample, L_sample, indexing="ij")
+        omega_C = self.fpv_table.lookup_direct(
+            "SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh
+        )
+        omega_C_interp = interpolate.RegularGridInterpolator(
+            (Z_sample, L_sample), omega_C, bounds_error=False, fill_value=0.0
+        )
 
         # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
         n_tab = (100, 100, 100)
         self.Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
         self.Lbar_vec = np.linspace(0.0, 1.0, n_tab[1])
-        self.logsigma2_vec = np.linspace(-10.0, -1.0, n_tab[2])
-        Zbar_mesh, Lbar_mesh, logsigma2_mesh = np.meshgrid(
-            self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec, indexing="ij"
-        )
-        sigma2_mesh = 10.0**logsigma2_mesh
-        Cmin_mesh = self.fpv_table.lookup("PROG", Zbar_mesh, 0.0, 0.0)
-        Cmax_mesh = self.fpv_table.lookup("PROG", Zbar_mesh, 0.0, 1.0)
-        Abar_mesh = 1 / (Cmax_mesh - Cmin_mesh)
-        Bbar_mesh = -Cmin_mesh / (Cmax_mesh - Cmin_mesh)
-        Cbar_mesh = (Lbar_mesh - Bbar_mesh) / Abar_mesh
+        self.logsigma2_vec = np.linspace(-4.0, -1.5, n_tab[2])
 
-        # Sample omega_C on Z, L mesh
-        omega_C_ZL = self.fpv_table.lookup("SRC_PROG", Z_mesh, 0.0, L_mesh)
-
-        # Compute PDF shape parameters
-        alpha_Z = ((Zbar_mesh * (1 - Zbar_mesh) / sigma2_mesh) - 1) * Zbar_mesh
-        beta_Z = alpha_Z * (1 - Zbar_mesh) / Zbar_mesh
-        alpha_C = ((Cbar_mesh * (1 - Cbar_mesh) / sigma2_mesh) - 1) * Cbar_mesh
-        beta_C = alpha_C * (1 - Cbar_mesh) / Cbar_mesh
-
-        eps = 1.0e-6
-        alpha_Z = np.maximum(alpha_Z, eps)
-        beta_Z = np.maximum(beta_Z, eps)
-        alpha_C = np.maximum(alpha_C, eps)
-        beta_C = np.maximum(beta_C, eps)
+        uv_vec, W_vec = special.roots_legendre(200)
+        W_vec = W_vec / 2
+        uv_vec = uv_vec / 2 + 0.5
 
         self.omega_C_int = np.zeros(n_tab)
         compute_func = functools.partial(
             self._compute_omega_C_int,
-            Z_mesh=Z_mesh,
-            Zbar_mesh=Zbar_mesh,
-            Z_vec=Z_vec,
-            C_mesh=C_mesh,
-            L_vec=L_vec,
-            A_mesh=A_mesh,
-            omega_C_ZL=omega_C_ZL,
-            alpha_Z=alpha_Z,
-            beta_Z=beta_Z,
-            alpha_C=alpha_C,
-            beta_C=beta_C,
+            Zbar_vec=self.Zbar_vec,
+            Lbar_vec=self.Lbar_vec,
+            logsigma2_vec=self.logsigma2_vec,
+            uv_vec=uv_vec,
+            W_vec=W_vec,
+            omega_C_interp=omega_C_interp,
         )
         tasks = [
             (i_Zbar, i_Lbar, i_S)
@@ -1132,12 +1002,6 @@ class JICModel:
             for i_Lbar in range(n_tab[1])
             for i_S in range(n_tab[2])
         ]
-
-        # Serial version (for debugging)
-        # results = []
-        # for i_Zbar, i_Lbar, i_S in tasks:
-        #     value = compute_func(i_Zbar, i_Lbar, i_S)
-        #     results.append((i_Zbar, i_Lbar, i_S, value))
 
         # Parallel version
         with tqdm_joblib(tqdm(desc="Assembling table", total=len(tasks))):
@@ -1161,7 +1025,9 @@ class JICModel:
             (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
         )
 
-    def get_chemical_sources(self, Z, C):
+    def get_chemical_sources(
+        self, _time: float, state_array: Array, physics: FPVTable, gamma_star: Array
+    ) -> Array:
         """
         This method computes the chemical source terms [1/s] using the FPV table.
         Z: float
@@ -1169,6 +1035,11 @@ class JICModel:
         C: float
             The array of progress variable values at different grid points
         """
+        # Get primitive variables
+        state = physics.conservative_to_primitive(state_array, gamma_star)
+        factor = physics.get_source_progress_variable_compressibility_factor(state)
+
+        # Get the mixture fraction variance profile
         mdot_inj = np.interp(
             self.x,
             np.flip(self.fluid_tips, axis=0)[:, 0],
@@ -1176,8 +1047,18 @@ class JICModel:
         )
         Zvar = self.Z_var_profile_interp((mdot_inj, self.x))
         Zvar = np.maximum(Zvar, 10 ** self.logsigma2_vec.min())
-        L = self.fpv_table.get_normalized_progress_variable(Z, C)
-        return self.omega_C_int_interp((Z, L, np.log10(Zvar)))
+
+        return (
+            factor
+            * state.density
+            * self.omega_C_int_interp(
+                (
+                    state.mixture_fraction,
+                    state.normalized_progress_variable,
+                    np.log10(Zvar),
+                )
+            )
+        )
 
     def get_MIB_profiles(self):
         """
