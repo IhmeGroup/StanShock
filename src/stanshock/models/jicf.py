@@ -890,8 +890,8 @@ class JICModel(RightHandSide):
         """
         rhs = np.zeros_like(state_array)
 
-        rho = state_array[:, 0]
-        rhoZ = state_array[:, 4]
+        rho = state_array[:, 2]
+        rhoZ = state_array[:, 3]
 
         Z = rhoZ / rho
         mdot_inj = np.interp(
@@ -907,7 +907,7 @@ class JICModel(RightHandSide):
 
         # Compute the source term
         rhs[:, 0] = 0.0  # momentum
-        rhs[:, 1] = mdot * self.E_inj  # total non-chemical energy
+        rhs[:, 1] = mdot * self.E_inj  # total energy
         rhs[:, 2] = mdot  # density
         rhs[:, 3] = mdot  # mixture fraction
         rhs[:, 4] = 0.0  # progress variable
