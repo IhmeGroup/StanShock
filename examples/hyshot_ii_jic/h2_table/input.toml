@@ -15,11 +15,11 @@ pressure = 127444.0     # Operating pressure in Pa
 initial_chi_st = 1.0e1  # Initial target scalar dissipation rate
 
 [fuel_inlet]
-composition = { H2 = 1.0 }  # Pure methane
-temperature = 250.0         # Temperature in K
+composition = { H2 = 1.0 }  # Pure hydrogen
+temperature = 300.0         # Temperature in K
 
 [oxidizer_inlet]
-composition = { O2 = 1.0 }  # Air
+composition = { O2 = 0.21, N2 = 0.79 }  # Air
 temperature = 1366.81       # Temperature in K
 
 [solver]
