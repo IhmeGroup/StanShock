@@ -6,13 +6,14 @@ from pathlib import Path
 import cantera as ct
 import matplotlib.pyplot as plt
 import numpy as np
-from scipy import interpolate, optimize
+from scipy import optimize
 
 from stanshock.components.combustor import Combustor
 from stanshock.models.jicf import JICModel
 from stanshock.numerics.boundary_conditions import Inflow
 from stanshock.physics.flamelet import FPVTable
 from stanshock.processing.plot import XTDiagram
+from stanshock.system.geometry import Box
 
 XSMALL_SIZE = 12
 SMALL_SIZE = 14
@@ -223,14 +224,7 @@ x = np.linspace(0, L_const + L_exhaust, N_x)
 h = np.zeros_like(x)
 h[x < L_const] = h_const
 h[x >= L_const] = h_const + (x[x >= L_const] - L_const) * np.tan(theta_exhaust)
-A = h * w
-lnA = np.log(A)
-dlnA_dx_data = np.gradient(lnA, x)
-dlnA_dx_interp = interpolate.interp1d(x, dlnA_dx_data, kind="cubic")
-
-
-def dlnA_dx(t, x):
-    return dlnA_dx_interp(x)
+geometry = Box(x=x, h=h, w=w)
 
 
 # PDF sampling parameters
@@ -409,21 +403,19 @@ jic = JICModel(
 # Initialize and run the simulation
 ss = Combustor(
     x=x,
-    h=h,
-    w=w,
-    dlnA_dx=dlnA_dx,
+    geometry=geometry,
     wall_temperature=300.0,
     include_boundary_layer=True,
     initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,
-    sourceTerms=None,
+    source_terms=None,
     injector=jic,
     cfl=0.5,
     physics=fpv_table,
     reacting=True,
     include_diffusion=False,
-    output_every=10,
-    plot_state_interval=10,
+    output_every=100,
+    plot_state_interval=100,
 )
 
 plot_variables = [

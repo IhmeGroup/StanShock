@@ -50,7 +50,7 @@ class FPVTable(FluidPhysics):
         self.gas = gas
         self.n_scalars = 3
         self.n_scalars_rho_sum = 1
-        self.scalar_names = ["mixture fraction", "progress variable"]
+        self.scalar_names = ["density", "mixture fraction", "progress variable"]
         self.is_flamelet = True
         self.filename = filename
         self.p_correction = p_correction
