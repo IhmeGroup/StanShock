@@ -286,28 +286,12 @@ class Combustor:
             inputs
                 dt=time step
         """
-        # Using mixed-is-burned (MIB)
-        # (r,ru,E,rY)=self.primitiveToConservative(self.r,self.u,self.p,self.Y,self.state.gamma)
-        # Z = rY[:, 1] / r
-        # Q = np.zeros(self.n)
-        # C = rY[:, 2] / r
-        # L = self.physics.get_normalized_progress_variable(Z, C)
-        # e_chem0 = r * self.physics.lookup('E0_CHEM', Z, Q, L)
-        # C1, e_chem1 = self.injector.get_MIB_profiles()
-        # e_chem1 *= r
-        # E1 = E + e_chem0 - e_chem1
-        # rY1 = rY
-        # rY1[:, 2] = r * C1
-        # (r,u,p,Y)=self.conservativeToPrimitive(r,ru,E1,rY1,self.state.gamma)
-
-        # Using FPV
         # initialize
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         # 1st stage of RK2
-        r = y[self.idx_cells, 2]
-        omegaC = r * self.injector.get_chemical_sources(
+        omegaC = self.injector.get_chemical_sources(
             self.t,
             y[self.idx_cells],
             self.physics,
@@ -318,9 +302,8 @@ class Combustor:
         y1[self.idx_cells, 4] += dt * omegaC
 
         # 2nd stage of RK2
-        r1 = y1[self.idx_cells, 2]
-        omegaC1 = r1 * self.injector.get_chemical_sources(
-            self.t,
+        omegaC1 = self.injector.get_chemical_sources(
+            self.t + dt,
             y1[self.idx_cells],
             self.physics,
             gamma_star[self.idx_cells],
@@ -329,9 +312,9 @@ class Combustor:
         y[self.idx_cells, 4] = 0.5 * (
             y[self.idx_cells, 4] + y1[self.idx_cells, 4] + dt * omegaC1
         )
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
         # update properties
+        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
         self.state.temperature = self.physics.get_temperature(self.state)
 
     def advance_chemistry_FRC(self, dt):
@@ -473,13 +456,24 @@ class Combustor:
 
         # 1st stage of RK2
         dydt = self.source_terms.source(
-            self.t, y[self.idx_cells], self.physics, gamma_star, e0_star
+            self.t,
+            y[self.idx_cells],
+            self.physics,
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
         )
         y1 = y[self.idx_cells] + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, gamma_star, e0_Star)
 
         # 2nd stage of RK2
-        dydt = self.source_terms(self.t + dt, y1, self.physics, gamma_star, e0_star)
+        dydt = self.source_terms.source(
+            self.t + dt,
+            y1,
+            self.physics,
+            gamma_star[self.idx_cells],
+            e0_star[self.idx_cells],
+        )
+
         y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1 + dt * dydt)
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
@@ -514,7 +508,7 @@ class Combustor:
 
         # 2nd stage of RK2
         dydt = self.injector.source(
-            self.t,
+            self.t + dt,
             y1,
             self.physics,
             gamma_star[self.idx_cells],

@@ -47,7 +47,7 @@ class PadCells(GhostCell):
 
     def update(self, time: float, target: Array) -> Array:
         _: float = time
-        target[self.idx_exterior, :] = target[self.idx_interior, :]
+        target[self.idx_exterior] = target[self.idx_interior]
 
         return target
 
@@ -68,7 +68,7 @@ class Periodic(GhostCell):
 
     def update(self, time: float, target: Array) -> Array:
         _: float = time
-        target[self.idx_exterior, :] = target[self.idx_interior, :]
+        target[self.idx_exterior] = target[self.idx_interior]
 
         return target
 
@@ -89,8 +89,8 @@ class Symmetry(GhostCell):
 
     def update(self, time: float, target: Array) -> Array:
         _: float = time
-        target[self.idx_exterior, :] = target[self.idx_interior, :]
-        target[self.idx_exterior, 1] = -target[self.idx_interior, 1]
+        target[self.idx_exterior] = target[self.idx_interior]
+        target[self.idx_exterior][1] = -target[self.idx_interior][1]
 
         return target
 
@@ -117,9 +117,7 @@ class Extrapolate(RiemannFlux):
         target.density[self.idx_exterior] = target.density[self.idx_interior]
         target.velocity[self.idx_exterior] = target.velocity[self.idx_interior]
         target.pressure[self.idx_exterior] = target.pressure[self.idx_interior]
-        target.composition[self.idx_exterior, :] = target.composition[
-            self.idx_interior, :
-        ]
+        target.composition[self.idx_exterior] = target.composition[self.idx_interior]
 
         return target
 
@@ -161,7 +159,7 @@ class Inflow(Extrapolate):
             target.pressure[self.idx_exterior] = self.reference_state[2]
         if self.reference_state[3] is not None:
             assert target.composition is not None
-            target.composition[self.idx_exterior, :] = self.reference_state[3]
+            target.composition[self.idx_exterior] = self.reference_state[3]
 
         return target
 
@@ -182,7 +180,7 @@ class DirichletInflow(SpecifiedFlux):
 
     def update(self, time: float, target: Array) -> Array:
         _: float = time
-        target[self.idx_boundary_face, :] = self.reference_flux
+        target[self.idx_boundary_face] = self.reference_flux
 
         return target
 

@@ -34,7 +34,16 @@ class FPVTable(FluidPhysics):
     Class to read an FPV table from an HDF5 file and perform lookups.
     """
 
-    def __init__(self, filename, gas, ox_def=None, fuel_def=None, prog_def=None):
+    def __init__(
+        self,
+        filename,
+        gas,
+        ox_def=None,
+        fuel_def=None,
+        prog_def=None,
+        p_correction=False,
+        T_correction=False,
+    ):
         """
         Initialize the FPVTable object by reading the HDF5 file.
         """
@@ -44,6 +53,8 @@ class FPVTable(FluidPhysics):
         self.scalar_names = ["mixture fraction", "progress variable"]
         self.is_flamelet = True
         self.filename = filename
+        self.p_correction = p_correction
+        self.T_correction = T_correction
         with h5py.File(filename, "r") as f:
             self.P = f["Header"]["Doubles"]["Double_0"].attrs["Value"][0]
             self.Z = f["Coordinates"]["Coor_0"][()]
@@ -216,6 +227,11 @@ class FPVTable(FluidPhysics):
         return state.thermal_conductivity
 
     def get_temperature(self, state: FluidState):
+        """
+        Compute the temperature at the given Z, Q, L and e values.
+        Note: Using sensible energy instead of internal energy because
+        StanShock transports the total non-chemical energy.
+        """
         R = self.get_specific_gas_constant(state)
         if state.pressure is not None:
             state.temperature = state.pressure / (state.density * R)
@@ -277,3 +293,18 @@ class FPVTable(FluidPhysics):
 
     def get_source_terms(self, state):
         return self.lookup("SRC_PROG", state)
+
+    def get_source_progress_variable_compressibility_factor(self, state: FluidState):
+        """
+        Compute the scaling factor for the progress variable source term at the given Z, Q, L, p and T values.
+        """
+        factor = 1.0
+        if self.p_correction:
+            factor *= state.pressure / self.P
+        if self.T_correction:
+            if state.temperature is None:
+                self.get_temperature(state)
+            TA = self.lookup("TA", state)
+            T0 = self.lookup("T0", state)
+            factor *= np.exp(-TA * ((1 / state.temperature) - (1 / T0)))
+        return factor
