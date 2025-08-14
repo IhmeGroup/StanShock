@@ -6,7 +6,7 @@
 # solution_index = 50
 
 [mechanism]
-file = "../h2_boivin_9sp_12r_mod.yaml"  # Path to mechanism file
+file = "../../../data/mechanisms/h2_boivin_9sp_12r_mod.yaml"  # Path to mechanism file
 transport_model = "multicomponent"   # Transport model: "unity-Lewis-number", "mixture-averaged", or "multicomponent"
 prog_def = { H2O = 1.0 }             # Progress variable definition
 

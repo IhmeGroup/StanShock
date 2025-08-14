@@ -463,14 +463,16 @@ class Combustor:
         y = self.physics.primitive_to_conservative(self.state)
 
         # 1st stage of RK2
-        dydt = self.source_terms(
-            self.t, y[self.idx_cells], self.state.gamma, self.geometry.x
+        dydt = self.source_terms.source(
+            self.t, y[self.idx_cells], self.state.gamma[self.idx_cells], self.geometry.x
         )
         y1 = y[self.idx_cells] + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, self.state.gamma)
 
         # 2nd stage of RK2
-        dydt = self.source_terms(self.t + dt, y1, self.state.gamma, self.geometry.x)
+        dydt = self.source_terms.source(
+            self.t + dt, y1, self.state.gamma[self.idx_cells], self.geometry.x
+        )
         y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1 + dt * dydt)
         self.state = self.physics.conservative_to_primitive(y, self.state.gamma)
 

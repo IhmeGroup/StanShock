@@ -56,7 +56,7 @@ figdir.mkdir(exist_ok=True)
 (figdir / "anim").mkdir(exist_ok=True)
 
 # Chemistry
-mech = "h2_boivin_9sp_12r_mod.yaml"
+mech = "../../data/mechanisms/h2_boivin_9sp_12r_mod.yaml"
 table_file = "./h2_table/flamelet_results/H2_O2_p01_3_tf0250_to1367_200x2x200.h5"
 gas = ct.Solution(mech)
 X_ox = "O2:0.21,N2:0.79"
