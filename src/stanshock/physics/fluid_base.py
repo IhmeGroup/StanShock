@@ -16,6 +16,7 @@ class FluidState:
     density: Array | None = None
     temperature: Array | None = None
     pressure: Array | None = None
+    internal_energy: Array | None = None
     mass_fractions: Array | None = None
     mole_fractions: Array | None = None
     mixture_fraction: Array | None = None
@@ -30,6 +31,9 @@ class FluidState:
     sound_speed: Array | None = None
 
     velocity: Array | None = None
+
+    gamma_star: Array | None = None
+    e0_star: Array | None = None
 
     _cache_valid: bool = False
 
@@ -65,6 +69,16 @@ class FluidPhysics(ABC):
     def get_gamma(self, state: FluidState):
         """Compute specific heat ratio, gamma."""
 
+    def get_double_flux_variables(self, state: FluidState) -> tuple[Array, Array]:
+        """Compute effective specific heat ratio, gamma*, and reference energy, e_0^*."""
+        # Valid for any ideal gas, g* = rho*c^2/p = g
+        state.gamma_star = self.get_gamma(state)
+        state.e0_star = state.internal_energy - state.pressure / (
+            state.density * (state.gamma_star - 1.0)
+        )
+
+        return state.gamma_star, state.e0_star
+
     @abstractmethod
     def get_mu(self, state: FluidState):
         """Compute dynamic viscosity."""
@@ -80,6 +94,14 @@ class FluidPhysics(ABC):
     @abstractmethod
     def get_pressure(self, state: FluidState):
         """Compute pressure of the gas."""
+
+    @abstractmethod
+    def get_internal_energy(self, state: FluidState):
+        """Compute internal energy of the gas."""
+
+    @abstractmethod
+    def get_species_enthalpies(self, state: FluidState):
+        """Compute total enthalpies of each species."""
 
     @abstractmethod
     def get_sound_speed(self, state: FluidState):
@@ -179,9 +201,13 @@ class FluidPhysics(ABC):
 
     def primitive_to_conservative(self, state: FluidState):
         """Transform primitive variables into vector of conservatives, accounting for chemical contributions."""
-        # Compute total non-chemical energy
-        sensible_energy = state.pressure / (state.density * (state.gamma - 1.0))
-        total_energy = sensible_energy + 0.5 * state.velocity**2
+        # Compute total energy including chemical contributions
+        self.set_state(state)
+
+        e_int = state.internal_energy
+        if e_int is None:
+            e_int = self.get_internal_energy(state)
+        total_energy = e_int + 0.5 * state.velocity**2
 
         return np.concatenate(
             (
@@ -192,9 +218,38 @@ class FluidPhysics(ABC):
             axis=-1,
         )
 
-    @abstractmethod
-    def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
-        """Transform conservative variables into primitives."""
+    def conservative_to_primitive(
+        self,
+        state_array: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> FluidState:
+        """Transform conservative variables into primitives, accounting for chemical contributions."""
+        ru = state_array[..., 0]
+        re_t = state_array[..., 1]
+        rY = state_array[..., 2:]
+
+        # Enforce non-negativity
+        np.clip(rY, 0, None, out=rY)
+
+        r = rY[..., : self.n_scalars_rho_sum].sum(axis=-1)
+        u = ru / r
+        e_int = (re_t / r) - 0.5 * u**2.0
+        Y = rY / r[..., None]
+
+        state = FluidState(
+            shape=r.shape,
+            density=r,
+            velocity=u,
+            internal_energy=e_int,
+            composition=Y,
+        )
+
+        if gamma_star is not None:
+            # Compute pressure using double-flux method
+            state.pressure = (gamma_star - 1.0) * r * (e_int - e0_star)
+
+        return self.set_state(state)
 
     @abstractmethod
     def get_source_terms(self, state: FluidState):

@@ -127,6 +127,7 @@ def main(
         d_outer=d_outer,
         dlnA_dx=dlnA_dx,
     )
+    ss.state.gamma = ss.physics.get_gamma(ss.state)
 
     # Solve
     t0 = time.perf_counter()

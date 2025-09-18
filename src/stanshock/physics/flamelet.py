@@ -5,7 +5,6 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array
 
 
 class TableVariable:
@@ -51,7 +50,7 @@ class FPVTable(FluidPhysics):
         self.gas = gas
         self.n_scalars = 3
         self.n_scalars_rho_sum = 1
-        self.scalar_names = ["mixture fraction", "progress variable"]
+        self.scalar_names = ["density", "mixture fraction", "progress variable"]
         self.is_flamelet = True
         self.filename = filename
         self.p_correction = p_correction
@@ -172,6 +171,9 @@ class FPVTable(FluidPhysics):
         """
         Compute the specific heat ratio at the given Z, Q, L and T values.
         """
+        if state.temperature is None:
+            self.get_temperature(state)
+
         gamma0 = self.lookup("GAMMA0", state)
         ag = self.lookup("AGAMMA", state)
         T0 = self.lookup("T0", state)
@@ -231,14 +233,55 @@ class FPVTable(FluidPhysics):
         StanShock transports the total non-chemical energy.
         """
         R = self.get_specific_gas_constant(state)
-        state.temperature = state.pressure / (R * state.density)
-
+        if state.pressure is not None:
+            state.temperature = state.pressure / (state.density * R)
+        else:
+            T0 = self.lookup("T0", state)
+            e0 = self.lookup("E0", state)
+            gamma0 = self.lookup("GAMMA0", state)
+            ag = self.lookup("AGAMMA", state)
+            state.temperature = T0 + ((gamma0 - 1) / ag) * (
+                np.exp(ag * (state.internal_energy - e0) / R) - 1
+            )
         return state.temperature
 
     def get_pressure(self, state: FluidState):
         R = self.get_specific_gas_constant(state)
         state.pressure = state.temperature * R * state.density
         return state.pressure
+
+    def get_internal_energy(self, state: FluidState):
+        if state.e0_star is not None:
+            state.internal_energy = (
+                state.pressure / (state.density * (state.gamma_star - 1.0))
+                + state.e0_star
+            )
+        else:
+            T = state.temperature
+            if T is None:
+                if state.pressure is None:
+                    msg = (
+                        "Fluid state not fully defined. "
+                        "Temperature, pressure, and internal energy are not set."
+                    )
+                    raise ValueError(msg)
+                T = self.get_temperature(state)
+
+            R = self.get_specific_gas_constant(state)
+            T0 = self.lookup("T0", state)
+            e0 = self.lookup("E0", state)
+            gamma0 = self.lookup("GAMMA0", state)
+            ag = self.lookup("AGAMMA", state)
+
+            state.internal_energy = e0 + R / ag * np.log(
+                1.0 + ag * (T - T0) / (gamma0 - 1.0)
+            )
+
+        return state.internal_energy
+
+    def get_species_enthalpies(self, state: FluidState):
+        state = self.set_state(state)
+        return 0.0
 
     def get_sound_speed(self, state):
         if state.gamma is None:
@@ -247,39 +290,6 @@ class FPVTable(FluidPhysics):
             self.get_pressure(state)
         state.sound_speed = np.sqrt(state.gamma * state.pressure / state.density)
         return state.sound_speed
-
-    def conservative_to_primitive(self, state_array: Array, gamma: Array) -> FluidState:
-        """Transform conservative variables into primitives, accounting for chemical contributions."""
-        ru = state_array[..., 0]
-        rE = state_array[..., 1]
-        rY = np.clip(state_array[..., 2:], a_min=0.0, a_max=None)
-
-        r = rY[..., : self.n_scalars_rho_sum].sum(axis=-1)
-
-        u = ru / r
-        Y = rY / r[..., None]
-        # ^ By definition, Y[..., 0] = 1.0 such that the first conservative scalar is the density.
-
-        # Get Z, C, and L
-        Z = Y[..., 1]
-        C = Y[..., 2]
-        L = self.get_normalized_progress_variable(Z, C)
-
-        # Now get velocity and pressure
-        u = ru / r
-        p = (gamma - 1.0) * (rE - 0.5 * r * u**2.0)
-        # TODO - ^ update this: use Saghafian to get temperature, then use P = rho * R * T
-
-        return FluidState(
-            shape=r.shape,
-            density=r,
-            velocity=u,
-            pressure=p,
-            composition=Y,
-            mixture_fraction=Z,
-            progress_variable=C,
-            normalized_progress_variable=L,
-        )
 
     def get_source_terms(self, state):
         return self.lookup("SRC_PROG", state)

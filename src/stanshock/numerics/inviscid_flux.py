@@ -21,12 +21,17 @@ double2D = double[:, :]
 double3D = double[:, :, :]
 
 # Signature for Riemann solvers
-RiemannSolver: TypeAlias = Callable[[Array, Array, Array, Array, Array], Array]
+RiemannSolver: TypeAlias = Callable[[Array, Array, Array, Array, Array, Array], Array]
 
 
-@njit(double2D(double2D, double2D, double2D, double3D, double1D))
+@njit(double2D(double2D, double2D, double2D, double3D, double1D, double1D))
 def lax_friedrichs_flux(
-    rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array
+    rLR: Array,
+    uLR: Array,
+    pLR: Array,
+    YLR: Array,
+    gamma: Array,
+    e0: Array,
 ) -> Array:
     """
     This method computes the flux at each interface
@@ -36,7 +41,8 @@ def lax_friedrichs_flux(
             pLR=array containing left and right pressure states [nLR,nFaces]
             YLR=array containing left and right scalar states
                 [nLR,nFaces,nSc]
-            gamma= array containing the specific heat [nFaces]
+            gamma=array containing the specific heat [nFaces]
+            eo=array containing the reference internal energy [nFaces]
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
@@ -62,7 +68,7 @@ def lax_friedrichs_flux(
             FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
             FLR[K, iFace, 1] = uLR[K, iFace] * (
                 gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace]
-                + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
+                + rLR[K, iFace] * (e0[iFace] + 0.5 * uLR[K, iFace] ** 2.0)
             )
             for kSc in range(nSc):
                 FLR[K, iFace, mn + kSc] = (
@@ -75,9 +81,8 @@ def lax_friedrichs_flux(
     for iFace in range(nFaces):
         for K in range(nLR):
             U[K, 0] = rLR[K, iFace] * uLR[K, iFace]
-            U[K, 1] = (
-                pLR[K, iFace] / (gamma[iFace] - 1.0)
-                + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
+            U[K, 1] = pLR[K, iFace] / (gamma[iFace] - 1.0) + rLR[K, iFace] * (
+                e0[iFace] + 0.5 * uLR[K, iFace] ** 2.0
             )
             for kSc in range(nSc):
                 U[K, mn + kSc] = rLR[K, iFace] * YLR[K, iFace, kSc]
@@ -87,8 +92,10 @@ def lax_friedrichs_flux(
     return F
 
 
-@njit(double2D(double2D, double2D, double2D, double3D, double1D))
-def hllc_flux(rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array) -> Array:
+@njit(double2D(double2D, double2D, double2D, double3D, double1D, double1D))
+def hllc_flux(
+    rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array, e0: Array
+) -> Array:
     """
     This method computes the flux at each interface
         inputs:
@@ -97,7 +104,8 @@ def hllc_flux(rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array) -> A
             pLR=array containing left and right pressure states [nLR,nFaces]
             YLR=array containing left and right scalar states
                 [nLR,nFaces,nSc]
-            gamma= array containing the specific heat [nFaces]
+            gamma=array containing the specific heat [nFaces]
+            eo=array containing the reference internal energy [nFaces]
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
@@ -155,7 +163,7 @@ def hllc_flux(rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array) -> A
             FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
             FLR[K, iFace, 1] = uLR[K, iFace] * (
                 gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace]
-                + 0.5 * rLR[K, iFace] * uLR[K, iFace] ** 2.0
+                + rLR[K, iFace] * (e0[iFace] + 0.5 * uLR[K, iFace] ** 2.0)
             )
             for kSc in range(nSc):
                 FLR[K, iFace, mn + kSc] = (
@@ -186,7 +194,7 @@ def hllc_flux(rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array) -> A
             SFace = SLR[K, iFace]
             # conservative variable vector
             U[0] = rFace * uFace
-            U[1] = pFace / (gammaFace - 1.0) + 0.5 * rFace * uFace**2.0
+            U[1] = pFace / (gammaFace - 1.0) + rFace * (e0[iFace] + 0.5 * uFace**2.0)
             for kSc in range(nSc):
                 U[mn + kSc] = rFace * YFace[kSc]
             # star conservative variable vector
@@ -219,12 +227,20 @@ class InviscidFlux(RightHandSide):
         self.dx = dx
 
     def source(
-        self, time: float, state_array: Array, physics: FluidPhysics, gamma_star: Array
+        self,
+        time: float,
+        state_array: Array,
+        physics: FluidPhysics,
+        gamma_star: Array,
+        e0_star: Array,
     ) -> Array:
         state_array = self.boundary_conditions.update_ghost_layers(time, state_array)
 
-        state: FluidState = physics.conservative_to_primitive(state_array, gamma_star)
-        state.gamma = gamma_star
+        state: FluidState = physics.conservative_to_primitive(
+            state_array, gamma_star, e0_star
+        )
+        state.gamma_star = gamma_star
+        state.e0_star = e0_star
 
         face_states: FluidState = self.face_extrapolator(state)
         face_states = self.boundary_conditions.update_face_states(time, face_states)
@@ -238,21 +254,24 @@ class InviscidFlux(RightHandSide):
         assert face_states.velocity is not None
         assert face_states.pressure is not None
         assert face_states.composition is not None
-        assert face_states.gamma is not None
+        assert face_states.gamma_star is not None
+        assert face_states.e0_star is not None
 
         left_face_flux: Array = self.riemann_solver(
             face_states.density,
             face_states.velocity,
             face_states.pressure,
             face_states.composition,
-            face_states.gamma[1, :],
+            face_states.gamma_star[1, :],
+            face_states.e0_star[1, :],
         )
         right_face_flux: Array = self.riemann_solver(
             face_states.density,
             face_states.velocity,
             face_states.pressure,
             face_states.composition,
-            face_states.gamma[0, :],
+            face_states.gamma_star[0, :],
+            face_states.e0_star[0, :],
         )
 
         return cast(

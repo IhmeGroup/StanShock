@@ -133,7 +133,8 @@ class HydrogenInjection(RightHandSide):
         self.L_src = 30.0e-3
         self.scale_factor = 3.960715337483353
 
-    def source(self, t, _state_array, _gamma, x):
+    def source(self, t, _state_array, _physics, _gamma_star, _e0_star):
+        x = self.geometry.x
         rho_f = self.rho_f
         U_f = self.U_f
         A_f = self.A_f

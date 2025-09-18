@@ -32,19 +32,20 @@ class AreaChange(RightHandSide):
         state_array: Array,
         physics: FluidPhysics,
         gamma_star: Array,
+        e0_star: Array,
         dt: float,
     ) -> Array:
         if self.no_area_change:
             return np.zeros((1,))
 
-        # Compute the density from the state array
-        rY0 = state_array[:, 2:]
-        r0 = rY0[..., : physics.n_scalars_rho_sum].sum(axis=-1)
-        Y0 = rY0 / r0[..., None]
+        state = physics.conservative_to_primitive(state_array, gamma_star, e0_star)
+        Y0 = state.composition
 
-        state0_compact = np.zeros((state_array.shape[0], 3))
-        state0_compact[:, 0] = r0
-        state0_compact[:, 1:] = state_array[:, :2]  # ru and rE
+        state0_compact = np.zeros((state_array.shape[0], 4))
+        state0_compact[:, 0] = state.density
+        state0_compact[:, 1] = state_array[:, 0]
+        state0_compact[:, 2] = state_array[:, 1]
+        state0_compact[:, 3] = state.pressure
 
         # Divide domain between explicit and implicit source terms
         idx_explicit: Index = np.arange(self.geometry.x.shape[0], dtype=np.int64)
@@ -78,19 +79,19 @@ class AreaChange(RightHandSide):
 
                 # Store RHS source term
                 rhs_compact: Array = (self.integrator.y - y0) / dt
-                rhs[idx_implicit, 0:2] += rhs_compact[:, 1:]  # ru and rE
+                rhs[idx_implicit, 0:2] += rhs_compact[:, 1:]  # ru and re_t
                 rhs[idx_implicit, 2:] += (
                     rhs_compact[:, 0:1] * Y0[idx_implicit, :]
                 )  # rY sources
 
         # Add slow source terms
         state: FluidState = physics.conservative_to_primitive(
-            state_array, gamma=gamma_star
+            state_array, gamma_star=gamma_star, e0_star=e0_star
         )
         rhs_compact = self.source_slow(
             time=time, state0_compact=state0_compact, state=state, idx=idx_explicit
         )
-        rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:]  # ru and rE
+        rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:3]  # ru and re_t
         rhs[idx_explicit, 2:] += (
             rhs_compact[idx_explicit, 0:1] * Y0[idx_explicit, :]
         )  # rY sources
@@ -127,12 +128,12 @@ class AreaChange(RightHandSide):
         """Fast source terms for quasi-1D geometry."""
         # Unpack the input and initialize
         x: Array = args[0]
-        gamma: Array = args[1]
+        # gamma_star: Array = args[1]
         n: int = len(x)
         r: Array = y[0:n]
         ru: Array = y[n : 2 * n]
         rE: Array = y[2 * n : 3 * n]
-        p: float = (gamma - 1.0) * (rE - 0.5 * ru**2 / r)
+        p: Array = y[3 * n : 4 * n]
         rhs: Array = np.zeros_like(y)
 
         # create quasi-1D right hand side
@@ -154,12 +155,12 @@ class AreaChange(RightHandSide):
         self, time: float, y: Array, args: tuple[Array, Array]
     ) -> Array:
         x: Array = args[0]
-        gamma: Array = args[1]
+        gamma_star: Array = args[1]
         n: int = len(x)
         r: Array = y[0:n]
         ru: Array = y[n : 2 * n]
         # rE: Array = y[2 * n : 3 * n]
-        # p = (gamma - 1) * (rE - 0.5 * ru**2 / r)
+        # p = (gamma_star - 1) * (rE - r*e0_star - 0.5 * ru**2 / r)
 
         dlnAdt: Array | float = (
             self.geometry.dlnA_dt(time, x) if self.geometry.dlnA_dt is not None else 0.0
@@ -173,7 +174,7 @@ class AreaChange(RightHandSide):
         # Diagonal entries per variable
         J_diag[0:n] = -dlnAdt  # ∂R/∂ρ  # noqa: RUF003
         J_diag[n : 2 * n] = -dlnAdt  # ∂R/∂(ρu)  # noqa: RUF003
-        J_diag[2 * n : 3 * n] = -dlnAdt - (ru / r) * gamma * dlnAdx  # ∂R/∂E
+        J_diag[2 * n : 3 * n] = -dlnAdt - (ru / r) * gamma_star * dlnAdx  # ∂R/∂E
         return J_diag.reshape(
             1, 3 * n
         )  # shape (1, 3n): banded with 0 lower and upper bandwidth

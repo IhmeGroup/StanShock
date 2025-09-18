@@ -882,6 +882,7 @@ class JICModel(RightHandSide):
         state_array: Array,
         _physics: FluidPhysics,
         _gamma_star: Array,
+        _e0_star: Array,
     ) -> Array:
         """
         This method computes a fuel injector source term to target the desired
@@ -889,8 +890,8 @@ class JICModel(RightHandSide):
         """
         rhs = np.zeros_like(state_array)
 
-        rho = state_array[:, 0]
-        rhoZ = state_array[:, 4]
+        rho = state_array[:, 2]
+        rhoZ = state_array[:, 3]
 
         Z = rhoZ / rho
         mdot_inj = np.interp(
@@ -906,7 +907,7 @@ class JICModel(RightHandSide):
 
         # Compute the source term
         rhs[:, 0] = 0.0  # momentum
-        rhs[:, 1] = mdot * self.E_inj  # total non-chemical energy
+        rhs[:, 1] = mdot * self.E_inj  # total energy
         rhs[:, 2] = mdot  # density
         rhs[:, 3] = mdot  # mixture fraction
         rhs[:, 4] = 0.0  # progress variable
@@ -1026,7 +1027,12 @@ class JICModel(RightHandSide):
         )
 
     def get_chemical_sources(
-        self, _time: float, state_array: Array, physics: FPVTable, gamma_star: Array
+        self,
+        _time: float,
+        state_array: Array,
+        physics: FPVTable,
+        gamma_star: Array,
+        e0_star: Array,
     ) -> Array:
         """
         This method computes the chemical source terms [1/s] using the FPV table.
@@ -1036,7 +1042,7 @@ class JICModel(RightHandSide):
             The array of progress variable values at different grid points
         """
         # Get primitive variables
-        state = physics.conservative_to_primitive(state_array, gamma_star)
+        state = physics.conservative_to_primitive(state_array, gamma_star, e0_star)
         factor = physics.get_source_progress_variable_compressibility_factor(state)
 
         # Get the mixture fraction variance profile
