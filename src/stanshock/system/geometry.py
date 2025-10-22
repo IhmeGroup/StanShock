@@ -198,6 +198,9 @@ class Cylinder(Geometry):
         n_ghost_layers: int = 0,
     ) -> None:
         self.xf: Array = xf
+        if d_inner is None:
+            d_inner = 0.0
+
         # Set up functional form of inner and outer diameters
         self.d_outer: SpatioTemporalFunction = self.to_spatiotemporal(value=d_outer)
         self.d_inner: SpatioTemporalFunction = self.to_spatiotemporal(value=d_inner)
