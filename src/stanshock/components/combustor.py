@@ -23,6 +23,7 @@ from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.processing.initialize import (
     initialize_constant,
     initialize_diffuse_interface,
+    initialize_isentropic,
     initialize_riemann_problem,
 )
 from stanshock.processing.plot import plot_state
@@ -136,6 +137,10 @@ class Combustor:
             )
         elif self.initialization[0].lower() == "diffuse_interface":
             self.state = initialize_diffuse_interface(
+                self.geometry, self.physics, *self.initialization[1:]
+            )
+        elif self.initialization[0].lower() == "isentropic":
+            self.state = initialize_isentropic(
                 self.geometry, self.physics, *self.initialization[1:]
             )
 

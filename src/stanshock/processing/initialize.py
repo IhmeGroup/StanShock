@@ -6,6 +6,7 @@ import numpy as np
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array
 from stanshock.system.geometry import Geometry
+from stanshock.utils.isentropic import mach_from_area_ratio, property_ratios
 
 
 def smoothing_function(
@@ -195,3 +196,208 @@ def initialize_diffuse_interface(
         gamma=gamma,
         composition=composition,
     )
+
+
+def initialize_isentropic(
+    geometry: Geometry,
+    physics: FluidPhysics,
+    inflow_state: ct.Solution,
+    throat_area: float | None = None,
+    subsonic_inflow: bool = True,
+    subsonic_outflow: bool = False,
+) -> FluidState:
+    """
+    Applies isentropic flow relations to set initial conditions.
+
+    Note that this formulation is only valid for a flow with constant specific
+    heat ratio. It could be extended for non-ideal gas equations of state
+    """
+    # Get cross-sectional area from the geometry
+    x = geometry.x
+    area = geometry.area(0.0, x)
+    assert isinstance(area, np.ndarray)
+
+    # If throat area is not given, assume choked flow
+    min_area: float = area.min()
+    throat_area = min_area if throat_area is None else min(min_area, throat_area)
+
+    # Get inflow properties for the gas
+    g = inflow_state.cp / inflow_state.cv
+    P_in = inflow_state.P
+    rho_in = inflow_state.density_mass
+    composition = physics.get_composition(inflow_state.Y)
+
+    # Get the permissible subsonic and supersonic Mach numbers throughout
+    # the domain from the area ratio
+    area_ratio = area / throat_area
+    area_ratio_min = area_ratio.min()
+    choked_flow = area_ratio_min <= 1.0
+    if choked_flow:
+        # Adjust throat area based on choked flow - will affect requested boundary conditions
+        area_ratio /= area_ratio_min
+        throat_area /= area_ratio_min
+    else:
+        subsonic_outflow = subsonic_inflow
+
+    # Solve for allowable Mach numbers corresponding to given area ratio
+    subsonic_mach: Array = mach_from_area_ratio(area_ratio, g, subsonic=True)
+    supersonic_mach: Array = mach_from_area_ratio(area_ratio, g, subsonic=False)
+
+    # Combine into one mach profile
+    mach = subsonic_mach
+    if subsonic_inflow != subsonic_outflow:
+        idx = np.argmin(area_ratio)
+
+        if subsonic_inflow:
+            mach[idx:] = supersonic_mach[idx:]
+        else:
+            mach[:idx] = supersonic_mach[:idx]
+    elif not subsonic_inflow and not subsonic_outflow:
+        mach = supersonic_mach
+
+    # Get stagnation properties based on inflow
+    _, inflow_Pratio, inflow_rhoratio = property_ratios(mach[0], g)
+
+    # Get properties throughout
+    _, Pratio_profile, rhoratio_profile = property_ratios(mach, g)
+
+    n = geometry.n
+    state = FluidState(
+        shape=(n,),
+        pressure=P_in / inflow_Pratio * Pratio_profile,
+        density=rho_in / inflow_rhoratio * rhoratio_profile,
+        gamma=g * np.ones((n,)),
+        composition=np.broadcast_to(composition, (n, composition.shape[0])).copy(),
+    )
+    state.velocity = mach * physics.get_sound_speed(state)
+
+    return state
+
+
+def initialize_isentropic_total(
+    geometry: Geometry,
+    physics: FluidPhysics,
+    total_state: ct.Solution,
+    inflow_mach: float | None = None,
+    inflow_pressure: float | None = None,
+    outflow_pressure: float | None = None,
+    throat_area: float | None = None,
+    subsonic_inflow: bool = True,
+    subsonic_outflow: bool = True,
+) -> FluidState:
+    """
+    Applies isentropic flow relations to set initial conditions.
+
+    Note that this formulation is only valid for a flow with constant specific
+    heat ratio. It could be extended for non-ideal gas equations of state
+    """
+    # Get cross-sectional area from the geometry
+    x = geometry.x
+    area = geometry.area(0.0, x)
+    assert isinstance(area, np.ndarray)
+
+    # Get stagnation properties for the gas
+    g = total_state.cp / total_state.cv
+    Pt = total_state.P
+    Tt = total_state.T
+    rhot = total_state.density_mass
+    composition = physics.get_composition(total_state.Y)
+
+    # Determine throat area from given inputs
+    inputs_done = False
+    too_many_inputs_prefix = "Too many inputs specified. "
+    error_msg = "Must specify one of inflow_velocity, inflow_pressure, outflow_pressure, or throat area."
+
+    if throat_area is not None:
+        inputs_done = True
+
+    if inflow_mach is not None:
+        Tratio, _, _ = property_ratios(inflow_mach, g)
+        inflow_area = area[0]
+        throat_area = (
+            inflow_area
+            * inflow_mach
+            * (2.0 * Tratio / (g + 1)) ** (0.5 * (g + 1) / (g - 1))
+        )
+        if inputs_done:
+            raise ValueError(too_many_inputs_prefix + error_msg)
+        inputs_done = True
+
+    if inflow_pressure is not None:
+        Pratio = inflow_pressure / Pt
+        Tratio = Pratio ** ((g - 1.0) / g)
+        inflow_mach = np.sqrt(2.0 * (1.0 / Tratio - 1.0) / (g - 1.0))
+        inflow_area = area[0]
+        throat_area = (
+            inflow_area
+            * inflow_mach
+            * (2.0 * Tratio / (g + 1)) ** (0.5 * (g + 1) / (g - 1))
+        )
+        if inputs_done:
+            raise ValueError(too_many_inputs_prefix + error_msg)
+        inputs_done = True
+
+    if outflow_pressure is not None:
+        Pratio = outflow_pressure / Pt
+        Tratio = Pratio ** ((g - 1.0) / g)
+        outflow_mach = np.sqrt(2.0 * (1.0 / Tratio - 1.0) / (g - 1.0))
+        outflow_area = area[-1]
+        throat_area = (
+            outflow_area
+            * outflow_mach
+            * (2.0 * Tratio / (g + 1)) ** (0.5 * (g + 1) / (g - 1))
+        )
+        if inputs_done:
+            raise ValueError(too_many_inputs_prefix + error_msg)
+        inputs_done = True
+
+    if not inputs_done:
+        raise ValueError(error_msg)
+
+    # Get the permissible subsonic and supersonic Mach numbers throughout
+    # the domain from the area ratio
+    assert isinstance(throat_area, float)
+    area_ratio = area / throat_area
+
+    # Check if flow is choked
+    area_ratio_min = area_ratio.min()
+    choked_flow = area_ratio_min <= 1.0
+    if choked_flow:
+        # Adjust throat area based on choked flow - will affect requested boundary conditions
+        area_ratio /= area_ratio_min
+        throat_area /= area_ratio_min
+
+    # Solve for allowable Mach numbers corresponding to given area ratio
+    subsonic_mach: Array = mach_from_area_ratio(area_ratio, g, subsonic=True)
+    supersonic_mach: Array = mach_from_area_ratio(area_ratio, g, subsonic=False)
+
+    # Combine into one mach profile
+    mach = subsonic_mach
+    if subsonic_inflow != subsonic_outflow:
+        if not choked_flow:
+            msg = f"Subsonic-supersonic transition requested, but flow is not choked. {area_ratio_min = }"
+            raise ValueError(msg)
+        idx = np.argmin(area_ratio)
+
+        if subsonic_inflow:
+            mach[idx:] = supersonic_mach[idx:]
+        else:
+            mach[:idx] = supersonic_mach[:idx]
+    elif not subsonic_inflow and not subsonic_outflow:
+        mach = supersonic_mach
+
+    # Get properties throughout
+    Tratio_profile, Pratio_profile, rhoratio_profile = property_ratios(mach, g)
+
+    n = geometry.n
+    state = FluidState(
+        shape=(n,),
+        temperature=Tt * Tratio_profile,
+        pressure=Pt * Pratio_profile,
+        density=rhot * rhoratio_profile,
+        gamma=g * np.ones((n,)),
+        composition=np.broadcast_to(composition, (n, composition.shape[0])).copy(),
+    )
+    state.velocity = mach * physics.get_sound_speed(state)
+
+    return state
