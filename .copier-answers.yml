@@ -1,0 +1,12 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 2025.10.20-2-g5cc8cd9
+_src_path: gh:scientific-python/cookie
+backend: hatch
+email: tim.dawson@cfd-research.com
+full_name: Tim Dawson
+license: BSD
+org: IhmeGroup
+project_name: StanShock
+project_short_description: Quasi-1D gas dynamics solver designed to model shock tube experiments and scramjet engines.
+url: https://github.com/IhmeGroup/StanShock
+vcs: true

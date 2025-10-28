@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling", "hatch-vcs"]
+requires = ["hatchling>=1.26", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 
@@ -27,6 +27,7 @@ classifiers = [
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Topic :: Scientific/Engineering",
   "Typing :: Typed",
 ]
@@ -47,14 +48,20 @@ dependencies = [
   "imageio",
 ]
 
-[project.optional-dependencies]
+[project.urls]
+Homepage = "https://github.com/IhmeGroup/StanShock"
+"Bug Tracker" = "https://github.com/IhmeGroup/StanShock/issues"
+Discussions = "https://github.com/IhmeGroup/StanShock/discussions"
+Changelog = "https://github.com/IhmeGroup/StanShock/releases"
+
+
+[dependency-groups]
 test = [
   "pytest >=6",
   "pytest-cov >=3",
 ]
 dev = [
-  "pytest >=6",
-  "pytest-cov >=3",
+  { include-group = "test" },
 ]
 docs = [
   "sphinx>=7.0",
@@ -64,27 +71,29 @@ docs = [
   "furo>=2023.08.17",
 ]
 
-[project.urls]
-Homepage = "https://github.com/IhmeGroup/StanShock"
-"Bug Tracker" = "https://github.com/IhmeGroup/StanShock/issues"
-Discussions = "https://github.com/IhmeGroup/StanShock/discussions"
-Changelog = "https://github.com/IhmeGroup/StanShock/releases"
-
 
 [tool.hatch]
 version.source = "vcs"
 build.hooks.vcs.version-file = "src/stanshock/_version.py"
 
 [tool.hatch.envs.default]
-features = ["test"]
-scripts.test = "pytest {args}"
-
-
-[tool.uv]
-reinstall-package = ["stanshock"]
-dev-dependencies = [
-  "stanshock[test]",
+# duplicate for now since hatch doesn't support groups yet
+dependencies = [
+  "numpy",
+  "scipy",
+  # "scipy-stubs",
+  "scikit-learn",
+  "matplotlib",
+  "numba",
+  "cantera",
+  "joblib",
+  "tqdm",
+  "tqdm_joblib",
+  # "types-tqdm",
+  "h5py",
+  "imageio",
 ]
+scripts.test = "pytest {args}"
 
 
 [tool.pytest.ini_options]
@@ -156,6 +165,7 @@ ignore = [
   "ISC001",   # Conflicts with formatter
   "T201",     # Use of print command
   "ARG001",   # Unused function argument
+  "PLC0415",  # `import` should be at top of file
 ]
 isort.required-imports = ["from __future__ import annotations"]
 # Uncomment if using a _compat.typing backport
