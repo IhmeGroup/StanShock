@@ -6,6 +6,7 @@ from numba import double, njit
 
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.fluid_base import FluidState
+from stanshock.system.backend import Array, Composition
 
 # Type signatures for numba
 double1D = double[:]
@@ -14,7 +15,7 @@ double3D = double[:, :, :]
 
 
 @njit(double1D(double2D, double1D))
-def get_specific_gas_constant_compiled(Y, molecularWeights):
+def get_specific_gas_constant_compiled(Y: Array, molecularWeights: Array) -> Array:
     """
     Function used by the thermoTable class to find the gas constant. This
     function is compiled for speed-up.
@@ -30,7 +31,7 @@ def get_specific_gas_constant_compiled(Y, molecularWeights):
     # determine R
     R = np.zeros(nX)
     for iX in range(nX):
-        molecularWeight = 0.0
+        molecularWeight: float = 0.0
         for iSp in range(nSp):
             molecularWeight += Y[iX, iSp] / molecularWeights[iSp]
         molecularWeight = 1.0 / molecularWeight
@@ -39,7 +40,7 @@ def get_specific_gas_constant_compiled(Y, molecularWeights):
 
 
 @njit(double1D(double1D, double2D, double1D, double2D, double2D))
-def get_cp_compiled(T, Y, TTable, a, b):
+def get_cp_compiled(T: Array, Y: Array, TTable: Array, a: Array, b: Array) -> Array:
     """
     Function used by the thermoTable class to find the constant pressure
     specific heats. This function is compiled for speed-up.
@@ -85,7 +86,13 @@ class ThermoTable(CanteraInterface):
     relevant methods
     """
 
-    def __init__(self, gas: ct.Solution, ox_def=None, fuel_def=None, prog_def=None):
+    def __init__(
+        self,
+        gas: ct.Solution,
+        ox_def: Composition | None = None,
+        fuel_def: Composition | None = None,
+        prog_def: Composition | None = None,
+    ) -> None:
         """
         This method initializes the temperature table. The table uses a
         piecewise linear function for the constant pressure specific heat
@@ -93,19 +100,25 @@ class ThermoTable(CanteraInterface):
         enthalpies at the table points.
         """
         super().__init__(gas, ox_def, fuel_def, prog_def)
-        nSp = gas.n_species
-        self.TMin = 50.0
-        self.dT = 100.0
-        self.TMax = 9950.0
-        self.T = np.arange(
-            self.TMin, self.TMax, self.dT
+        nSp: int = gas.n_species
+        self.TMin: float = 50.0
+        self.dT: float = 100.0
+        self.TMax: float = 9950.0
+        self.T: Array = np.arange(
+            self.TMin, self.TMax, self.dT, dtype=np.float64
         )  # vector of temperatures assuming thermal equilibrium between species
         nT = len(self.T)
-        self.h = np.zeros((nT, nSp))  # matrix of species enthalpies per temperature
+        self.h: Array = np.zeros(
+            (nT, nSp)
+        )  # matrix of species enthalpies per temperature
         # cpk = ak*T+bk for T in [Tk,Tk+1], k in {0,1,2,...,nT-1}
-        self.a = np.zeros((nT, nSp))  # matrix of species first order coefficients
-        self.b = np.zeros((nT, nSp))  # matrix of species zeroth order coefficients
-        self.molecularWeights = gas.molecular_weights
+        self.a: Array = np.zeros(
+            (nT, nSp)
+        )  # matrix of species first order coefficients
+        self.b: Array = np.zeros(
+            (nT, nSp)
+        )  # matrix of species zeroth order coefficients
+        self.molecularWeights: Array = gas.molecular_weights
         # determine the coefficients
         for kSp, species in enumerate(gas.species()):
             # initialize with actual cp
@@ -124,7 +137,7 @@ class ThermoTable(CanteraInterface):
                 cpk = self.a[kT, kSp] * (Tkp1) + self.b[kT, kSp]
                 hk = hkp1
 
-    def get_specific_gas_constant(self, state: FluidState):
+    def get_specific_gas_constant(self, state: FluidState) -> Array:
         """
         This method computes the mixture-specific gas constat
             inputs:
@@ -132,11 +145,12 @@ class ThermoTable(CanteraInterface):
             outputs:
                 R: vector of mixture-specific gas constants [n]
         """
+        assert state.composition is not None
         return get_specific_gas_constant_compiled(
             state.composition.reshape((-1, self.n_scalars)), self.molecularWeights
         ).reshape(state.shape)
 
-    def get_cp(self, state: FluidState):
+    def get_cp(self, state: FluidState) -> Array:
         """
         This method computes the constant pressure specific heat as determined
         by Billet and Abgrall (2003) for the double flux method.
@@ -146,6 +160,7 @@ class ThermoTable(CanteraInterface):
             outputs:
                 cp: vector of constant pressure specific heats
         """
+        assert state.composition is not None
         if state.temperature is None:
             state.temperature = self.get_temperature(state)
         return get_cp_compiled(
@@ -156,7 +171,7 @@ class ThermoTable(CanteraInterface):
             self.b,
         ).reshape(state.shape)
 
-    def get_frozen_enthalpy(self, T, Y):
+    def get_frozen_enthalpy(self, T: Array, Y: Array) -> Array:
         """
         This method computes the enthalpy according to Billet and Abgrall (2003).
         This is the enthalpy that is frozen over the time step
@@ -177,7 +192,7 @@ class ThermoTable(CanteraInterface):
             h0[k] = np.dot(Y[k, :], self.h[index] - bbar * self.T[index])
         return h0
 
-    def get_gamma(self, state: FluidState):
+    def get_gamma(self, state: FluidState) -> Array:
         """
         This method computes the specific heat ratio, gamma.
             inputs:
@@ -189,7 +204,7 @@ class ThermoTable(CanteraInterface):
         R = self.get_specific_gas_constant(state)
         return cp / (cp - R)
 
-    def get_temperature(self, state: FluidState):
+    def get_temperature(self, state: FluidState) -> Array:
         """
         This method applies the ideal gas law to compute the temperature
             inputs:
@@ -199,21 +214,25 @@ class ThermoTable(CanteraInterface):
         """
         R = self.get_specific_gas_constant(state)
         if state.pressure is None:
-            self.set_state(state)
+            state = self.set_state(state)
             state.temperature = self.sol.T
         else:
+            assert state.density is not None
             state.temperature = state.pressure / (state.density * R)
         return state.temperature
 
-    def get_pressure(self, state: FluidState):
+    def get_pressure(self, state: FluidState) -> Array:
+        assert state.temperature is not None
+        assert state.density is not None
         R = self.get_specific_gas_constant(state)
         state.pressure = state.temperature * R * state.density
         return state.pressure
 
-    def get_species_enthalpies(self, state: FluidState):
-        T = state.temperature
+    def get_species_enthalpies(self, state: FluidState) -> Array:
         if state.temperature is None:
             T = self.get_temperature(state)
+        else:
+            T = state.temperature
 
         if any(np.logical_or(self.TMin > T, self.TMax < T)):
             msg = "Temperature not within table"
@@ -226,7 +245,9 @@ class ThermoTable(CanteraInterface):
         )
         return self.h[indices, :] - bbar * self.T[indices, None]
 
-    def get_sound_speed(self, state: FluidState):
+    def get_sound_speed(self, state: FluidState) -> Array:
+        assert state.pressure is not None
+        assert state.density is not None
         gamma = state.gamma
         if gamma is None:
             gamma = self.get_gamma(state)
