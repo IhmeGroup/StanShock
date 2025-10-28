@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
+from stanshock.components.combustor import Combustor
 from stanshock.numerics.inviscid_flux import hllc_flux, lax_friedrichs_flux
 
 lax_friedrichs_flux = lax_friedrichs_flux.__wrapped__  # unwrap for coverage testing
@@ -50,3 +52,22 @@ def test_hllc_predicts_constant_flux():
     expected_flux = np.array([r * u**2 + p, H * u, r * Y * u])[np.newaxis, ...]
     expected_flux = np.repeat(expected_flux, num_faces, axis=0)
     assert np.allclose(flux, expected_flux)
+
+
+def test_isentropic_flow_relations(isentropic_flow: Combustor) -> None:
+    # Get initial state from given solution
+    t = isentropic_flow.t
+    state = isentropic_flow.state
+    physics = isentropic_flow.physics
+    idx = isentropic_flow.idx_cells
+    y = isentropic_flow.physics.primitive_to_conservative(state)
+    gamma_star = state.gamma
+
+    # Get source terms from inviscid flux
+    source_flux = isentropic_flow.inviscid_flux.source(t, y, physics, gamma_star)
+
+    # Get source terms from area change
+    source_area = isentropic_flow.area_change.source(
+        t, y[idx], physics, gamma_star[idx], 1.0
+    )
+    assert source_flux[3:-3] == pytest.approx(-source_area[3:-3], abs=1e-3)
