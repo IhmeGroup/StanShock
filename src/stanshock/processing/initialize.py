@@ -236,8 +236,11 @@ def initialize_isentropic(
         # Adjust throat area based on choked flow - will affect requested boundary conditions
         area_ratio /= area_ratio_min
         throat_area /= area_ratio_min
-    else:
-        subsonic_outflow = subsonic_inflow
+    elif subsonic_inflow != subsonic_outflow:
+        print(
+            "Warning: Subsonic/supersonic transition requested, but flow may not be choked.\n"
+            + f"Minimum area ratio = {area_ratio_min}."
+        )
 
     # Solve for allowable Mach numbers corresponding to given area ratio
     subsonic_mach: Array = mach_from_area_ratio(area_ratio, g, subsonic=True)
@@ -249,7 +252,7 @@ def initialize_isentropic(
         idx = np.argmin(area_ratio)
 
         if subsonic_inflow:
-            mach[idx:] = supersonic_mach[idx:]
+            mach[idx + 1 :] = supersonic_mach[idx + 1 :]
         else:
             mach[:idx] = supersonic_mach[:idx]
     elif not subsonic_inflow and not subsonic_outflow:

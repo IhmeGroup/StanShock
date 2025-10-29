@@ -34,10 +34,9 @@ def mach_from_area_ratio(area_ratio: Array, g: float, subsonic: bool = True) -> 
     def residual2(mach: float, g: float, area_ratio_target: float) -> float:
         return np.abs(area_ratio_from_mach(mach, g) - area_ratio_target)
 
+    bracket2 = (0.8, 1.0) if subsonic else (1.0, 1.2)
     for i in np.where(np.isnan(mach))[0]:
-        mach[i] = minimize_scalar(
-            residual2, args=(g, area_ratio[i]), bracket=(0.8, 1.2)
-        ).x
+        mach[i] = minimize_scalar(residual2, args=(g, area_ratio[i]), bracket=bracket2).x
 
     return mach
 
