@@ -33,20 +33,24 @@ class LinearInterpolator:
 class Geometry:
     def __init__(
         self,
-        x: Array,
+        xf: Array,
         area: SpatioTemporalLike = 1.0,
         perimeter: SpatioTemporalLike = 1.0,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
-        self.x: Array = x
-        self.n: int = len(self.x)
-        self.dx: float = self.x[1] - self.x[0]
+        self.xf: Array = xf  # Face-center locations
+        self.xc: Array = 0.5 * (xf[1:] + xf[:-1])  # Cell-center locations
+        self.n: int = len(self.xc)
+        self.dx: Array | float = np.diff(self.xf)
+        # If mesh spacing is constant, simplify this to a float
+        if np.max(np.abs(np.diff(self.dx))) < 1e-8:
+            self.dx = self.dx[0]
 
         # Denote distinct regions by their x-range, mapping them to the mesh index
         if regions is None:
-            regions = {"domain": (x[0], x[-1])}
+            regions = {"domain": (self.xf[0], self.xf[-1])}
         self.regions: dict[str, tuple[float, float]] = regions
         self._region_indices: dict[str, Index] = {}
 
@@ -63,12 +67,12 @@ class Geometry:
                 self.dlnA_dx = None
             else:
                 if isinstance(area, np.ndarray):
-                    x_tmp, y_tmp = self.x, area
+                    x_tmp, y_tmp = self.xf, area
                 elif isinstance(area, tuple):
                     x_tmp, y_tmp = area
                 else:
-                    msg = "Cannot (yet) automatically determine dlnA_dx from callable area."
-                    raise NotImplementedError(msg)
+                    x_tmp = self.xf
+                    y_tmp = area(0.0, self.xf)
                 x_midpoint: Array = 0.5 * (x_tmp[1:] + x_tmp[:-1])
                 area_midpoint: Array = 0.5 * (y_tmp[1:] + y_tmp[:-1])
                 dlnA_dx_fd: Array = np.diff(y_tmp) / (np.diff(x_tmp) * area_midpoint)
@@ -88,7 +92,7 @@ class Geometry:
         elif isinstance(value, tuple):
             func = LinearInterpolator(xp=value[0], fp=value[1])
         elif isinstance(value, np.ndarray):
-            func = LinearInterpolator(xp=self.x, fp=value)
+            func = LinearInterpolator(xp=self.xf, fp=value)
         else:
             func = value
 
@@ -98,7 +102,7 @@ class Geometry:
         self, time: float = 0.0, x: Array | None = None
     ) -> Array | float:
         if x is None:
-            x = self.x
+            x = self.xc
 
         return 4.0 * self.area(time, x) / self.perimeter(time, x)
 
@@ -106,7 +110,7 @@ class Geometry:
         self, time: float = 0.0, x: Array | None = None
     ) -> Array | float:
         if x is None:
-            x = self.x
+            x = self.xc
 
         return self.hydraulic_diameter(time, x)
 
@@ -116,8 +120,8 @@ class Geometry:
 
         if region_name not in self._region_indices:
             x_region_start, x_region_end = self.regions[region_name]
-            start_index: np.intp = np.argmin(np.abs(self.x - x_region_start))
-            end_index: np.intp = np.argmin(np.abs(self.x - x_region_end))
+            start_index: np.intp = np.argmin(np.abs(self.xc - x_region_start))
+            end_index: np.intp = np.argmin(np.abs(self.xc - x_region_end))
 
             self._region_indices[region_name] = np.s_[start_index:end_index]
 
@@ -127,14 +131,14 @@ class Geometry:
 class Cylinder(Geometry):
     def __init__(
         self,
-        x: Array,
+        xf: Array,
         d_outer: SpatioTemporalLike,
         d_inner: SpatioTemporalLike | None = None,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
-        self.x: Array = x
+        self.xf: Array = xf
         # Set up functional form of inner and outer diameters
         self.d_outer: SpatioTemporalFunction = self.to_spatiotemporal(value=d_outer)
         self.d_inner: SpatioTemporalFunction = self.to_spatiotemporal(value=d_inner)
@@ -149,7 +153,7 @@ class Cylinder(Geometry):
             area = 0.25 * np.pi * (d_outer**2 - d_inner**2)
             perimeter = 0.5 * np.pi * (d_outer + d_inner)
 
-        super().__init__(x, area, perimeter, dlnA_dt, dlnA_dx, regions)
+        super().__init__(xf, area, perimeter, dlnA_dt, dlnA_dx, regions)
 
     def _area(self, t: float, x: Array) -> Array | float:
         return 0.25 * np.pi * (self.d_outer(t, x) ** 2 - self.d_inner(t, x) ** 2)
@@ -161,7 +165,7 @@ class Cylinder(Geometry):
         self, time: float = 0.0, x: Array | None = None
     ) -> Array | float:
         if x is None:
-            x = self.x
+            x = self.xc
 
         return self.d_outer(time, x) - self.d_inner(time, x)
 
@@ -169,7 +173,7 @@ class Cylinder(Geometry):
         self, time: float = 0.0, x: Array | None = None
     ) -> Array | float:
         if x is None:
-            x = self.x
+            x = self.xc
 
         d_outer: Array | float = self.d_outer(time, x)
         d_inner: Array | float = self.d_inner(time, x)
@@ -187,14 +191,14 @@ class Cylinder(Geometry):
 class Box(Geometry):
     def __init__(
         self,
-        x: Array,
+        xf: Array,
         h: SpatioTemporalLike = 1.0,
         w: SpatioTemporalLike = 1.0,
         dlnA_dt: SpatioTemporalFunction | None = None,
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
-        self.x: Array = x
+        self.xf: Array = xf
         # Set up functional forms of height and width
         self.h: SpatioTemporalFunction = self.to_spatiotemporal(value=h)
         self.w: SpatioTemporalFunction = self.to_spatiotemporal(value=w)
@@ -209,7 +213,7 @@ class Box(Geometry):
             area = h * w
             perimeter = 2 * (h + w)
 
-        super().__init__(x, area, perimeter, dlnA_dt, dlnA_dx, regions)
+        super().__init__(xf, area, perimeter, dlnA_dt, dlnA_dx, regions)
 
     def _area(self, time: float, x: Array) -> Array | float:
         return self.h(time, x) * self.w(time, x)
@@ -221,7 +225,7 @@ class Box(Geometry):
         self, time: float = 0.0, x: Array | None = None
     ) -> Array | float:
         if x is None:
-            x = self.x
+            x = self.xc
 
         h: Array | float = self.h(time, x)
         w: Array | float = self.w(time, x)
@@ -231,7 +235,7 @@ class Box(Geometry):
 class AsymmetricBox(Box):
     def __init__(
         self,
-        x: Array,
+        xf: Array,
         upper_wall: SpatioTemporalLike,
         lower_wall: SpatioTemporalLike | None = None,
         w: SpatioTemporalLike = 1.0,
@@ -239,7 +243,7 @@ class AsymmetricBox(Box):
         dlnA_dx: SpatioTemporalFunction | None = None,
         regions: dict[str, tuple[float, float]] | None = None,
     ) -> None:
-        self.x: Array = x
+        self.xf: Array = xf
         # Set up functional forms of height and width
         self.upper_wall: SpatioTemporalFunction = self.to_spatiotemporal(
             value=upper_wall
@@ -248,14 +252,14 @@ class AsymmetricBox(Box):
             value=lower_wall
         )
 
-        super().__init__(x, self._h, w, dlnA_dt, dlnA_dx, regions)
+        super().__init__(xf, self._h, w, dlnA_dt, dlnA_dx, regions)
 
     def _h(self, time: float, x: Array) -> Array | float:
         return self.upper_wall(time, x) - self.lower_wall(time, x)
 
 
 def initialize_geometry(
-    x: Array,
+    xf: Array,
     area: SpatioTemporalLike = 1.0,  # Cross-sectional area of flow
     perimeter: SpatioTemporalLike = 1.0,  # Perimeter of the flow cross section
     d_outer: SpatioTemporalLike | None = None,  # Outer diameter of the cylinder/annulus
@@ -280,7 +284,7 @@ def initialize_geometry(
 
     if upper_wall is not None:
         geometry = AsymmetricBox(
-            x=x,
+            xf=xf,
             upper_wall=upper_wall,
             lower_wall=lower_wall,
             w=w,
@@ -290,7 +294,7 @@ def initialize_geometry(
         )
     elif h is not None:
         geometry = Box(
-            x=x,
+            xf=xf,
             h=h,
             w=w,
             dlnA_dt=dlnA_dt,
@@ -299,7 +303,7 @@ def initialize_geometry(
         )
     elif d_outer is not None:
         geometry = Cylinder(
-            x=x,
+            xf=xf,
             d_outer=d_outer,
             d_inner=d_inner,
             dlnA_dt=dlnA_dt,
@@ -308,7 +312,7 @@ def initialize_geometry(
         )
     else:
         geometry = Geometry(
-            x=x,
+            xf=xf,
             area=area,
             perimeter=perimeter,
             dlnA_dx=dlnA_dx,

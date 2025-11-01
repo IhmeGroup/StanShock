@@ -8,9 +8,11 @@ import numpy as np
 
 from stanshock.components.combustor import Combustor
 from stanshock.numerics.boundary_conditions import Inflow
+from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.physics.thermotable import ThermoTable
+from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import Box
+from stanshock.system.geometry import Box, Geometry
 
 plt.rcParams.update(
     {
@@ -41,7 +43,7 @@ scale = 1e3
 
 def add_h_plot(ax):
     ax1 = ax.twinx()
-    ax1.plot(x * scale, h * scale, "k", linestyle="--")
+    ax1.plot(xf * scale, h * scale, "k", linestyle="--")
     ax1.axhline(0, color="k", linestyle="--")
     ax1.set_aspect("equal")
     ax1.set_ylabel("h [mm]")
@@ -73,11 +75,11 @@ mdot_a = rho_in * U_in * h_const * w
 
 # Define the grid
 N_x = 200
-x = np.linspace(0, L_const + L_exhaust, N_x)
-h = np.zeros_like(x)
-h[x < L_const] = h_const
-h[x >= L_const] = h_const + (x[x >= L_const] - L_const) * np.tan(theta_exhaust)
-geometry = Box(x=x, h=h, w=w)
+xf = np.linspace(0, L_const + L_exhaust, N_x + 1)
+h = np.zeros_like(xf)
+h[xf < L_const] = h_const
+h[xf >= L_const] = h_const + (xf[xf >= L_const] - L_const) * np.tan(theta_exhaust)
+geometry = Box(xf=xf, h=h, w=w)
 
 # Time parameters
 tau = L / U_in
@@ -99,9 +101,7 @@ BCs = (BC_inlet, BC_outlet)
 
 # Define the fuel inflow
 class HydrogenInjection(RightHandSide):
-    def __init__(self, gas, geometry):
-        self.geometry = geometry
-
+    def __init__(self, gas: ct.Solution, geometry: Geometry) -> None:
         # Injector area
         r_f = 0.2e-3  # m
         N_f = 4  # -
@@ -123,43 +123,45 @@ class HydrogenInjection(RightHandSide):
         P_f = gas.P
         # W_f = gas.mean_molecular_weight
 
-        self.rho_f = rho_f
-        self.rhoE_f = P_f / (gamma_f - 1) + 0.5 * rho_f * U_f**2
-        self.rhoYH2_f = rho_f * gas.Y[gas.species_index("H2")]
-        self.U_f = U_f
-        self.A_f = A_f_tot
+        rhoE_f = P_f / (gamma_f - 1) + 0.5 * rho_f * U_f**2
+        rhoYH2_f = rho_f * gas.Y[gas.species_index("H2")]
+        A_f = A_f_tot
 
         # Define the source terms
-        self.L_src = 30.0e-3
-        self.scale_factor = 3.960715337483353
+        L_src = 30.0e-3
+        scale_factor = 3.960715337483353
 
-    def source(self, t, _state_array, _physics, _gamma_star, _e0_star):
-        x = self.geometry.x
-        rho_f = self.rho_f
-        U_f = self.U_f
-        A_f = self.A_f
-        rhoE_f = self.rhoE_f
-        rhoYH2_f = self.rhoYH2_f
-        L_src = self.L_src
-        scale_factor = self.scale_factor
+        # Get geometry information
+        xf = geometry.xf
+        index = np.where(np.logical_and(xf >= x_inj, xf < x_inj + L_src))[0]
 
         nsp = gas.n_species
-        rhs = np.zeros([len(x), 2 + nsp])
-        index = np.logical_and(x >= x_inj, x < x_inj + L_src)
-        dx = x[1] - x[0]
-        area = self.geometry.area(t, x[index])
+        self.rhs = np.zeros([geometry.n, 2 + nsp])
+        self.rhs[index, 0] = rho_f
+        self.rhs[index, 1] = rhoE_f
+        self.rhs[index, 2 + gas.species_index("H2")] = rhoYH2_f
+        self.rhs[index, :] *= U_f * A_f / L_src * scale_factor
 
-        rhs[index, 0] = rho_f * U_f * A_f / L_src * dx / (dx * area) * scale_factor
-        rhs[index, 1] = rhoE_f * U_f * A_f / L_src * dx / (dx * area) * scale_factor
-        rhs[index, 2 + gas.species_index("H2")] = (
-            rhoYH2_f * U_f * A_f / L_src * dx / (dx * area) * scale_factor
-        )
+        self.xc = geometry.xc[index]
+        self.geometry = geometry
+        self.index = index
+
+    def source(
+        self,
+        time: float,
+        _state_array: Array,
+        _physics: FluidPhysics,
+        _gamma_star: Array | None = None,
+        _e0_star: Array | None = None,
+    ) -> Array:
+        rhs = self.rhs.copy()
+        rhs[self.index, :] /= self.geometry.area(time, self.xc)[:, None]
         return rhs
 
 
 # Initialize and run the simulation
 ss = Combustor(
-    x=x,
+    xf=xf,
     geometry=geometry,
     initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,
@@ -174,8 +176,8 @@ ss.advance_simulation(t_end)
 
 
 # Plot the results
-def plot_sim(ss):
-    x = ss.geometry.x
+def plot_sim(ss: Combustor) -> None:
+    xc = ss.geometry.xc
 
     idx = ss.idx_cells
     rho = ss.state.density[idx]
@@ -187,37 +189,37 @@ def plot_sim(ss):
     M = u / c
 
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 8))
-    ax[0].plot(x * scale, rho)
+    ax[0].plot(xc * scale, rho)
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
     add_h_plot(ax[0])
 
-    ax[1].plot(x * scale, u)
+    ax[1].plot(xc * scale, u)
     ax[1].set_ymargin(0.1)
     ax[1].set_ylabel(r"$u$ [m/s]")
     add_h_plot(ax[1])
 
-    ax[2].plot(x * scale, p)
+    ax[2].plot(xc * scale, p)
     ax[2].set_ymargin(0.1)
     ax[2].set_ylabel(r"$p$ [Pa]")
     add_h_plot(ax[2])
 
-    ax[3].plot(x * scale, T)
+    ax[3].plot(xc * scale, T)
     ax[3].set_ymargin(0.1)
     ax[3].set_ylabel(r"$T$ [K]")
     add_h_plot(ax[3])
 
-    ax[4].plot(x * scale, M)
+    ax[4].plot(xc * scale, M)
     ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
     add_h_plot(ax[4])
 
-    ax[5].plot(x * scale, Y[:, gas.species_index("H2")])
+    ax[5].plot(xc * scale, Y[:, gas.species_index("H2")])
     ax[5].set_ymargin(0.1)
     ax[5].set_ylabel(r"$Y_{\mathrm{H}_2}$ [-]")
     add_h_plot(ax[5])
 
-    ax[6].plot(x * scale, Y[:, gas.species_index("H2O")])
+    ax[6].plot(xc * scale, Y[:, gas.species_index("H2O")])
     ax[6].set_ymargin(0.1)
     ax[6].set_ylabel(r"$Y_{\mathrm{H}_2\mathrm{O}}$ [-]")
     add_h_plot(ax[6])

@@ -137,11 +137,11 @@ class ShockTube(Combustor):
             )  # assume temporally constant area
 
         # Determine geometry from pressure
-        dpAbs = np.abs(pInitial[1:] - pInitial[:-1])
-        xShock = max(zip(dpAbs, geometry.x[1:], strict=False))[
-            1
+        dpAbs = np.abs(np.diff(pInitial))
+        xShock = geometry.xf[
+            np.argmax(dpAbs) + 1
         ]  # maximum pressure gradient corresponds to shock
-        (xMin, xMax, probeLocation) = (geometry.x[0], xShock, geometry.x[-1])
+        (xMin, xMax, probeLocation) = (geometry.xc[0], xShock, geometry.xc[-1])
         LMax = xMax - xMin  # maximum length of constrained optimization
         DMax = min(
             geometry.d_outer(0.0, np.linspace(xMin, xMax))

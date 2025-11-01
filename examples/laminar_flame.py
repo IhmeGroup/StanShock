@@ -65,8 +65,8 @@ def main(
 
     ss = Combustor(
         n=nX,
-        x=np.linspace(xLower, xUpper, nX),
-        dx=(xUpper - xLower) / (nX - 1),
+        xf=np.linspace(xLower, xUpper, nX + 1),
+        dx=(xUpper - xLower) / nX,
         initialization=("Riemann", unburnedState, burnedState, flame_center),
         physics=physics,
         boundary_conditions=boundary_conditions,
@@ -79,11 +79,13 @@ def main(
     # interpolate flame solution
     Y = ss.state.composition
     for iSp in range(gas.n_species):
-        Y[ss.idx_cells, iSp] = np.interp(ss.geometry.x, flame.grid, flame.Y[iSp, :])
+        Y[ss.idx_cells, iSp] = np.interp(ss.geometry.xc, flame.grid, flame.Y[iSp, :])
 
-    ss.state.density[ss.idx_cells] = np.interp(ss.geometry.x, flame.grid, flame.density)
+    ss.state.density[ss.idx_cells] = np.interp(
+        ss.geometry.xc, flame.grid, flame.density
+    )
     ss.state.velocity[ss.idx_cells] = np.interp(
-        ss.geometry.x, flame.grid, flame.velocity
+        ss.geometry.xc, flame.grid, flame.velocity
     )
     ss.state.pressure[ss.idx_cells] = flame.P * np.ones(ss.geometry.n)
     ss.state.composition = Y
@@ -119,7 +121,7 @@ def main(
             label=r"$T/T_\mathrm{F}$",
         )
         plt.plot(
-            (ss.geometry.x - flame_center) / flameThickness, T / flame.T[-1], "r--s"
+            (ss.geometry.xc - flame_center) / flameThickness, T / flame.T[-1], "r--s"
         )
         iOH = gas.species_index("OH")
         plt.plot(
@@ -129,7 +131,7 @@ def main(
             label=r"$Y_\mathrm{OH}\times 10$",
         )
         plt.plot(
-            (ss.geometry.x - flame_center) / flameThickness,
+            (ss.geometry.xc - flame_center) / flameThickness,
             state.mass_fractions[ss.idx_cells, iOH] * 10,
             "k--s",
         )
@@ -141,7 +143,7 @@ def main(
             label=r"$Y_\mathrm{O_2}$",
         )
         plt.plot(
-            (ss.geometry.x - flame_center) / flameThickness,
+            (ss.geometry.xc - flame_center) / flameThickness,
             state.mass_fractions[ss.idx_cells, iO2],
             "g--s",
         )
@@ -153,7 +155,7 @@ def main(
             label=r"$Y_\mathrm{H_2}$",
         )
         plt.plot(
-            (ss.geometry.x - flame_center) / flameThickness,
+            (ss.geometry.xc - flame_center) / flameThickness,
             state.mass_fractions[ss.idx_cells, iH2],
             "b--s",
         )
@@ -167,7 +169,7 @@ def main(
             plt.savefig(results_location / "laminarFlame.pdf")
 
     results = {
-        "position": ss.geometry.x,
+        "position": ss.geometry.xc,
         "temperature": T[ss.idx_cells],
     }
     if results_location is not None:

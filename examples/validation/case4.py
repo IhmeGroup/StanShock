@@ -86,7 +86,7 @@ def main(
     xLower = -LDriver
     xUpper = LDriven
     xShock = 0.0
-    x = np.linspace(xLower, xUpper, nX)
+    xf = np.linspace(xLower, xUpper, nX + 1)
     # arrays from HTGL
     xInterp = -0.0254 * np.array(
         [142, 140, 130, 120, 110, 100, 90, 80, 70, 60, 50, 40, 36, 37, 30, 20, 10, 0]
@@ -152,7 +152,7 @@ def main(
 
     ssbl = ShockTube(
         n=nX,
-        x=x,
+        xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -165,7 +165,7 @@ def main(
         dlnA_dx=dlnA_dx,
     )
     ssbl.state.gamma = ssbl.physics.get_gamma(ssbl.state)
-    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.x)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xc)))  # end wall probe
     diagram_settings = [
         ("pressure", [p1 / 101325, p4 / 101325]),
         ("temperature", [T1, 800.0]),
@@ -178,9 +178,9 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssbl.geometry.x[1] - ssbl.geometry.x[0]
-    dV = A(0.0, ssbl.geometry.x) * dx
-    VDriver = np.sum(dV[ssbl.geometry.x < xShock])
+    dx = ssbl.geometry.dx
+    dV = A(0.0, ssbl.geometry.xc) * dx
+    VDriver = np.sum(dV[ssbl.geometry.xc < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
@@ -215,7 +215,7 @@ def main(
     gas4.TP = T4, p4
     ssnbl = ShockTube(
         n=nX,
-        x=x,
+        xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -228,7 +228,7 @@ def main(
         dlnA_dx=dlnA_dx,
     )
     ssnbl.state.gamma = ssnbl.physics.get_gamma(ssnbl.state)
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.x)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xc)))  # end wall probe
     ssnbl.xt_diagrams += [
         XTDiagram(ssnbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
@@ -237,9 +237,9 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssnbl.geometry.x[1] - ssnbl.geometry.x[0]
-    dV = A(0.0, ssnbl.geometry.x) * dx
-    VDriver = np.sum(dV[ssnbl.geometry.x < xShock])
+    dx = ssnbl.geometry.dx
+    dV = A(0.0, ssnbl.geometry.xc) * dx
+    VDriver = np.sum(dV[ssnbl.geometry.xc < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver

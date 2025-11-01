@@ -57,9 +57,7 @@ class Combustor:
             "outflow",
             "outflow",
         ]
-        self.x: Array = np.linspace(
-            0.0, self.dx * (self.n - 1), self.n, dtype=np.float64
-        )
+        self.xf: Array = np.linspace(0.0, self.dx * self.n, self.n, dtype=np.float64)
         self.F = np.ones(self.n)  # thickening
         self.t = 0.0  # time
         self.verbose = True  # console output switch
@@ -94,8 +92,8 @@ class Combustor:
 
         # Initialize the geometry of the domain
         if geometry is None:
-            kwargs.pop("x")
-            self.geometry: Geometry = initialize_geometry(x=self.x, **kwargs)
+            kwargs.pop("xf")
+            self.geometry: Geometry = initialize_geometry(xf=self.xf, **kwargs)
         else:
             self.geometry = geometry
 
@@ -363,7 +361,7 @@ class Combustor:
         indices = [
             k + self.n_ghost_layers
             for k in range(self.n)
-            if self.in_reacting_region(self.geometry.x[k], self.t)
+            if self.in_reacting_region(self.geometry.xc[k], self.t)
         ]
         state_temp = FluidState(
             shape=(len(indices),),

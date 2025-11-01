@@ -48,7 +48,7 @@ class AreaChange(RightHandSide):
         state0_compact[:, 3] = state.pressure
 
         # Divide domain between explicit and implicit source terms
-        idx_explicit: Index = np.arange(self.geometry.x.shape[0], dtype=np.int64)
+        idx_explicit: Index = np.arange(self.geometry.xc.shape[0], dtype=np.int64)
         assert isinstance(idx_explicit, np.ndarray)
         idx_implicit: Index = np.array([], dtype=np.int64)
         assert isinstance(idx_implicit, np.ndarray)
@@ -57,7 +57,7 @@ class AreaChange(RightHandSide):
         )
 
         if self.geometry.dlnA_dt is not None:
-            dlnA_dt: Array | float = self.geometry.dlnA_dt(time, self.geometry.x)
+            dlnA_dt: Array | float = self.geometry.dlnA_dt(time, self.geometry.xc)
             assert isinstance(dlnA_dt, np.ndarray)
             idx_implicit = np.where(dlnA_dt != 0.0)[0]
             idx_explicit = np.where(dlnA_dt == 0.0)[0]
@@ -67,7 +67,7 @@ class AreaChange(RightHandSide):
                 # Initialize
                 y0: Array = state0_compact[idx_implicit, :].copy()
                 args: tuple[Array, Array] = (
-                    self.geometry.x[idx_implicit],
+                    self.geometry.xc[idx_implicit],
                     gamma_star[idx_implicit],
                 )
                 self.integrator.set_initial_value(y=y0, t=time)
@@ -103,7 +103,7 @@ class AreaChange(RightHandSide):
     ) -> Array:
         """Area change contributions to RHS."""
         rhs_compact: Array = np.zeros_like(state0_compact[idx])
-        x: Array = self.geometry.x[idx]
+        x: Array = self.geometry.xc[idx]
 
         if self.geometry.dlnA_dt is not None:
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)

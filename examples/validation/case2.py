@@ -65,7 +65,7 @@ def main(
     xLower = -LDriver
     xUpper = LDriven
     xShock = 0.0
-    x = np.linspace(xLower, xUpper, nX)
+    xf = np.linspace(xLower, xUpper, nX + 1)
     DeltaD = DDriven - DDriver
     DeltaX = (
         (xUpper - xLower) / float(nX) * 10
@@ -102,7 +102,7 @@ def main(
 
     ssbl = ShockTube(
         n=nX,
-        x=x,
+        xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -113,7 +113,7 @@ def main(
         d_outer=D,
         dlnA_dx=dlnA_dx,
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.x)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xc)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()
@@ -128,7 +128,7 @@ def main(
     gas4.TP = T4, p4
     ssnbl = ShockTube(
         n=nX,
-        x=x,
+        xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -138,7 +138,7 @@ def main(
         d_outer=D,
         dlnA_dx=dlnA_dx,
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.x)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xc)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()
