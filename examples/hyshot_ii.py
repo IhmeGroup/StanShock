@@ -224,8 +224,8 @@ def plot_sim(ss):
 
     ax[6].set_xlabel("x [mm]")
 
-    plt.tight_layout()
-    plt.savefig("hyshot_ii.png", bbox_inches="tight", dpi=300)
+    fig.tight_layout()
+    fig.savefig("hyshot_ii.png", bbox_inches="tight", dpi=300)
 
 
 plot_sim(ss)
