@@ -100,7 +100,7 @@ def main(
     physics_model = ThermoTable(gas1)
 
     ssbl = ShockTube(
-        n=nX,
+        n_cells=nX,
         xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
@@ -112,7 +112,7 @@ def main(
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
         dlnA_dx=dlnA_dx,
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xc)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()
@@ -126,7 +126,7 @@ def main(
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
-        n=nX,
+        n_cells=nX,
         xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
@@ -137,7 +137,7 @@ def main(
         d_outer=D,
         dlnA_dx=dlnA_dx,
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xc)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xf)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()

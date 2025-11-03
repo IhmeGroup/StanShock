@@ -124,11 +124,12 @@ class ShockTube(Combustor):
             )
             p5 = p5op1 * self.state.pressure[-1]
         # Get initial state for reinitialization
-        rInitial = np.copy(self.state.density[self.idx_cells])
-        uInitial = np.copy(self.state.velocity[self.idx_cells])
-        pInitial = np.copy(self.state.pressure[self.idx_cells])
-        YInitial = np.copy(self.state.composition[self.idx_cells])
-        gammaInitial = np.copy(self.state.gamma[self.idx_cells])
+        idx = self.geometry.idx_cells
+        rInitial = np.copy(self.state.density[idx])
+        uInitial = np.copy(self.state.velocity[idx])
+        pInitial = np.copy(self.state.pressure[idx])
+        YInitial = np.copy(self.state.composition[idx])
+        gammaInitial = np.copy(self.state.gamma[idx])
         dlnA_dx_initial = geometry.dlnA_dx
 
         def dd_outerdx(time: float, x: Array) -> Array:
@@ -141,7 +142,7 @@ class ShockTube(Combustor):
         xShock = geometry.xf[
             np.argmax(dpAbs) + 1
         ]  # maximum pressure gradient corresponds to shock
-        (xMin, xMax, probeLocation) = (geometry.xc[0], xShock, geometry.xc[-1])
+        (xMin, xMax, probeLocation) = (geometry.xf[0], xShock, geometry.xf[-1])
         LMax = xMax - xMin  # maximum length of constrained optimization
         DMax = min(
             geometry.d_outer(0.0, np.linspace(xMin, xMax))
@@ -223,7 +224,7 @@ class ShockTube(Combustor):
             geometry.dlnA_dx = lambda t, x: dA_dx(t, x) / A(t, x)
             geometry.d_inner = d_inner
             self.state = FluidState(
-                shape=(geometry.n,),
+                shape=(geometry.n_cells_interior,),
                 density=np.copy(rInitial),
                 velocity=np.copy(uInitial),
                 pressure=np.copy(pInitial),

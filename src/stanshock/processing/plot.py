@@ -41,12 +41,12 @@ class XTDiagram:
         # check interpolation grid
         geometry = domain.geometry
         if x is None:
-            self.xc = geometry.xc
+            self.x = geometry.xf
         elif (x[-1] > geometry.xc[-1]) or (x[0] < geometry.xc[0]):
             msg = "Invalid Interpolation Grid"
             raise Exception(msg)
         else:
-            self.xc = x
+            self.x = x
 
         self.variable: list[Array] = []  # list of numpy arrays of the variable w.r.t x
         self.t: list[float] = []  # list of times
@@ -63,37 +63,26 @@ class XTDiagram:
         variable = self.name
         state = domain.state
         geometry = domain.geometry
-        idx_cells = domain.idx_cells
 
         if variable in ["density", "r", "rho"]:
-            self.variable.append(
-                np.interp(self.xc, geometry.xc, state.density[idx_cells])
-            )
+            self.variable.append(np.interp(self.x, geometry.xc, state.density))
         elif variable in ["velocity", "u"]:
-            self.variable.append(
-                np.interp(self.xc, geometry.xc, state.velocity[idx_cells])
-            )
+            self.variable.append(np.interp(self.x, geometry.xc, state.velocity))
         elif variable in ["pressure", "p"]:
-            self.variable.append(
-                np.interp(self.xc, geometry.xc, state.pressure[idx_cells])
-            )
+            self.variable.append(np.interp(self.x, geometry.xc, state.pressure))
         elif variable in ["temperature", "t"]:
             T = domain.physics.get_temperature(state)
-            self.variable.append(np.interp(self.xc, geometry.xc, T[idx_cells]))
+            self.variable.append(np.interp(self.x, geometry.xc, T))
         elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            self.variable.append(
-                np.interp(self.xc, geometry.xc, state.gamma[idx_cells])
-            )
+            self.variable.append(np.interp(self.x, geometry.xc, state.gamma))
         elif variable in domain.physics.scalar_names:
             scalarIndex = domain.physics.scalar_names.index(variable)
             self.variable.append(
-                np.interp(
-                    self.xc, geometry.xc, state.composition[idx_cells, scalarIndex]
-                )
+                np.interp(self.x, geometry.xc, state.composition[:, scalarIndex])
             )
         elif variable in ["mach", "m"]:
             M = np.abs(state.velocity) / domain.physics.get_sound_speed(state)
-            self.variable.append(np.interp(self.xc, geometry.xc, M[idx_cells]))
+            self.variable.append(np.interp(self.x, geometry.xc, M))
         else:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
@@ -109,7 +98,7 @@ class XTDiagram:
         """
         t = [t * 1000.0 for t in self.t]
         mdot = [mdot * 1.0e3 for mdot in self.mdot]
-        X, T = np.meshgrid(self.xc, t)
+        X, T = np.meshgrid(self.x, t)
         variableMatrix = np.zeros(X.shape)
         for k, variablek in enumerate(self.variable):
             variableMatrix[k, :] = variablek
@@ -162,7 +151,7 @@ class XTDiagram:
 
         main_ax.set_xlabel(r"$x~[\mathrm{m}]$")
         main_ax.set_ylabel(r"$t~[\mathrm{ms}]$")
-        main_ax.set_xlim(min(self.xc), max(self.xc))
+        main_ax.set_xlim(min(self.x), max(self.x))
         main_ax.set_ylim(min(t), max(t))
 
         if has_mdot:
@@ -180,7 +169,7 @@ class XTDiagram:
         fig.savefig(Path(figdir) / f"{variable}.png", bbox_inches="tight", dpi=300)
 
 
-def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0) -> Axes:
+def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
     ax1 = ax.twinx()
     ax1.set_zorder(-np.inf)
     ax.patch.set_visible(False)
@@ -201,38 +190,39 @@ def plot_state(domain: Combustor, filename: Path | str) -> None:
     physics = domain.physics
     state = domain.state
     geometry = domain.geometry
-    idx_cells = domain.idx_cells
+    idx_cells = geometry.idx_cells
+    x = xscale * geometry.xc[idx_cells]
     T = physics.get_temperature(state)
 
     fig: Figure
     ax: list[Axes]
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
-    ax[0].plot(geometry.xc * xscale, state.density[idx_cells])
+    ax[0].plot(x, state.density[idx_cells])
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
     if geometry.h is not None:
         add_h_plot(domain, ax[0], scale=xscale)
 
-    ax[1].plot(geometry.xc * xscale, state.velocity[idx_cells])
+    ax[1].plot(x, state.velocity[idx_cells])
     ax[1].set_ymargin(0.1)
     ax[1].set_ylabel(r"$u$ [m/s]")
     if geometry.h is not None:
         add_h_plot(domain, ax[1], scale=xscale)
 
-    ax[2].plot(geometry.xc * xscale, state.pressure[idx_cells])
+    ax[2].plot(x, state.pressure[idx_cells])
     ax[2].set_ymargin(0.1)
     ax[2].set_ylabel(r"$p$ [Pa]")
     if geometry.h is not None:
         add_h_plot(domain, ax[2], scale=xscale)
 
-    ax[3].plot(geometry.xc * xscale, T[idx_cells])
+    ax[3].plot(x, T[idx_cells])
     ax[3].set_ymargin(0.1)
     ax[3].set_ylabel(r"$T$ [K]")
     if geometry.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
     M = np.abs(state.velocity) / physics.get_sound_speed(state)
-    ax[4].plot(geometry.xc * xscale, M[idx_cells])
+    ax[4].plot(x, M[idx_cells])
     ax[4].axhline(1.0, color="r", linestyle="--")
     ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
@@ -249,9 +239,9 @@ def plot_state(domain: Combustor, filename: Path | str) -> None:
         Y_H2 = Y[:, physics.gas.species_index("H2")]
         Y_OH = Y[:, physics.gas.species_index("OH")]
         Y_H2O = Y[:, physics.gas.species_index("H2O")]
-    ax[5].plot(geometry.xc * xscale, Y_H2, label=r"$\mathrm{H}_2$")
-    ax[5].plot(geometry.xc * xscale, Y_OH, label=r"$\mathrm{OH}$")
-    ax[5].plot(geometry.xc * xscale, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
+    ax[5].plot(x, Y_H2, label=r"$\mathrm{H}_2$")
+    ax[5].plot(x, Y_OH, label=r"$\mathrm{OH}$")
+    ax[5].plot(x, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
     if Y_H2.max() < 1e-6:
         ax[5].set_ylim(-1e-3, 1e-3)
     else:

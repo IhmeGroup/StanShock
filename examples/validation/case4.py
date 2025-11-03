@@ -151,7 +151,7 @@ def main(
     physics_model = ThermoTable(gas1)
 
     ssbl = ShockTube(
-        n=nX,
+        n_cells=nX,
         xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
@@ -165,7 +165,7 @@ def main(
         dlnA_dx=dlnA_dx,
     )
     ssbl.state.gamma = ssbl.physics.get_gamma(ssbl.state)
-    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xc)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
     diagram_settings = [
         ("pressure", [p1 / 101325, p4 / 101325]),
         ("temperature", [T1, 800.0]),
@@ -178,15 +178,16 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssbl.geometry.dx
-    dV = A(0.0, ssbl.geometry.xc) * dx
-    VDriver = np.sum(dV[ssbl.geometry.xc < xShock])
+    idx = ssbl.geometry.idx_cells
+    xc = ssbl.geometry.xc[idx]
+    dV = ssbl.geometry.volume(0.0, xc)
+    VDriver = np.sum(dV[xc < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
     # get gas properties
     iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
-    mt = ssbl.n_ghost_layers
+    mt = ssbl.geometry.n_ghost_layers
     for iX, VNorm in enumerate(VNorms):
         if VNorm <= 1.0:
             # nitrogen and helium
@@ -214,7 +215,7 @@ def main(
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
-        n=nX,
+        n_cells=nX,
         xf=xf,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
@@ -228,7 +229,7 @@ def main(
         dlnA_dx=dlnA_dx,
     )
     ssnbl.state.gamma = ssnbl.physics.get_gamma(ssnbl.state)
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xc)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xf)))  # end wall probe
     ssnbl.xt_diagrams += [
         XTDiagram(ssnbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
@@ -237,15 +238,16 @@ def main(
     # adjust for partial filling strategy
     XN2Lower = 0.80  # assume smearing during fill
     XN2Upper = 1.5 - XN2Lower
-    dx = ssnbl.geometry.dx
-    dV = A(0.0, ssnbl.geometry.xc) * dx
-    VDriver = np.sum(dV[ssnbl.geometry.xc < xShock])
+    idx = ssnbl.geometry.idx_cells
+    xc = ssnbl.geometry.xc[idx]
+    dV = ssnbl.geometry.volume(0.0, xc)
+    VDriver = np.sum(dV[xc < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
     VNorms = V / VDriver
     # get gas properties
     iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
-    mt = ssnbl.n_ghost_layers
+    mt = ssnbl.geometry.n_ghost_layers
     for iX, VNorm in enumerate(VNorms):
         if VNorm <= 1.0:
             # nitrogen and helium

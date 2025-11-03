@@ -64,7 +64,7 @@ def main(
         physics = CanteraInterface(gas)
 
     ss = Combustor(
-        n=nX,
+        n_cells=nX,
         xf=np.linspace(xLower, xUpper, nX + 1),
         dx=(xUpper - xLower) / nX,
         initialization=("Riemann", unburnedState, burnedState, flame_center),
@@ -79,15 +79,11 @@ def main(
     # interpolate flame solution
     Y = ss.state.composition
     for iSp in range(gas.n_species):
-        Y[ss.idx_cells, iSp] = np.interp(ss.geometry.xc, flame.grid, flame.Y[iSp, :])
+        Y[:, iSp] = np.interp(ss.geometry.xc, flame.grid, flame.Y[iSp, :])
 
-    ss.state.density[ss.idx_cells] = np.interp(
-        ss.geometry.xc, flame.grid, flame.density
-    )
-    ss.state.velocity[ss.idx_cells] = np.interp(
-        ss.geometry.xc, flame.grid, flame.velocity
-    )
-    ss.state.pressure[ss.idx_cells] = flame.P * np.ones(ss.geometry.n)
+    ss.state.density = np.interp(ss.geometry.xc, flame.grid, flame.density)
+    ss.state.velocity = np.interp(ss.geometry.xc, flame.grid, flame.velocity)
+    ss.state.pressure = flame.P * np.ones(ss.geometry.n_cells)
     ss.state.composition = Y
 
     T = ss.state.temperature = ss.physics.get_temperature(ss.state)
@@ -105,7 +101,10 @@ def main(
 
     # plot setup
     if plot_results:
-        T = ss.physics.get_temperature(ss.state)[ss.idx_cells]
+        idx = ss.geometry.idx_cells
+        x = (ss.geometry.xc[idx] - flame_center) / flameThickness
+        x_ct = (flame.grid - flame_center) / flameThickness
+        T = ss.physics.get_temperature(ss.state)[idx]
         state = ss.physics.set_state(ss.state)
 
         plt.close("all")
@@ -114,51 +113,17 @@ def main(
         mpl.rcParams["font.size"] = fontsize
         plt.rc("text", usetex=True)
         # plot
-        plt.plot(
-            (flame.grid - flame_center) / flameThickness,
-            flame.T / flame.T[-1],
-            "r",
-            label=r"$T/T_\mathrm{F}$",
-        )
-        plt.plot(
-            (ss.geometry.xc - flame_center) / flameThickness, T / flame.T[-1], "r--s"
-        )
+        plt.plot(x_ct, flame.T / flame.T[-1], "r", label=r"$T/T_\mathrm{F}$")
+        plt.plot(x, T / flame.T[-1], "r--s")
         iOH = gas.species_index("OH")
-        plt.plot(
-            (flame.grid - flame_center) / flameThickness,
-            flame.Y[iOH, :] * 10,
-            "k",
-            label=r"$Y_\mathrm{OH}\times 10$",
-        )
-        plt.plot(
-            (ss.geometry.xc - flame_center) / flameThickness,
-            state.mass_fractions[ss.idx_cells, iOH] * 10,
-            "k--s",
-        )
+        plt.plot(x_ct, flame.Y[iOH, :] * 10, "k", label=r"$Y_\mathrm{OH}\times 10$")
+        plt.plot(x, state.mass_fractions[idx, iOH] * 10, "k--s")
         iO2 = gas.species_index("O2")
-        plt.plot(
-            (flame.grid - flame_center) / flameThickness,
-            flame.Y[iO2, :],
-            "g",
-            label=r"$Y_\mathrm{O_2}$",
-        )
-        plt.plot(
-            (ss.geometry.xc - flame_center) / flameThickness,
-            state.mass_fractions[ss.idx_cells, iO2],
-            "g--s",
-        )
+        plt.plot(x_ct, flame.Y[iO2, :], "g", label=r"$Y_\mathrm{O_2}$")
+        plt.plot(x, state.mass_fractions[idx, iO2], "g--s")
         iH2 = gas.species_index("H2")
-        plt.plot(
-            (flame.grid - flame_center) / flameThickness,
-            flame.Y[iH2, :],
-            "b",
-            label=r"$Y_\mathrm{H_2}$",
-        )
-        plt.plot(
-            (ss.geometry.xc - flame_center) / flameThickness,
-            state.mass_fractions[ss.idx_cells, iH2],
-            "b--s",
-        )
+        plt.plot(x_ct, flame.Y[iH2, :], "b", label=r"$Y_\mathrm{H_2}$")
+        plt.plot(x, state.mass_fractions[idx, iH2], "b--s")
         plt.xlabel(r"$x/\delta_\mathrm{F}$")
         plt.legend(loc="best")
         if show_results:
@@ -169,8 +134,8 @@ def main(
             plt.savefig(results_location / "laminarFlame.pdf")
 
     results = {
-        "position": ss.geometry.xc,
-        "temperature": T[ss.idx_cells],
+        "position": ss.geometry.xc[idx],
+        "temperature": T[idx],
     }
     if results_location is not None:
         results_location = Path(results_location)

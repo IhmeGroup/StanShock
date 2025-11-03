@@ -65,7 +65,7 @@ def initialize_constant(
             gas = Cantera solution object at the desired thermodynamic state
             u = velocity
     """
-    n = geometry.n
+    n = geometry.n_cells
     ones = np.ones(n)
 
     # Initialize state
@@ -178,7 +178,7 @@ def initialize_diffuse_interface(
         geometry.xc, shock_location, delta_smoothing, gamma_left, gamma_right
     )
 
-    composition = np.zeros((geometry.n, geometry.n_scalars))
+    composition = np.zeros((geometry.n_cells, geometry.n_scalars))
     for kSp in range(geometry.n_scalars):
         composition[:, kSp] = smoothing_function(
             geometry.xc,
@@ -189,7 +189,7 @@ def initialize_diffuse_interface(
         )
 
     return FluidState(
-        shape=(geometry.n,),
+        shape=(geometry.n_cells,),
         density=r,
         pressure=p,
         gamma=gamma,

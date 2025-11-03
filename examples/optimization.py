@@ -167,7 +167,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.geometry.xc)))  # end wall probe
+    ss.probes.append(Probe(ss, max(ss.geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
@@ -202,7 +202,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.geometry.xc)))  # end wall probe
+    ss.probes.append(Probe(ss, max(ss.geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()

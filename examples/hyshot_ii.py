@@ -136,7 +136,7 @@ class HydrogenInjection(RightHandSide):
         index = np.where(np.logical_and(xf >= x_inj, xf < x_inj + L_src))[0]
 
         nsp = gas.n_species
-        self.rhs = np.zeros([geometry.n, 2 + nsp])
+        self.rhs = np.zeros([geometry.n_cells, 2 + nsp])
         self.rhs[index, 0] = rho_f
         self.rhs[index, 1] = rhoE_f
         self.rhs[index, 2 + gas.species_index("H2")] = rhoYH2_f
@@ -177,9 +177,8 @@ ss.advance_simulation(t_end)
 
 # Plot the results
 def plot_sim(ss: Combustor) -> None:
-    xc = ss.geometry.xc
-
-    idx = ss.idx_cells
+    idx = ss.geometry.idx_cells
+    xc = ss.geometry.xc[idx] * scale
     rho = ss.state.density[idx]
     u = ss.state.velocity[idx]
     p = ss.state.pressure[idx]
@@ -189,37 +188,37 @@ def plot_sim(ss: Combustor) -> None:
     M = u / c
 
     fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 8))
-    ax[0].plot(xc * scale, rho)
+    ax[0].plot(xc, rho)
     ax[0].set_ymargin(0.1)
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
     add_h_plot(ax[0])
 
-    ax[1].plot(xc * scale, u)
+    ax[1].plot(xc, u)
     ax[1].set_ymargin(0.1)
     ax[1].set_ylabel(r"$u$ [m/s]")
     add_h_plot(ax[1])
 
-    ax[2].plot(xc * scale, p)
+    ax[2].plot(xc, p)
     ax[2].set_ymargin(0.1)
     ax[2].set_ylabel(r"$p$ [Pa]")
     add_h_plot(ax[2])
 
-    ax[3].plot(xc * scale, T)
+    ax[3].plot(xc, T)
     ax[3].set_ymargin(0.1)
     ax[3].set_ylabel(r"$T$ [K]")
     add_h_plot(ax[3])
 
-    ax[4].plot(xc * scale, M)
+    ax[4].plot(xc, M)
     ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
     add_h_plot(ax[4])
 
-    ax[5].plot(xc * scale, Y[:, gas.species_index("H2")])
+    ax[5].plot(xc, Y[:, gas.species_index("H2")])
     ax[5].set_ymargin(0.1)
     ax[5].set_ylabel(r"$Y_{\mathrm{H}_2}$ [-]")
     add_h_plot(ax[5])
 
-    ax[6].plot(xc * scale, Y[:, gas.species_index("H2O")])
+    ax[6].plot(xc, Y[:, gas.species_index("H2O")])
     ax[6].set_ymargin(0.1)
     ax[6].set_ylabel(r"$Y_{\mathrm{H}_2\mathrm{O}}$ [-]")
     add_h_plot(ax[6])

@@ -41,26 +41,17 @@ class Probe:
     def update(self, domain):
         state = domain.state
         geometry = domain.geometry
-        idx_cells = domain.idx_cells
         self.t.append(domain.t)
-        self.r.append(
-            interpolate(geometry.xc, state.density[idx_cells], self.probeLocation)
-        )
-        self.u.append(
-            interpolate(geometry.xc, state.velocity[idx_cells], self.probeLocation)
-        )
-        self.p.append(
-            interpolate(geometry.xc, state.pressure[idx_cells], self.probeLocation)
-        )
-        self.gamma.append(
-            interpolate(geometry.xc, state.gamma[idx_cells], self.probeLocation)
-        )
+        self.r.append(interpolate(geometry.xc, state.density, self.probeLocation))
+        self.u.append(interpolate(geometry.xc, state.velocity, self.probeLocation))
+        self.p.append(interpolate(geometry.xc, state.pressure, self.probeLocation))
+        self.gamma.append(interpolate(geometry.xc, state.gamma, self.probeLocation))
         YProbe = np.array(
             [
                 (
                     interpolate(
                         geometry.xc,
-                        state.composition[idx_cells, kSp],
+                        state.composition[:, kSp],
                         self.probeLocation,
                     )
                 )
