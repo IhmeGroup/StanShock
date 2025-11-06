@@ -131,7 +131,7 @@ class CanteraInterface(FluidPhysics):
         gamma = state.gamma
         if gamma is None:
             gamma = self.get_gamma(state)
-        state.sound_speed = np.sqrt(gamma * self.sol.P / self.sol.density)
+        state.sound_speed = np.sqrt(gamma * state.pressure / state.density)
         return state.sound_speed
 
     def get_mass_diffusivity(self, state: FluidState) -> Array:

@@ -59,15 +59,16 @@ def test_isentropic_flow_relations(isentropic_flow: Combustor) -> None:
     t = isentropic_flow.t
     state = isentropic_flow.state
     physics = isentropic_flow.physics
-    idx = isentropic_flow.idx_cells
     y = isentropic_flow.physics.primitive_to_conservative(state)
-    gamma_star = state.gamma
+    gamma_star, e0_star = isentropic_flow.physics.get_double_flux_variables(state)
 
     # Get source terms from inviscid flux
-    source_flux = isentropic_flow.inviscid_flux.source(t, y, physics, gamma_star)
+    source_flux = isentropic_flow.inviscid_flux.source(
+        t, y, physics, gamma_star, e0_star
+    )
 
     # Get source terms from area change
     source_area = isentropic_flow.area_change.source(
-        t, y[idx], physics, gamma_star[idx], 1.0
+        t, y, physics, gamma_star, e0_star, 1.0
     )
-    assert source_flux[3:-3] == pytest.approx(-source_area[3:-3], abs=1e-3)
+    assert source_flux[3:-3] == pytest.approx(-source_area[3:-3], rel=1e-3)

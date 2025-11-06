@@ -146,6 +146,16 @@ def hllc_flux(
         )
         SLR[0, iFace] = uLR[0, iFace] - aLR[0, iFace] * qLR[0, iFace]
         SLR[1, iFace] = uLR[1, iFace] + aLR[1, iFace] * qLR[1, iFace]
+
+        # srL = np.sqrt(rLR[0, iFace])
+        # srR = np.sqrt(rLR[1, iFace])
+        # denom = 1.0/(srL + srR)
+        # utilde = (srL*uLR[0, iFace] + srR*uLR[1, iFace]) * denom
+        # atilde = (srL*aLR[0, iFace] + srR*aLR[1, iFace]) * denom
+
+        # SLR[0, iFace] = utilde - atilde
+        # SLR[1, iFace] = utilde + atilde
+
         SStar[iFace] = pLR[1, iFace] - pLR[0, iFace]
         SStar[iFace] += rLR[0, iFace] * uLR[0, iFace] * (SLR[0, iFace] - uLR[0, iFace])
         SStar[iFace] -= rLR[1, iFace] * uLR[1, iFace] * (SLR[1, iFace] - uLR[1, iFace])

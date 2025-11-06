@@ -10,12 +10,16 @@ import pytest
 from cantera import Solution
 
 from stanshock.components.combustor import Combustor
-from stanshock.numerics.boundary_conditions import Inflow
+from stanshock.numerics.boundary_conditions import FreezeCells, Inflow
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.system.backend import Array
-from stanshock.system.geometry import Geometry, initialize_geometry
+from stanshock.system.geometry import (
+    Geometry,
+    SpatioTemporalFunction,
+    initialize_geometry,
+)
 from stanshock.utils.isentropic import mach_from_area_ratio
 
 T = TypeVar("T")
@@ -51,56 +55,74 @@ def pytest_collection_modifyitems(
 
 
 # Reusable fixtures for each piece of a full case setup
-# @pytest.fixture(params=[21, 201], ids=["coarse", "fine"], scope="session")
-# @pytest.fixture(params=[21], ids=["coarse"], scope="session")
-@pytest.fixture(params=[201], ids=["fine"], scope="session")
+@pytest.fixture(params=[401, 1001], ids=["coarse", "fine"], scope="session")
 def num_points(request: FixtureRequest[int]) -> int:
     return request.param
 
 
-@pytest.fixture(params=[2.0, 10.0], scope="session")
-def area_range(request: FixtureRequest[float], scope="session") -> float:
-    # Ratio of the largest to smallest flow area
-    return request.param
+choking_area_ratio = 10.0
 
 
 @pytest.fixture(
     params=["constant", "converging", "diverging", "converging-diverging"],
     scope="session",
 )
-def area(request: FixtureRequest[str], area_range: float, num_points: int) -> Array:
-    area: Array = np.ones((num_points,), dtype=np.float64)
+def area(request: FixtureRequest[str]) -> SpatioTemporalFunction:
     if request.param == "converging":
-        area = np.linspace(area_range, 1.0, num_points, dtype=np.float64)
+        area_range = 4.0
+
+        def area_function(_t: float, x: Array) -> Array:
+            return 1.0 + (1.0 - 0.1 * x) * (area_range - 1.0)
+
     elif request.param == "diverging":
-        area = np.linspace(1.0, area_range, num_points, dtype=np.float64)
+        area_range = 2.0
+
+        def area_function(_t: float, x: Array) -> Array:
+            return 1.0 + 0.1 * x * (area_range - 1.0)
+
     elif request.param == "converging-diverging":
-        scale = 5.0
-        shift = 2.0
-        x = np.linspace(-scale, scale, num_points, dtype=np.float64)
-        area = np.tanh(x - shift) - np.tanh(x + shift) + 2.0
-        area_min = np.tanh(-shift) - np.tanh(shift) + 2.0
-        area_max = np.tanh(scale - shift) - np.tanh(scale + shift) + 2.0
-        area = (area - area_min) / (area_max - area_min) * (
-            1.0 - 1.0 / area_range
-        ) + 1.0 / area_range
-    return area
+        area_range = choking_area_ratio
+
+        def area_function(_t: float, x: Array) -> Array:
+            scale = 5.0
+            shift = 2.0
+
+            x = x - scale
+
+            area = np.tanh(x - shift) - np.tanh(x + shift) + 2.0
+            area_min = np.tanh(-shift) - np.tanh(shift) + 2.0
+            area_max = np.tanh(scale - shift) - np.tanh(scale + shift) + 2.0
+            return (area - area_min) / (area_max - area_min) * (
+                1.0 - 1.0 / area_range
+            ) + 1.0 / area_range
+    else:
+
+        def area_function(_t: float, x: Array) -> Array:
+            return np.ones_like(x)
+
+    return area_function
 
 
 @pytest.fixture(
     params=["box", "cylinder"],
     scope="session",
 )
-def geometry(request: FixtureRequest[str], area: Array) -> Geometry:
-    num_points = area.shape[0]
-    x = np.linspace(0.0, 10.0, num_points, dtype=np.float64)
+def geometry(
+    request: FixtureRequest[str], area: SpatioTemporalFunction, num_points: int
+) -> Geometry:
+    xf = np.linspace(0.0, 10.0, num_points, dtype=np.float64)
 
     if request.param == "box":
-        geometry: Geometry = initialize_geometry(x=x, h=area)
+        geometry: Geometry = initialize_geometry(xf=xf, h=area)
+
     elif request.param == "cylinder":
-        geometry = initialize_geometry(x=x, d_outer=2.0 * np.sqrt(area / np.pi))
+
+        def d_outer(t: float, x: Array) -> Array:
+            return 2.0 * np.sqrt(area(t, x) / np.pi)
+
+        geometry = initialize_geometry(xf=xf, d_outer=d_outer)
     else:
-        geometry = initialize_geometry(x=x, area=area)
+        geometry = initialize_geometry(xf=xf, area=area)
     return geometry
 
 
@@ -117,10 +139,7 @@ def mechanism(request: FixtureRequest[str]) -> Path:
 
 @pytest.fixture(scope="session")
 def gas(mechanism: Path) -> Solution:
-    gas = Solution(mechanism)
-    nsp = gas.n_species
-    gas.TPY = 3000.0, 30e6, np.ones((nsp,)) / nsp
-    return gas
+    return Solution(mechanism)
 
 
 @pytest.fixture(
@@ -136,8 +155,10 @@ def fluid_physics(
 # Set inflow boundary condition for a choked flow with area ratio 10.0
 @pytest.fixture(scope="session")
 def inflow_bc(gas: Solution) -> Inflow:
+    nsp = gas.n_species
+    gas.TPY = 3000.0, 30e6, np.ones((nsp,)) / nsp
     g: float = gas.cp / gas.cv
-    area_ratio = np.array([10.0])
+    area_ratio = np.array([choking_area_ratio])
 
     # Get subsonic result
     inflow_mach: float = mach_from_area_ratio(area_ratio, g, subsonic=True)[0]
@@ -152,13 +173,19 @@ def inflow_bc(gas: Solution) -> Inflow:
 def isentropic_flow(
     gas: Solution, fluid_physics: FluidPhysics, geometry: Geometry, inflow_bc: Inflow
 ) -> Combustor:
+    # Reinitialize Solution object to inflow conditions
+    nsp = gas.n_species
+    gas.TPY = 3000.0, 30e6, np.ones((nsp,)) / nsp
+
     # Get throat area at which flow will choke
-    throat_area: float = geometry.area(0.0, geometry.x[0]) / 10.0
+    area = geometry.area(0.0, geometry.xf)
+    throat_area: float = area[0] / choking_area_ratio
+    subsonic_outflow = area.min() - throat_area > 1e-3
 
     # Set up simulation object
     return Combustor(
-        boundary_conditions=[inflow_bc, "outflow"],
+        boundary_conditions=[inflow_bc, FreezeCells(location="right"), "outflow"],
         geometry=geometry,
-        initialization=("isentropic", gas, throat_area),
+        initialization=("isentropic", gas, throat_area, True, subsonic_outflow),
         physics=fluid_physics,
     )

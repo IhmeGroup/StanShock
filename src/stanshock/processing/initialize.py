@@ -212,28 +212,26 @@ def initialize_isentropic(
     Note that this formulation is only valid for a flow with constant specific
     heat ratio. It could be extended for non-ideal gas equations of state
     """
-    # Get cross-sectional area from the geometry
-    x = geometry.x
-    area = geometry.area(0.0, x)
-    assert isinstance(area, np.ndarray)
-
-    # If throat area is not given, assume choked flow
-    min_area: float = area.min()
-    throat_area = min_area if throat_area is None else min(min_area, throat_area)
-
     # Get inflow properties for the gas
     g = inflow_state.cp / inflow_state.cv
     P_in = inflow_state.P
     rho_in = inflow_state.density_mass
     composition = physics.get_composition(inflow_state.Y)
 
-    # Get the permissible subsonic and supersonic Mach numbers throughout
-    # the domain from the area ratio
+    # Get cross-sectional area from the geometry
+    area = geometry.area(0.0, geometry.xf)
+    assert isinstance(area, np.ndarray)
+
+    # If throat area is not given, assume choked flow
+    min_area: float = area.min()
+    throat_area = min_area if throat_area is None else min(min_area, throat_area)
     area_ratio = area / throat_area
+    inflow_area_ratio = area_ratio[0]
     area_ratio_min = area_ratio.min()
-    choked_flow = area_ratio_min <= 1.0
+    choked_flow = area_ratio_min < 1.0
     if choked_flow:
         # Adjust throat area based on choked flow - will affect requested boundary conditions
+        inflow_area_ratio /= area_ratio_min
         area_ratio /= area_ratio_min
         throat_area /= area_ratio_min
     elif subsonic_inflow != subsonic_outflow:
@@ -241,6 +239,10 @@ def initialize_isentropic(
             "Warning: Subsonic/supersonic transition requested, but flow may not be choked.\n"
             + f"Minimum area ratio = {area_ratio_min}."
         )
+
+    # Get area ratios at cell centers
+    area = geometry.area(0.0, geometry.xc)
+    area_ratio = area / throat_area
 
     # Solve for allowable Mach numbers corresponding to given area ratio
     subsonic_mach: Array = mach_from_area_ratio(area_ratio, g, subsonic=True)
@@ -259,12 +261,15 @@ def initialize_isentropic(
         mach = supersonic_mach
 
     # Get stagnation properties based on inflow
-    _, inflow_Pratio, inflow_rhoratio = property_ratios(mach[0], g)
+    inflow_mach: float = mach_from_area_ratio(
+        inflow_area_ratio, g, subsonic=subsonic_inflow
+    )[0]
+    _, inflow_Pratio, inflow_rhoratio = property_ratios(inflow_mach, g)
 
     # Get properties throughout
     _, Pratio_profile, rhoratio_profile = property_ratios(mach, g)
 
-    n = geometry.n
+    n = geometry.n_cells
     state = FluidState(
         shape=(n,),
         pressure=P_in / inflow_Pratio * Pratio_profile,
@@ -273,6 +278,7 @@ def initialize_isentropic(
         composition=np.broadcast_to(composition, (n, composition.shape[0])).copy(),
     )
     state.velocity = mach * physics.get_sound_speed(state)
+    state.temperature = physics.get_temperature(state)
 
     return state
 
