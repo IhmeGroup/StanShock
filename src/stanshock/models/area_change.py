@@ -18,7 +18,7 @@ class AreaChange(RightHandSide):
         ).set_integrator("lsoda", lband=0, uband=0)
 
         # Define global indices
-        self.idx_locations = np.s_[:]
+        self.idx_locations = self.geometry.idx_cells
         self.idx_source_terms = np.s_[:]
 
         # For geometries with no area change, replace the source term with a no-op
@@ -38,26 +38,28 @@ class AreaChange(RightHandSide):
         if self.no_area_change:
             return np.zeros((1,))
 
-        state = physics.conservative_to_primitive(state_array, gamma_star, e0_star)
+        idx = self.idx_locations
+        xc = self.geometry.xc[idx]
+        state = physics.conservative_to_primitive(
+            state_array[idx], gamma_star[idx], e0_star[idx]
+        )
         Y0 = state.composition
 
-        state0_compact = np.zeros((state_array.shape[0], 4))
+        state0_compact = np.zeros((state_array[idx].shape[0], 4))
         state0_compact[:, 0] = state.density
-        state0_compact[:, 1] = state_array[:, 0]
-        state0_compact[:, 2] = state_array[:, 1]
+        state0_compact[:, 1] = state_array[idx, 0]
+        state0_compact[:, 2] = state_array[idx, 1]
         state0_compact[:, 3] = state.pressure
 
         # Divide domain between explicit and implicit source terms
-        idx_explicit: Index = np.arange(self.geometry.x.shape[0], dtype=np.int64)
+        idx_explicit: Index = np.arange(self.geometry.n_cells_interior, dtype=np.int64)
         assert isinstance(idx_explicit, np.ndarray)
         idx_implicit: Index = np.array([], dtype=np.int64)
         assert isinstance(idx_implicit, np.ndarray)
-        rhs: Array = np.zeros_like(
-            state_array[self.idx_locations, self.idx_source_terms]
-        )
+        rhs: Array = np.zeros_like(state_array[idx, self.idx_source_terms])
 
         if self.geometry.dlnA_dt is not None:
-            dlnA_dt: Array | float = self.geometry.dlnA_dt(time, self.geometry.x)
+            dlnA_dt: Array | float = self.geometry.dlnA_dt(time, xc)
             assert isinstance(dlnA_dt, np.ndarray)
             idx_implicit = np.where(dlnA_dt != 0.0)[0]
             idx_explicit = np.where(dlnA_dt == 0.0)[0]
@@ -67,8 +69,8 @@ class AreaChange(RightHandSide):
                 # Initialize
                 y0: Array = state0_compact[idx_implicit, :].copy()
                 args: tuple[Array, Array] = (
-                    self.geometry.x[idx_implicit],
-                    gamma_star[idx_implicit],
+                    xc[idx_implicit],
+                    gamma_star[idx][idx_implicit],
                 )
                 self.integrator.set_initial_value(y=y0, t=time)
                 self.integrator.set_f_params(args)
@@ -85,9 +87,6 @@ class AreaChange(RightHandSide):
                 )  # rY sources
 
         # Add slow source terms
-        state: FluidState = physics.conservative_to_primitive(
-            state_array, gamma_star=gamma_star, e0_star=e0_star
-        )
         rhs_compact = self.source_slow(
             time=time, state0_compact=state0_compact, state=state, idx=idx_explicit
         )
@@ -103,7 +102,7 @@ class AreaChange(RightHandSide):
     ) -> Array:
         """Area change contributions to RHS."""
         rhs_compact: Array = np.zeros_like(state0_compact[idx])
-        x: Array = self.geometry.x[idx]
+        x: Array = self.geometry.xc[self.geometry.idx_cells][idx]
 
         if self.geometry.dlnA_dt is not None:
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)

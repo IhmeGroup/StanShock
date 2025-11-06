@@ -22,9 +22,9 @@ BIGGER_SIZE = 18
 
 plt.rcParams.update(
     {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
+        "text.usetex": False,
+        # "font.family": "serif",
+        # "font.serif": ["Computer Modern Roman"],
         "axes.xmargin": 0,
         "axes.ymargin": 0,
         "font.size": SMALL_SIZE,
@@ -43,7 +43,7 @@ scale = 1e3
 
 def add_h_plot(ax):
     ax1 = ax.twinx()
-    ax1.plot(x * scale, h * scale, "k", linestyle="--")
+    ax1.plot(xf * scale, h * scale, "k", linestyle="--")
     ax1.axhline(0, color="k", linestyle="--")
     ax1.set_aspect("equal")
     ax1.set_ylabel("h [mm]")
@@ -220,11 +220,12 @@ T_f = T_f[-1]
 
 # Define the grid
 N_x = 200
-x = np.linspace(0, L_const + L_exhaust, N_x)
-h = np.zeros_like(x)
-h[x < L_const] = h_const
-h[x >= L_const] = h_const + (x[x >= L_const] - L_const) * np.tan(theta_exhaust)
-geometry = Box(x=x, h=h, w=w)
+xf = np.linspace(0, L_const + L_exhaust, N_x + 1)
+xc = 0.5 * (xf[1:] + xf[:-1])
+h = np.zeros_like(xf)
+h[xf < L_const] = h_const
+h[xf >= L_const] = h_const + (xf[xf >= L_const] - L_const) * np.tan(theta_exhaust)
+geometry = Box(xf=xf, h=h, w=w)
 
 
 # PDF sampling parameters
@@ -256,21 +257,21 @@ fpv_table = FPVTable(
 
 # Build the injector model
 jic = JICModel(
-    "H2",
-    x,
-    x_inj,
-    L_const,
-    w,
-    h[0],
-    N_f,
-    2 * r_f,
-    t_f,
-    rho_f,
-    U_f,
-    T_f,
-    rho_in,
-    U_in,
-    T_in,
+    fuel="H2",
+    x=xc,
+    x_inj=x_inj,
+    x_noz=L_const,
+    w=w,
+    h=h[0],
+    n_inj=N_f,
+    d_inj=2 * r_f,
+    t_inj=t_f,
+    rho_inj=rho_f,
+    u_inj=U_f,
+    T_inj=T_f,
+    rho=rho_in,
+    u=U_in,
+    T=T_in,
     alpha=1e6,
     fpv_table=fpv_table,
     load_Z_3D=(datadir / "Z_3D.npy").exists(),
@@ -402,7 +403,7 @@ jic = JICModel(
 
 # Initialize and run the simulation
 ss = Combustor(
-    x=x,
+    xf=xf,
     geometry=geometry,
     wall_temperature=300.0,
     include_boundary_layer=True,

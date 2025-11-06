@@ -31,6 +31,14 @@ class SpecifiedFlux(BoundaryCondition[Array]):
     """Directly set the flux through the boundary face."""
 
 
+class FreezeCells(GhostCell):
+    """Hold ghost cells constant (do nothing)."""
+
+    def update(self, time: float, target: Array) -> Array:
+        _: float = time
+        return target
+
+
 class PadCells(GhostCell):
     """Extrapolates constant values from the last interior cell into the ghost layers."""
 
@@ -90,7 +98,7 @@ class Symmetry(GhostCell):
     def update(self, time: float, target: Array) -> Array:
         _: float = time
         target[self.idx_exterior] = target[self.idx_interior]
-        target[self.idx_exterior][1] = -target[self.idx_interior][1]
+        target[self.idx_exterior][:, 0] = -target[self.idx_interior][:, 0]
 
         return target
 
@@ -249,6 +257,12 @@ def set_boundary_conditions(
 ) -> BoundaryConditions:
     """Convenience function to initialize different boundary conditions."""
 
+    # If ghost layer method not specified, default to freezing (hold constant)
+    default_ghost_layers: dict[str, GhostCell] = {
+        "left": FreezeCells(location="left"),
+        "right": FreezeCells(location="right"),
+    }
+
     # Convert lists into BoundaryConditions:
     if not isinstance(boundary_conditions, BoundaryConditions):
         bc_locs: list[Literal["left", "right"]] = ["left", "right"]
@@ -259,10 +273,12 @@ def set_boundary_conditions(
                 if bc_specification == "periodic":
                     bcs += [Periodic(mt, location=bc_loc)]
                 elif bc_specification == "outflow":
+                    default_ghost_layers[bc_loc] = PadCells(mt, location=bc_loc)
                     bcs += [Extrapolate(location=bc_loc)]
                 elif bc_specification in ["symmetry"]:
                     bcs += [Symmetry(mt, location=bc_loc)]
                 elif bc_specification in ["reflecting", "wall"]:
+                    default_ghost_layers[bc_loc] = Symmetry(mt, location=bc_loc)
                     bcs += [AdiabaticWall(location=bc_loc)]
             elif isinstance(bc_specification, BoundaryCondition):
                 bcs += [bc_specification]
@@ -271,11 +287,7 @@ def set_boundary_conditions(
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)
 
-    # If ghost layer method not specified, default to simple padding
-    default_ghost_layers: dict[str, GhostCell] = {
-        "left": PadCells(mt, location="left"),
-        "right": PadCells(mt, location="right"),
-    }
+    # Don't use default GhostCell treatments if already specified
     for bc in boundary_conditions._boundary_conditions:
         if isinstance(bc, Periodic):
             default_ghost_layers = {}

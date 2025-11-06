@@ -27,7 +27,7 @@ from stanshock.processing.initialize import (
     initialize_riemann_problem,
 )
 from stanshock.processing.plot import plot_state
-from stanshock.system.backend import Array, Index
+from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
 from stanshock.system.geometry import Geometry, initialize_geometry
 
@@ -41,7 +41,7 @@ class Combustor:
     def __init__(
         self,
         physics: FluidPhysics,
-        n: int = 10,
+        n_cells: int = 10,
         geometry: Geometry | None = None,
         **kwargs,
     ):
@@ -52,15 +52,14 @@ class Combustor:
         # initialize the class
         self.cfl = 1.0  # stability condition
         self.dx = 1.0  # grid spacing
-        self.n = n  # grid size
+        self.n_cells = n_cells  # grid size
         self.boundary_conditions: BoundaryConditions | list[BCNamesType | BCType] = [
             "outflow",
             "outflow",
         ]
-        self.x: Array = np.linspace(
-            0.0, self.dx * (self.n - 1), self.n, dtype=np.float64
+        self.xf: Array = np.linspace(
+            0.0, self.dx * self.n_cells, self.n_cells + 1, dtype=np.float64
         )
-        self.F = np.ones(self.n)  # thickening
         self.t = 0.0  # time
         self.verbose = True  # console output switch
         self.output_every = (
@@ -81,8 +80,8 @@ class Combustor:
         self.optimization_iteration = 0  # counter to keep track of optimization
         self.physics = physics  # Model handling all fluid property evaluations
         self.reacting = False  # flag to solver about whether to solve source terms
-        self.in_reacting_region = (
-            lambda _x, _t: True
+        self.in_reacting_region = lambda _t, x: np.ones_like(
+            x, dtype=bool
         )  # the reacting region of the shock tube.
         self.include_diffusion = False  # exclude diffusion
         self.thickening = None  # thickening function
@@ -92,12 +91,22 @@ class Combustor:
             if key in self.__dict__:
                 self.__dict__[key] = item
 
+        # Determine the number of ghost layers required by the spatial scheme
+        n_ghost_layers: int = self.inviscid_face_extrapolator.minimum_ghost_layers
+        if self.include_diffusion:
+            n_ghost_layers = max(
+                n_ghost_layers, self.viscous_face_extrapolator.minimum_ghost_layers
+            )
+
         # Initialize the geometry of the domain
         if geometry is None:
-            kwargs.pop("x")
-            self.geometry: Geometry = initialize_geometry(x=self.x, **kwargs)
+            kwargs.pop("xf")
+            self.geometry: Geometry = initialize_geometry(
+                xf=self.xf, n_ghost_layers=n_ghost_layers, **kwargs
+            )
         else:
             self.geometry = geometry
+            self.geometry.setup_ghost_layers(n_ghost_layers=n_ghost_layers)
 
         # Add area-change related source terms
         if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None:
@@ -109,16 +118,9 @@ class Combustor:
             msg = "JIC injector model requires FPVTable physics."
             raise Exception(msg)
 
-        # Determine the number of ghost layers required by the spatial scheme
-        self.n_ghost_layers: int = self.inviscid_face_extrapolator.minimum_ghost_layers
-        if self.include_diffusion:
-            self.n_ghost_layers = max(
-                self.n_ghost_layers, self.viscous_face_extrapolator.minimum_ghost_layers
-            )
-
         # Set up boundary conditions
         self.boundary_conditions: BoundaryConditions = set_boundary_conditions(
-            self.boundary_conditions, self.n_ghost_layers
+            self.boundary_conditions, self.geometry.n_ghost_layers
         )
 
         # initialize the state
@@ -142,7 +144,7 @@ class Combustor:
         self.inviscid_flux = InviscidFlux(
             face_extrapolator=self.inviscid_face_extrapolator(
                 n_scalars_rho_sum=self.physics.n_scalars_rho_sum,
-                n_ghost_layers=self.n_ghost_layers,
+                n_ghost_layers=self.geometry.n_ghost_layers,
             ),
             boundary_conditions=self.boundary_conditions,
             riemann_solver=self.flux_function,
@@ -154,10 +156,10 @@ class Combustor:
                 boundary_conditions=self.boundary_conditions,
                 face_extrapolator=self.viscous_face_extrapolator(
                     n_scalars_rho_sum=self.physics.n_scalars_rho_sum,
-                    n_ghost_layers=self.n_ghost_layers,
+                    n_ghost_layers=self.geometry.n_ghost_layers,
                 ),
                 geometry=self.geometry,
-                gradient=CentralDifference(n_ghost_layers=self.n_ghost_layers),
+                gradient=CentralDifference(n_ghost_layers=self.geometry.n_ghost_layers),
             )
 
         if self.include_boundary_layer:
@@ -168,10 +170,7 @@ class Combustor:
                 skin_friction_coefficient=self.skin_friction_coefficient,
             )
 
-        # Extend the domain to include the ghost layers
-        self.state = self.inviscid_flux.face_extrapolator.add_ghost_layers(self.state)
-        self.idx_cells: Index = np.s_[self.n_ghost_layers : -self.n_ghost_layers]
-        self.F = np.pad(self.F, self.n_ghost_layers, mode="edge")
+        self.F = np.ones(self.geometry.n_cells)  # thickening
 
     def get_wave_speed(self):
         """
@@ -211,27 +210,24 @@ class Combustor:
             inputs
                 dt=time step
         """
+        idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         # 1st stage of RK3
         dydt = self.inviscid_flux.source(self.t, y, self.physics, gamma_star, e0_star)
         y1 = y.copy()
-        y1[self.idx_cells] += dt * dydt
+        y1[idx] += dt * dydt
 
         # 2nd stage of RK3
         dydt = self.inviscid_flux.source(self.t, y1, self.physics, gamma_star, e0_star)
         y2 = 0.75 * y + 0.25 * y1
-        y2[self.idx_cells] += 0.25 * dt * dydt
+        y2[idx] += 0.25 * dt * dydt
 
         # 3rd stage of RK3
         dydt = self.inviscid_flux.source(self.t, y2, self.physics, gamma_star, e0_star)
 
-        y[self.idx_cells] = (
-            (1.0 / 3.0) * y[self.idx_cells]
-            + (2.0 / 3.0) * y2[self.idx_cells]
-            + (2.0 / 3.0) * dt * dydt
-        )
+        y[idx] = (1.0 / 3.0) * y[idx] + (2.0 / 3.0) * y2[idx] + (2.0 / 3.0) * dt * dydt
 
         # Remove ghost layers and update gamma
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
@@ -242,7 +238,7 @@ class Combustor:
             inputs
                 dt=time step
         """
-        mt: int = self.n_ghost_layers
+        idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
@@ -250,16 +246,18 @@ class Combustor:
             self.F = self.thickening(self)
 
             # No gradient in F at boundary
-            self.viscous_flux.F = np.pad(self.F, mt, mode="edge")
+            self.viscous_flux.F = np.pad(
+                self.F, self.geometry.n_ghost_layers, mode="edge"
+            )
 
         # 1st stage of RK2
         dydt = self.viscous_flux.source(self.t, y, self.physics, gamma_star, e0_star)
         y1 = y.copy()
-        y1[self.idx_cells] += dt * dydt
+        y1[idx] += dt * dydt
 
         # 2nd stage of RK2
         dydt = self.viscous_flux.source(self.t, y1, self.physics, gamma_star, e0_star)
-        y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1[self.idx_cells] + dt * dydt)
+        y[idx] = 0.5 * (y[idx] + y1[idx] + dt * dydt)
 
         # Remove ghost layers and update gamma
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
@@ -287,31 +285,30 @@ class Combustor:
                 dt=time step
         """
         # initialize
+        idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         # 1st stage of RK2
         omegaC = self.injector.get_chemical_sources(
             self.t,
-            y[self.idx_cells],
+            y[idx],
             self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
+            gamma_star[idx],
+            e0_star[idx],
         )
         y1 = y.copy()
-        y1[self.idx_cells, 4] += dt * omegaC
+        y1[idx, 4] += dt * omegaC
 
         # 2nd stage of RK2
         omegaC1 = self.injector.get_chemical_sources(
             self.t + dt,
-            y1[self.idx_cells],
+            y1[idx],
             self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
+            gamma_star[idx],
+            e0_star[idx],
         )
-        y[self.idx_cells, 4] = 0.5 * (
-            y[self.idx_cells, 4] + y1[self.idx_cells, 4] + dt * omegaC1
-        )
+        y[idx, 4] = 0.5 * (y[idx, 4] + y1[idx, 4] + dt * omegaC1)
 
         # update properties
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
@@ -360,11 +357,7 @@ class Combustor:
         from scipy import integrate
 
         # get indices
-        indices = [
-            k + self.n_ghost_layers
-            for k in range(self.n)
-            if self.in_reacting_region(self.geometry.x[k], self.t)
-        ]
+        indices = np.where(self.in_reacting_region(self.t, self.geometry.xc))[0]
         state_temp = FluidState(
             shape=(len(indices),),
             density=self.state.density[indices].copy(),
@@ -407,20 +400,14 @@ class Combustor:
         the shock tube. The client must supply the functions dlnA_dt and dlnA_dx
         to the Combustor object.
         """
+        idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
-        dydt = self.area_change.source(
-            self.t,
-            y[self.idx_cells],
-            self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
-            dt,
-        )
+        dydt = self.area_change.source(self.t, y, self.physics, gamma_star, e0_star, dt)
 
         # Update
-        y[self.idx_cells] += dt * dydt
+        y[idx] += dt * dydt
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_boundary_layer(self, dt):
@@ -429,19 +416,20 @@ class Combustor:
             inputs
                 dt=time step
         """
+        idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         dydt = self.boundary_layer.source(
             self.t,
-            y[self.idx_cells],
+            y[idx],
             self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
+            gamma_star[idx],
+            e0_star[idx],
         )
 
         # Update
-        y[self.idx_cells] += dydt * dt
+        y[idx] += dydt * dt
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_source_terms(self, dt):
@@ -451,18 +439,19 @@ class Combustor:
                 dt=time step
         """
         # initialize
+        idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
         # 1st stage of RK2
         dydt = self.source_terms.source(
             self.t,
-            y[self.idx_cells],
+            y[idx],
             self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
+            gamma_star[idx],
+            e0_star[idx],
         )
-        y1 = y[self.idx_cells] + dt * dydt
+        y1 = y[idx] + dt * dydt
         # state1 = self.physics.conservative_to_primitive(y1, gamma_star, e0_Star)
 
         # 2nd stage of RK2
@@ -470,11 +459,11 @@ class Combustor:
             self.t + dt,
             y1,
             self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
+            gamma_star[idx],
+            e0_star[idx],
         )
 
-        y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1 + dt * dydt)
+        y[idx] = 0.5 * (y[idx] + y1 + dt * dydt)
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
 
     def advance_injector(self, dt):
@@ -489,32 +478,31 @@ class Combustor:
             raise Exception(msg)
 
         # initialize
+        idx = self.geometry.idx_cells
         y = self.physics.primitive_to_conservative(self.state)
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
 
-        self.injector.update_fluid_tip_positions(
-            dt, self.t, self.state.velocity[self.idx_cells]
-        )
+        self.injector.update_fluid_tip_positions(dt, self.t, self.state.velocity[idx])
 
         # 1st stage of RK2
         dydt = self.injector.source(
             self.t,
-            y[self.idx_cells],
+            y[idx],
             self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
+            gamma_star[idx],
+            e0_star[idx],
         )
-        y1 = y[self.idx_cells] + dt * dydt
+        y1 = y[idx] + dt * dydt
 
         # 2nd stage of RK2
         dydt = self.injector.source(
             self.t + dt,
             y1,
             self.physics,
-            gamma_star[self.idx_cells],
-            e0_star[self.idx_cells],
+            gamma_star[idx],
+            e0_star[idx],
         )
-        y[self.idx_cells] = 0.5 * (y[self.idx_cells] + y1 + dt * dydt)
+        y[idx] = 0.5 * (y[idx] + y1 + dt * dydt)
 
         # update
         self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)

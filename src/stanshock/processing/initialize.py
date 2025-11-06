@@ -65,7 +65,7 @@ def initialize_constant(
             gas = Cantera solution object at the desired thermodynamic state
             u = velocity
     """
-    n = geometry.n
+    n = geometry.n_cells
     ones = np.ones(n)
 
     # Initialize state
@@ -115,7 +115,7 @@ def initialize_riemann_problem(
     # Override with right state
     state_right = initialize_constant(geometry, physics, right_gas, u_right)
 
-    index = np.where(geometry.x >= shock_location)[0]
+    index = np.where(geometry.xc >= shock_location)[0]
     state.density[index] = state_right.density[index]
     state.velocity[index] = state_right.velocity[index]
     state.pressure[index] = state_right.pressure[index]
@@ -162,22 +162,26 @@ def initialize_diffuse_interface(
 
     # Smooth transition between left and right states
     r = smoothing_function(
-        geometry.x, shock_location, delta_smoothing, left_gas.density, right_gas.density
+        geometry.xc,
+        shock_location,
+        delta_smoothing,
+        left_gas.density,
+        right_gas.density,
     )
     geometry.u = smoothing_function(
-        geometry.x, shock_location, delta_smoothing, u_left, u_right
+        geometry.xc, shock_location, delta_smoothing, u_left, u_right
     )
     p = smoothing_function(
-        geometry.x, shock_location, delta_smoothing, left_gas.P, right_gas.P
+        geometry.xc, shock_location, delta_smoothing, left_gas.P, right_gas.P
     )
     gamma = smoothing_function(
-        geometry.x, shock_location, delta_smoothing, gamma_left, gamma_right
+        geometry.xc, shock_location, delta_smoothing, gamma_left, gamma_right
     )
 
-    composition = np.zeros((geometry.n, geometry.n_scalars))
+    composition = np.zeros((geometry.n_cells, geometry.n_scalars))
     for kSp in range(geometry.n_scalars):
         composition[:, kSp] = smoothing_function(
-            geometry.x,
+            geometry.xc,
             shock_location,
             delta_smoothing,
             composition_left[:, kSp],
@@ -185,7 +189,7 @@ def initialize_diffuse_interface(
         )
 
     return FluidState(
-        shape=(geometry.n,),
+        shape=(geometry.n_cells,),
         density=r,
         pressure=p,
         gamma=gamma,

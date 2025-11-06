@@ -22,7 +22,7 @@ class Probe:
     def __init__(self, domain, probeLocation, skipSteps=0, probeName=None):
         self.probeLocation = probeLocation
         geometry = domain.geometry
-        if probeLocation > np.max(geometry.x) or probeLocation < np.min(geometry.x):
+        if probeLocation > np.max(geometry.xf) or probeLocation < np.min(geometry.xf):
             msg = "Invalid Probe Location"
             raise Exception(msg)
 
@@ -41,26 +41,17 @@ class Probe:
     def update(self, domain):
         state = domain.state
         geometry = domain.geometry
-        idx_cells = domain.idx_cells
         self.t.append(domain.t)
-        self.r.append(
-            interpolate(geometry.x, state.density[idx_cells], self.probeLocation)
-        )
-        self.u.append(
-            interpolate(geometry.x, state.velocity[idx_cells], self.probeLocation)
-        )
-        self.p.append(
-            interpolate(geometry.x, state.pressure[idx_cells], self.probeLocation)
-        )
-        self.gamma.append(
-            interpolate(geometry.x, state.gamma[idx_cells], self.probeLocation)
-        )
+        self.r.append(interpolate(geometry.xc, state.density, self.probeLocation))
+        self.u.append(interpolate(geometry.xc, state.velocity, self.probeLocation))
+        self.p.append(interpolate(geometry.xc, state.pressure, self.probeLocation))
+        self.gamma.append(interpolate(geometry.xc, state.gamma, self.probeLocation))
         YProbe = np.array(
             [
                 (
                     interpolate(
-                        geometry.x,
-                        state.composition[idx_cells, kSp],
+                        geometry.xc,
+                        state.composition[:, kSp],
                         self.probeLocation,
                     )
                 )
