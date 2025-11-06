@@ -46,9 +46,7 @@ def lax_friedrichs_flux(
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
-    nLR = len(rLR)
-    nFaces = len(rLR[0])
-    nSc = YLR[0].shape[1]
+    nLR, nFaces, nSc = YLR.shape
     nDim = mn + nSc
 
     # find the maximum wave speed
@@ -109,9 +107,7 @@ def hllc_flux(
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
-    nLR = len(rLR)
-    nFaces = len(rLR[0])
-    nSc = YLR[0].shape[1]
+    nLR, nFaces, nSc = YLR.shape
     nDim = mn + nSc
 
     # compute the wave speeds
@@ -248,7 +244,7 @@ class InviscidFlux(RightHandSide):
         return self.source_from_primitives(time, face_states, physics)
 
     def source_from_primitives(
-        self, _time: float, face_states: FluidState, _physics: FluidPhysics
+        self, time: float, face_states: FluidState, _physics: FluidPhysics
     ) -> Array:
         assert face_states.density is not None
         assert face_states.velocity is not None
@@ -273,6 +269,9 @@ class InviscidFlux(RightHandSide):
             face_states.gamma_star[0, :],
             face_states.e0_star[0, :],
         )
+
+        self.boundary_conditions.update_face_flux(time, left_face_flux)
+        self.boundary_conditions.update_face_flux(time, right_face_flux)
 
         return cast(
             Array,
