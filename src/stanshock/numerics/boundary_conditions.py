@@ -7,15 +7,15 @@ from typing import Generic, Literal, TypeVar
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, TypeAlias, np
 
-T = TypeVar("T")
+_T = TypeVar("_T")
 
 
-class BoundaryCondition(ABC, Generic[T]):
+class BoundaryCondition(ABC, Generic[_T]):
     def __init__(self, location: Literal["left", "right"] = "left") -> None:
         self.location = location
 
     @abstractmethod
-    def update(self, time: float, target: T) -> T:
+    def update(self, time: float, target: _T) -> _T:
         """Update the target of the specific boundary condition type."""
 
 
@@ -39,7 +39,7 @@ class FreezeCells(GhostCell):
         return target
 
 
-class PadCells(GhostCell):
+class ExtrapolateCells(GhostCell):
     """Extrapolates constant values from the last interior cell into the ghost layers."""
 
     def __init__(
@@ -60,7 +60,7 @@ class PadCells(GhostCell):
         return target
 
 
-class LinearExtrapolation(GhostCell):
+class ExtrapolateCellsLinear(GhostCell):
     """Linearly extrapolates values from the interior cells into the ghost layers."""
 
     def __init__(
@@ -74,17 +74,18 @@ class LinearExtrapolation(GhostCell):
             self.idx_interior = np.s_[-mt - 2 : -mt]
             self.idx_exterior = np.s_[-mt:]
         self.mt = mt
+        self.delta = np.arange(self.mt, 0, -1)[:, None]
 
     def update(self, time: float, target: Array) -> Array:
         _: float = time
-        target[self.idx_exterior] = target[self.idx_interior][[0]] - np.arange(
-            self.mt, 0, -1
-        )[:, None] * np.diff(target[self.idx_interior], axis=0)
+        target[self.idx_exterior] = target[self.idx_interior][
+            [0]
+        ] - self.delta * np.diff(target[self.idx_interior], axis=0)
 
         return target
 
 
-class Periodic(GhostCell):
+class PeriodicCells(GhostCell):
     """Replicates solution from opposite end of the domain into the ghost layers."""
 
     def __init__(
@@ -105,7 +106,7 @@ class Periodic(GhostCell):
         return target
 
 
-class Symmetry(GhostCell):
+class SymmetryCells(GhostCell):
     """Mirrors interior solution into the ghost layers."""
 
     def __init__(
@@ -127,7 +128,7 @@ class Symmetry(GhostCell):
         return target
 
 
-class Extrapolate(RiemannFlux):
+class ExtrapolateFace(RiemannFlux):
     """Copy extrapolated fluid state from interior of the boundary face to the exterior side."""
 
     def __init__(self, location: Literal["left", "right"] = "left") -> None:
@@ -154,7 +155,7 @@ class Extrapolate(RiemannFlux):
         return target
 
 
-class AdiabaticWall(Extrapolate):
+class AdiabaticWallFace(ExtrapolateFace):
     """Set the velocity at the wall face to zero."""
 
     def update(self, time: float, target: FluidState) -> FluidState:
@@ -165,8 +166,11 @@ class AdiabaticWall(Extrapolate):
         return target
 
 
-class Inflow(Extrapolate):
-    """Specify the fluid state at the wall face."""
+class PrescribedFace(ExtrapolateFace):
+    """Fully or partially specify the fluid state at the boundary face.
+
+    Unspecified properties will be extrapolated from interior cells.
+    """
 
     def __init__(
         self,
@@ -196,8 +200,8 @@ class Inflow(Extrapolate):
         return target
 
 
-class DirichletInflow(SpecifiedFlux):
-    """Directly set the flux through the wall face."""
+class DirichletFlux(SpecifiedFlux):
+    """Directly set the flux through the boundary face."""
 
     def __init__(
         self, reference_flux: Array, location: Literal["left", "right"] = "left"
@@ -295,25 +299,27 @@ def set_boundary_conditions(
         for bc_loc, bc_specification in zip(bc_locs, boundary_conditions, strict=False):
             if isinstance(bc_specification, str):
                 if bc_specification == "periodic":
-                    bcs += [Periodic(mt, location=bc_loc)]
+                    bcs += [PeriodicCells(mt, location=bc_loc)]
                 elif bc_specification == "outflow":
-                    default_ghost_layers[bc_loc] = PadCells(mt, location=bc_loc)
-                    bcs += [Extrapolate(location=bc_loc)]
+                    default_ghost_layers[bc_loc] = ExtrapolateCells(mt, location=bc_loc)
+                    bcs += [ExtrapolateFace(location=bc_loc)]
                 elif bc_specification in ["symmetry"]:
-                    bcs += [Symmetry(mt, location=bc_loc)]
+                    bcs += [SymmetryCells(mt, location=bc_loc)]
                 elif bc_specification in ["reflecting", "wall"]:
-                    default_ghost_layers[bc_loc] = Symmetry(mt, location=bc_loc)
-                    bcs += [AdiabaticWall(location=bc_loc)]
+                    default_ghost_layers[bc_loc] = SymmetryCells(mt, location=bc_loc)
+                    bcs += [AdiabaticWallFace(location=bc_loc)]
             elif isinstance(bc_specification, BoundaryCondition):
                 bcs += [bc_specification]
             elif isinstance(bc_specification, tuple | list):
-                bcs += [Inflow(reference_state=bc_specification, location=bc_loc)]
+                bcs += [
+                    PrescribedFace(reference_state=bc_specification, location=bc_loc)
+                ]
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)
 
     # Don't use default GhostCell treatments if already specified
     for bc in boundary_conditions._boundary_conditions:
-        if isinstance(bc, Periodic):
+        if isinstance(bc, PeriodicCells):
             default_ghost_layers = {}
         elif isinstance(bc, GhostCell):
             del default_ghost_layers[bc.location]
