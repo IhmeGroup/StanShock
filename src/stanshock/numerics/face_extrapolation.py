@@ -382,23 +382,6 @@ def weno5(
             for kSc in range(nSc):
                 PLR[N, iFace, 3 + kSc] = U[mn + kSc] / rLR
 
-    # First order at boundaries
-    for N in range(nLR):
-        for iFace in range(n_ghost_layers):
-            iCell = iFace + 2
-            PLR[N, iFace, 0] = r[iCell + N]
-            PLR[N, iFace, 1] = u[iCell + N]
-            PLR[N, iFace, 2] = p[iCell + N]
-            for kSc in range(nSc):
-                PLR[N, iFace, 3 + kSc] = Y[iCell + N, kSc]
-        for iFace in range(nFaces - n_ghost_layers, nFaces):
-            iCell = iFace + 2
-            PLR[N, iFace, 0] = r[iCell + N]
-            PLR[N, iFace, 1] = u[iCell + N]
-            PLR[N, iFace, 2] = p[iCell + N]
-            for kSc in range(nSc):
-                PLR[N, iFace, 3 + kSc] = Y[iCell + N, kSc]
-
     # Create primitive matrix for limiter
     P = np.zeros((nCells + 2 * n_ghost_layers, nVar + 1))
     P[:, 0] = r[:]
