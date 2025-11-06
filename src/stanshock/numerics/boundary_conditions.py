@@ -60,6 +60,30 @@ class PadCells(GhostCell):
         return target
 
 
+class LinearExtrapolation(GhostCell):
+    """Linearly extrapolates values from the interior cells into the ghost layers."""
+
+    def __init__(
+        self, mt: int = 3, location: Literal["left", "right"] = "left"
+    ) -> None:
+        super().__init__(location)
+        if self.location == "left":
+            self.idx_interior: Index = np.s_[mt : mt + 2]
+            self.idx_exterior: Index = np.s_[:mt]
+        else:
+            self.idx_interior = np.s_[-mt - 2 : -mt]
+            self.idx_exterior = np.s_[-mt:]
+        self.mt = mt
+
+    def update(self, time: float, target: Array) -> Array:
+        _: float = time
+        target[self.idx_exterior] = target[self.idx_interior][[0]] - np.arange(
+            self.mt, 0, -1
+        )[:, None] * np.diff(target[self.idx_interior], axis=0)
+
+        return target
+
+
 class Periodic(GhostCell):
     """Replicates solution from opposite end of the domain into the ghost layers."""
 
