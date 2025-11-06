@@ -237,6 +237,7 @@ class InviscidFlux(RightHandSide):
         )
         state.gamma_star = gamma_star
         state.e0_star = e0_star
+        state = self.boundary_conditions.update_ghost_states(time, state)
 
         face_states: FluidState = self.face_extrapolator(state)
         face_states = self.boundary_conditions.update_face_states(time, face_states)

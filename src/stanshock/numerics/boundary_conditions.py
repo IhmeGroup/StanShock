@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Generic, Literal, TypeVar
+from typing import Generic, Literal, TypeVar, TypedDict
 
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, TypeAlias, np
@@ -21,6 +21,10 @@ class BoundaryCondition(ABC, Generic[_T]):
 
 class GhostCell(BoundaryCondition[Array]):
     """Update the conservative variables in the ghost layers."""
+
+
+class GhostCellPrimitive(BoundaryCondition[FluidState]):
+    """Update the primitive variables in the ghost layers."""
 
 
 class RiemannFlux(BoundaryCondition[FluidState]):
@@ -124,6 +128,39 @@ class SymmetryCells(GhostCell):
         _: float = time
         target[self.idx_exterior] = target[self.idx_interior]
         target[self.idx_exterior][:, 0] = -target[self.idx_interior][:, 0]
+
+        return target
+
+
+class DeactivateWeno(GhostCellPrimitive):
+    """Applies large values and variance to primitives in ghost layers.
+
+    This is one approach to forcing the WENO stencil to only consider interior cells.
+    """
+
+    def __init__(
+        self, mt: int = 3, location: Literal["left", "right"] = "left"
+    ) -> None:
+        super().__init__(location)
+        if self.location == "left":
+            self.values = (10.0 * np.arange(mt, 0, -1)) ** 10.0
+            self.idx_exterior: Index = np.s_[:mt]
+        else:
+            self.values = (10.0 * np.arange(1, mt + 1)) ** 10.0
+            self.idx_exterior = np.s_[-mt:]
+
+    def update(self, time: float, target: FluidState) -> FluidState:
+        _: float = time
+        assert target.density is not None
+        assert target.velocity is not None
+        assert target.pressure is not None
+        assert target.composition is not None
+
+        values = self.values.copy()
+        target.density[self.idx_exterior] = values
+        target.velocity[self.idx_exterior] = values
+        target.pressure[self.idx_exterior] = values
+        target.composition[self.idx_exterior] = values
 
         return target
 
@@ -240,6 +277,14 @@ class BoundaryConditions:
         ]
 
     @property
+    def ghost_cells_primitive(self) -> list[GhostCellPrimitive]:
+        return [
+            boundary_condition
+            for boundary_condition in self._boundary_conditions
+            if isinstance(boundary_condition, GhostCellPrimitive)
+        ]
+
+    @property
     def riemann_fluxes(self) -> list[RiemannFlux]:
         return [
             boundary_condition
@@ -261,6 +306,12 @@ class BoundaryConditions:
 
         return state_array
 
+    def update_ghost_states(self, time: float, state: FluidState) -> FluidState:
+        for ghost_cell_primitive in self.ghost_cells_primitive:
+            state = ghost_cell_primitive.update(time, target=state)
+
+        return state
+
     def update_face_states(self, time: float, face_states: FluidState) -> FluidState:
         for riemann_flux in self.riemann_fluxes:
             face_states = riemann_flux.update(time, target=face_states)
@@ -279,41 +330,45 @@ BCNamesType: TypeAlias = Literal[
 ]
 
 
+class BCInput(TypedDict):
+    left: Sequence[BCNamesType | BCType]
+    right: Sequence[BCNamesType | BCType]
+
+
 def set_boundary_conditions(
-    boundary_conditions: BoundaryConditions | Sequence[BCNamesType | BCType],
-    mt: int = 3,
+    boundary_conditions: BoundaryConditions | BCInput, mt: int = 3
 ) -> BoundaryConditions:
     """Convenience function to initialize different boundary conditions."""
 
     # If ghost layer method not specified, default to freezing (hold constant)
-    default_ghost_layers: dict[str, GhostCell] = {
-        "left": FreezeCells(location="left"),
-        "right": FreezeCells(location="right"),
+    default_ghost_layers: dict[str, GhostCell | GhostCellPrimitive] = {
+        "left": DeactivateWeno(mt=mt, location="left"),
+        "right": DeactivateWeno(mt=mt, location="right"),
     }
 
     # Convert lists into BoundaryConditions:
     if not isinstance(boundary_conditions, BoundaryConditions):
         bc_locs: list[Literal["left", "right"]] = ["left", "right"]
         bcs: list[BCType] = []
-
-        for bc_loc, bc_specification in zip(bc_locs, boundary_conditions, strict=False):
-            if isinstance(bc_specification, str):
-                if bc_specification == "periodic":
-                    bcs += [PeriodicCells(mt, location=bc_loc)]
-                elif bc_specification == "outflow":
-                    default_ghost_layers[bc_loc] = ExtrapolateCells(mt, location=bc_loc)
-                    bcs += [ExtrapolateFace(location=bc_loc)]
-                elif bc_specification in ["symmetry"]:
-                    bcs += [SymmetryCells(mt, location=bc_loc)]
-                elif bc_specification in ["reflecting", "wall"]:
-                    default_ghost_layers[bc_loc] = SymmetryCells(mt, location=bc_loc)
-                    bcs += [AdiabaticWallFace(location=bc_loc)]
-            elif isinstance(bc_specification, BoundaryCondition):
-                bcs += [bc_specification]
-            elif isinstance(bc_specification, tuple | list):
-                bcs += [
-                    PrescribedFace(reference_state=bc_specification, location=bc_loc)
-                ]
+        for bc_loc in bc_locs:
+            for bc_specification in boundary_conditions[bc_loc]:
+                if isinstance(bc_specification, str):
+                    if bc_specification == "periodic":
+                        bcs += [PeriodicCells(mt, location=bc_loc)]
+                    elif bc_specification == "extrapolate":
+                        bcs += [ExtrapolateCells(mt, location=bc_loc)]
+                    elif bc_specification == "outflow":
+                        bcs += [ExtrapolateFace(location=bc_loc)]
+                    elif bc_specification in ["symmetry", "reflecting"]:
+                        bcs += [SymmetryCells(mt, location=bc_loc)]
+                    elif bc_specification == "wall":
+                        bcs += [AdiabaticWallFace(location=bc_loc)]
+                elif isinstance(bc_specification, BoundaryCondition):
+                    bcs += [bc_specification]
+                elif isinstance(bc_specification, tuple | list):
+                    bcs += [
+                        PrescribedFace(reference_state=bc_specification, location=bc_loc)
+                    ]
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)
 
@@ -321,7 +376,7 @@ def set_boundary_conditions(
     for bc in boundary_conditions._boundary_conditions:
         if isinstance(bc, PeriodicCells):
             default_ghost_layers = {}
-        elif isinstance(bc, GhostCell):
+        elif isinstance(bc, GhostCell | GhostCellPrimitive):
             del default_ghost_layers[bc.location]
 
     for _, bc in default_ghost_layers.items():
