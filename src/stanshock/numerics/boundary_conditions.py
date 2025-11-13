@@ -203,6 +203,11 @@ class AdiabaticWallFace(ExtrapolateFace):
         return target
 
 
+ReferenceStateType: TypeAlias = tuple[
+    float | None, float | None, float | None, Sequence[float] | None
+]
+
+
 class SpecifiedFace(ExtrapolateFace):
     """Fully or partially specify the fluid state at the boundary face.
 
@@ -211,7 +216,7 @@ class SpecifiedFace(ExtrapolateFace):
 
     def __init__(
         self,
-        reference_state: Sequence[float | Sequence[float] | None],
+        reference_state: ReferenceStateType,
         location: Literal["left", "right"] = "left",
     ) -> None:
         super().__init__(location)
@@ -329,10 +334,12 @@ BCNamesType: TypeAlias = Literal[
     "extrapolate", "outflow", "symmetry", "reflecting", "wall", "periodic"
 ]
 
+BCLike: TypeAlias = BCType | BCNamesType | ReferenceStateType
+
 
 class BCInput(TypedDict):
-    left: BCNamesType | BCType | Sequence[BCNamesType | BCType]
-    right: BCNamesType | BCType | Sequence[BCNamesType | BCType]
+    left: BCLike | Sequence[BCLike]
+    right: BCLike | Sequence[BCLike]
 
 
 def set_boundary_conditions(
@@ -351,7 +358,7 @@ def set_boundary_conditions(
         bc_locs: list[Literal["left", "right"]] = ["left", "right"]
         bcs: list[BCType] = []
         for bc_loc in bc_locs:
-            if isinstance(boundary_conditions[bc_loc], str | BoundaryCondition):
+            if isinstance(boundary_conditions[bc_loc], str | BoundaryCondition | tuple):
                 bc_tmp = [boundary_conditions[bc_loc]]
             else:
                 bc_tmp = boundary_conditions[bc_loc]
@@ -370,7 +377,7 @@ def set_boundary_conditions(
                         bcs += [AdiabaticWallFace(location=bc_loc)]
                 elif isinstance(bc_specification, BoundaryCondition):
                     bcs += [bc_specification]
-                elif isinstance(bc_specification, tuple | list):
+                elif isinstance(bc_specification, tuple):
                     bcs += [
                         SpecifiedFace(reference_state=bc_specification, location=bc_loc)
                     ]
