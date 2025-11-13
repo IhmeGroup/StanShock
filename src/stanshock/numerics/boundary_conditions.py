@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
-from typing import Generic, Literal, TypeVar, TypedDict
+from typing import Generic, Literal, TypedDict, TypeVar
 
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, TypeAlias, np
@@ -160,7 +160,7 @@ class DeactivateWeno(GhostCellPrimitive):
         target.density[self.idx_exterior] = values
         target.velocity[self.idx_exterior] = values
         target.pressure[self.idx_exterior] = values
-        target.composition[self.idx_exterior] = values
+        target.composition[self.idx_exterior] = values[:, None]
 
         return target
 
@@ -326,13 +326,13 @@ class BoundaryConditions:
 
 
 BCNamesType: TypeAlias = Literal[
-    "outflow", "symmetry", "reflecting", "wall", "periodic"
+    "extrapolate", "outflow", "symmetry", "reflecting", "wall", "periodic"
 ]
 
 
 class BCInput(TypedDict):
-    left: Sequence[BCNamesType | BCType]
-    right: Sequence[BCNamesType | BCType]
+    left: BCNamesType | BCType | Sequence[BCNamesType | BCType]
+    right: BCNamesType | BCType | Sequence[BCNamesType | BCType]
 
 
 def set_boundary_conditions(
@@ -351,7 +351,12 @@ def set_boundary_conditions(
         bc_locs: list[Literal["left", "right"]] = ["left", "right"]
         bcs: list[BCType] = []
         for bc_loc in bc_locs:
-            for bc_specification in boundary_conditions[bc_loc]:
+            if isinstance(boundary_conditions[bc_loc], str | BoundaryCondition):
+                bc_tmp = [boundary_conditions[bc_loc]]
+            else:
+                bc_tmp = boundary_conditions[bc_loc]
+
+            for bc_specification in bc_tmp:
                 if isinstance(bc_specification, str):
                     if bc_specification == "periodic":
                         bcs += [PeriodicCells(mt, location=bc_loc)]
@@ -367,7 +372,9 @@ def set_boundary_conditions(
                     bcs += [bc_specification]
                 elif isinstance(bc_specification, tuple | list):
                     bcs += [
-                        PrescribedFace(reference_state=bc_specification, location=bc_loc)
+                        PrescribedFace(
+                            reference_state=bc_specification, location=bc_loc
+                        )
                     ]
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)

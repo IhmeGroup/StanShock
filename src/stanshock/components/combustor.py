@@ -6,8 +6,7 @@ import numpy as np
 from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.numerics.boundary_conditions import (
-    BCNamesType,
-    BCType,
+    BCInput,
     BoundaryConditions,
     set_boundary_conditions,
 )
@@ -53,10 +52,10 @@ class Combustor:
         self.cfl = 1.0  # stability condition
         self.dx = 1.0  # grid spacing
         self.n_cells = n_cells  # grid size
-        self.boundary_conditions: BoundaryConditions | list[BCNamesType | BCType] = [
-            "outflow",
-            "outflow",
-        ]
+        self.boundary_conditions: BoundaryConditions | BCInput = {
+            "left": "outflow",
+            "right": "outflow",
+        }
         self.xf: Array = np.linspace(
             0.0, self.dx * self.n_cells, self.n_cells + 1, dtype=np.float64
         )
@@ -71,8 +70,8 @@ class Combustor:
         self.source_terms: RightHandSide | None = None  # source term function
         self.injector = None  # injector model
         self.flux_function: RiemannSolver = hllc_flux
-        self.inviscid_face_extrapolator: FaceExtrapolator = FifthOrderWeno
-        self.viscous_face_extrapolator: FaceExtrapolator = FirstOrder
+        self.inviscid_face_extrapolator: type[FaceExtrapolator] = FifthOrderWeno
+        self.viscous_face_extrapolator: type[FaceExtrapolator] = FirstOrder
         self.initialization = None  # initialization options
         self.probes = []  # list of probe objects
         self.xt_diagrams = []  # list of XT diagram objects
@@ -119,7 +118,7 @@ class Combustor:
             raise Exception(msg)
 
         # Set up boundary conditions
-        self.boundary_conditions: BoundaryConditions = set_boundary_conditions(
+        self.boundary_conditions = set_boundary_conditions(
             self.boundary_conditions, self.geometry.n_ghost_layers
         )
 
@@ -148,7 +147,7 @@ class Combustor:
             ),
             boundary_conditions=self.boundary_conditions,
             riemann_solver=self.flux_function,
-            dx=self.geometry.dx,
+            geometry=self.geometry,
         )
 
         if self.include_diffusion:
