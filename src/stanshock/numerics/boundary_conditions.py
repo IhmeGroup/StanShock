@@ -31,7 +31,7 @@ class RiemannFlux(BoundaryCondition[FluidState]):
     """Update the primitive variables at the boundary face (input to Riemann solver)."""
 
 
-class SpecifiedFlux(BoundaryCondition[Array]):
+class DirichletFlux(BoundaryCondition[Array]):
     """Directly set the flux through the boundary face."""
 
 
@@ -132,7 +132,7 @@ class SymmetryCells(GhostCell):
         return target
 
 
-class DeactivateWeno(GhostCellPrimitive):
+class DeactivateWenoCells(GhostCellPrimitive):
     """Applies large values and variance to primitives in ghost layers.
 
     This is one approach to forcing the WENO stencil to only consider interior cells.
@@ -203,7 +203,7 @@ class AdiabaticWallFace(ExtrapolateFace):
         return target
 
 
-class PrescribedFace(ExtrapolateFace):
+class SpecifiedFace(ExtrapolateFace):
     """Fully or partially specify the fluid state at the boundary face.
 
     Unspecified properties will be extrapolated from interior cells.
@@ -237,7 +237,7 @@ class PrescribedFace(ExtrapolateFace):
         return target
 
 
-class DirichletFlux(SpecifiedFlux):
+class SpecifiedFlux(DirichletFlux):
     """Directly set the flux through the boundary face."""
 
     def __init__(
@@ -293,11 +293,11 @@ class BoundaryConditions:
         ]
 
     @property
-    def specified_fluxes(self) -> list[SpecifiedFlux]:
+    def specified_fluxes(self) -> list[DirichletFlux]:
         return [
             boundary_condition
             for boundary_condition in self._boundary_conditions
-            if isinstance(boundary_condition, SpecifiedFlux)
+            if isinstance(boundary_condition, DirichletFlux)
         ]
 
     def update_ghost_layers(self, time: float, state_array: Array) -> Array:
@@ -342,8 +342,8 @@ def set_boundary_conditions(
 
     # If ghost layer method not specified, default to freezing (hold constant)
     default_ghost_layers: dict[str, GhostCell | GhostCellPrimitive] = {
-        "left": DeactivateWeno(mt=mt, location="left"),
-        "right": DeactivateWeno(mt=mt, location="right"),
+        "left": DeactivateWenoCells(mt=mt, location="left"),
+        "right": DeactivateWenoCells(mt=mt, location="right"),
     }
 
     # Convert lists into BoundaryConditions:
@@ -372,9 +372,7 @@ def set_boundary_conditions(
                     bcs += [bc_specification]
                 elif isinstance(bc_specification, tuple | list):
                     bcs += [
-                        PrescribedFace(
-                            reference_state=bc_specification, location=bc_loc
-                        )
+                        SpecifiedFace(reference_state=bc_specification, location=bc_loc)
                     ]
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)
