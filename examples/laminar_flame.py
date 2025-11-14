@@ -9,6 +9,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.combustor import Combustor
+from stanshock.numerics.boundary_conditions import FreezeCells
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.thermotable import ThermoTable
 
@@ -54,19 +55,19 @@ def main(
     flame_center = flame.grid[np.argmax(np.gradient(flame.T, flame.grid))]
     L = flame.grid[-1] - flame.grid[0]
     xUpper, xLower = flame_center + L * f, flame_center - L * f
-    boundary_conditions = (
-        (gasUnburned.density, uUnburned, None, gasUnburned.Y),
-        (None, None, gasBurned.P, None),
-    )
+    boundary_conditions = {
+        "left": FreezeCells(
+            "left"
+        ),  # (gasUnburned.density, uUnburned, None, gasUnburned.Y),
+        "right": FreezeCells("right"),  # (None, None, gasBurned.P, None),
+    }
     if physics_model == "ThermoTable":
         physics = ThermoTable(gas)
     else:
         physics = CanteraInterface(gas)
 
     ss = Combustor(
-        n_cells=nX,
         xf=np.linspace(xLower, xUpper, nX + 1),
-        dx=(xUpper - xLower) / nX,
         initialization=("Riemann", unburnedState, burnedState, flame_center),
         physics=physics,
         boundary_conditions=boundary_conditions,
@@ -75,6 +76,7 @@ def main(
         include_diffusion=True,
         output_every=10,
     )
+    print(ss.boundary_conditions._boundary_conditions)
 
     # interpolate flame solution
     Y = ss.state.composition
@@ -101,7 +103,8 @@ def main(
 
     # plot setup
     if plot_results:
-        idx = ss.geometry.idx_cells
+        # idx = ss.geometry.idx_cells
+        idx = np.s_[:]
         x = (ss.geometry.xc[idx] - flame_center) / flameThickness
         x_ct = (flame.grid - flame_center) / flameThickness
         T = ss.physics.get_temperature(ss.state)[idx]
