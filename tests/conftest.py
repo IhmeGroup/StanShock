@@ -10,7 +10,7 @@ import pytest
 from cantera import Solution
 
 from stanshock.components.combustor import Combustor
-from stanshock.numerics.boundary_conditions import FreezeCells, Inflow
+from stanshock.numerics.boundary_conditions import FreezeCells, SpecifiedFace
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.physics.thermotable import ThermoTable
@@ -154,7 +154,7 @@ def fluid_physics(
 
 # Set inflow boundary condition for a choked flow with area ratio 10.0
 @pytest.fixture(scope="session")
-def inflow_bc(gas: Solution) -> Inflow:
+def inflow_bc(gas: Solution) -> SpecifiedFace:
     nsp = gas.n_species
     gas.TPY = 3000.0, 30e6, np.ones((nsp,)) / nsp
     g: float = gas.cp / gas.cv
@@ -166,16 +166,22 @@ def inflow_bc(gas: Solution) -> Inflow:
     # Get corresponding inflow velocity and return inflow definition
     inflow_velocity = inflow_mach * gas.sound_speed
 
-    return Inflow(reference_state=(gas.density, inflow_velocity, gas.P, gas.Y))
+    return SpecifiedFace(reference_state=(gas.density, inflow_velocity, gas.P, gas.Y))
 
 
 @pytest.fixture(scope="session")
 def isentropic_flow(
-    gas: Solution, fluid_physics: FluidPhysics, geometry: Geometry, inflow_bc: Inflow
+    gas: Solution,
+    fluid_physics: FluidPhysics,
+    geometry: Geometry,
 ) -> Combustor:
     # Reinitialize Solution object to inflow conditions
     nsp = gas.n_species
     gas.TPY = 3000.0, 30e6, np.ones((nsp,)) / nsp
+    bcs = {
+        "left": FreezeCells(location="left"),
+        "right": FreezeCells(location="right"),
+    }
 
     # Get throat area at which flow will choke
     area = geometry.area(0.0, geometry.xf)
@@ -184,7 +190,7 @@ def isentropic_flow(
 
     # Set up simulation object
     return Combustor(
-        boundary_conditions=[inflow_bc, FreezeCells(location="right"), "outflow"],
+        boundary_conditions=bcs,
         geometry=geometry,
         initialization=("isentropic", gas, throat_area, True, subsonic_outflow),
         physics=fluid_physics,

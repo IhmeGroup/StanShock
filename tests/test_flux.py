@@ -71,4 +71,4 @@ def test_isentropic_flow_relations(isentropic_flow: Combustor) -> None:
     source_area = isentropic_flow.area_change.source(
         t, y, physics, gamma_star, e0_star, 1.0
     )
-    assert source_flux[3:-3] == pytest.approx(-source_area[3:-3], rel=1e-3)
+    assert source_flux == pytest.approx(-source_area, rel=1e-3)
