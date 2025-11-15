@@ -31,7 +31,7 @@ class AreaChange(FastSlowSource):
         idx_implicit: Index = np.array([], dtype=np.int64)
 
         if self.geometry.dlnA_dt is not None:
-            x = self.geometry.xc[self.idx_domain]
+            x = self.geometry.xc[self.idx_update]
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)
             assert isinstance(dlnA_dt, np.ndarray)
             idx_implicit = np.where(dlnA_dt != 0.0)[0]
@@ -40,10 +40,45 @@ class AreaChange(FastSlowSource):
         self.idx_implicit = idx_implicit
         self.idx_explicit = idx_explicit
 
-    def precompute(
+    def before_time_integration(
         self,
         time: float,
         state_array: Array,
+        update_double_flux: bool = True,
+    ) -> tuple[Array, Array | None, Array | None]:
+        """Replace species transport equations with mass continuity."""
+        state_array_local, gamma_star, e0_star = super().before_time_integration(
+            time, state_array, update_double_flux
+        )
+
+        assert self.physics is not None
+        state_compact = state_array_local[:, :3].copy()
+        n = self.physics.n_scalars_rho_sum
+        if n > 1:
+            state_compact[:, 2] = np.sum(state_array_local[:, 2 : 2 + n], axis=1)
+
+        # Store the frozen composition
+        self.composition_frozen = state_array_local[:, 2:] / state_compact[:, 2:3]
+
+        return state_compact, gamma_star, e0_star
+
+    def after_time_integration(
+        self, state_array: Array, state_array_local: Array
+    ) -> Array:
+        """Apply density update to all scalars."""
+        assert self.physics is not None
+        state_array_local = np.pad(
+            state_array_local, (0, (0, self.physics.n_scalars - 1)), mode="edge"
+        )
+        state_array_local[:, 2:] *= self.composition_frozen
+        state_array[self.idx_domain] = np.ravel(state_array_local)
+
+        return state_array
+
+    def precompute_for_source(
+        self,
+        time: float,
+        state_array_local: Array,
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> tuple[
@@ -53,40 +88,36 @@ class AreaChange(FastSlowSource):
         FluidState | None,
         FluidState | None,
     ]:
-        state_array, state, _, _, _ = super().precompute(
-            time, state_array, gamma_star, e0_star
+        _ = time
+        ru = state_array_local[:, 0]
+        re_t = state_array_local[:, 1]
+        r = state_array_local[:, 2]
+
+        u = ru / r
+        e_int = (re_t / r) - 0.5 * u**2.0
+
+        state = FluidState(
+            shape=(state_array_local.shape[0],),
+            density=r,
+            velocity=u,
+            internal_energy=e_int,
+            composition=self.composition_frozen,
+            gamma_star=gamma_star,
+            e0_star=e0_star,
         )
-        assert state is not None
-        assert state.density is not None
-        assert state.pressure is not None
 
-        idx = self.idx_domain
-        state_array = state_array[idx]
-
-        state0_compact = np.zeros((state_array.shape[0], 4))
-        state0_compact[:, 0] = state.density[idx]
-        state0_compact[:, 1] = state_array[:, 0]
-        state0_compact[:, 2] = state_array[:, 1]
-        state0_compact[:, 3] = state.pressure[idx]
-
-        return state0_compact, state, None, None, None
+        return state_array_local, state, None, None, None
 
     def source(
         self,
         time: float,
-        state_array: Array,
+        state_array_local: Array,
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
-        rhs_full = np.zeros_like(state_array)
         if self.no_area_change:
-            return rhs_full
-
-        state_array, state, _, _, _ = self.precompute(
-            time, state_array, gamma_star, e0_star
-        )
-
-        return self.source_implementation(time, state_array, state, None, None, None)
+            return np.zeros_like(state_array_local)
+        return super().source(time, state_array_local, gamma_star, e0_star)
 
         # # Integrate fast terms implicitly
         # if idx_implicit.size != 0:
@@ -103,50 +134,21 @@ class AreaChange(FastSlowSource):
         #     # Solve
         #     self.integrator.integrate(t=time + dt)
 
-        #     # Store RHS source term
-        #     rhs_compact: Array = (self.integrator.y - y0) / dt
-        #     rhs[idx_implicit, 0:2] += rhs_compact[:, 1:]  # ru and re_t
-        #     rhs[idx_implicit, 2:] += (
-        #         rhs_compact[:, 0:1] * Y0[idx_implicit, :]
-        #     )  # rY sources
-
-        # # Add slow source terms
-        # rhs_compact = self.source_slow(
-        #     time=time, state0_compact=state0_compact, state=state, idx=idx_explicit
-        # )
-        # rhs[idx_explicit, 0:2] += rhs_compact[idx_explicit, 1:3]  # ru and re_t
-        # rhs[idx_explicit, 2:] += (
-        #     rhs_compact[idx_explicit, 0:1] * Y0[idx_explicit, :]
-        # )  # rY sources
-
-        # return rhs
-
-    def postcompute(self, state_array: Array, state: FluidState) -> Array:
-        """Undo any transforms to the state array during precompute steps."""
-        state_array_full = np.zeros(self.shape)
-
-        assert state.composition is not None
-        Y = state.composition
-        state_array_full[:, 0:2] = state_array[:, 1:3]  # ru and re_t
-        state_array_full[:, 2:] = state_array[:, 0:1] * Y
-
-        return np.ravel(state_array_full)
-
     def source_slow(
         self,
         time: float,
-        state_array: Array | None,
+        state_array_local: Array | None,
         state: FluidState | None,
         face_states: FluidState | None,
         avg_face_states: FluidState | None,
         face_gradients: FluidState | None,
     ) -> Array:
         """Area change contributions to RHS."""
-        assert state_array is not None
+        assert state_array_local is not None
         _ = face_states, avg_face_states, face_gradients
         idx = self.idx_explicit
-        state_array = state_array[idx, :]
-        rhs_compact: Array = np.zeros_like(state_array)
+        state_array_local = state_array_local[idx, :]
+        rhs_compact: Array = np.zeros_like(state_array_local)
 
         if self.geometry.dlnA_dx is not None:
             assert state is not None
@@ -155,12 +157,12 @@ class AreaChange(FastSlowSource):
 
             x: Array = self.geometry.xc[idx]
             dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
-            rhs_compact[:, 0] -= state_array[:, 1] * dlnA_dx
+            rhs_compact[:, 0] -= state_array_local[:, 1] * dlnA_dx
             rhs_compact[:, 1] -= (
-                state_array[:, 1] ** 2.0 / state_array[:, 0]
+                state_array_local[:, 1] ** 2.0 / state_array_local[:, 0]
             ) * dlnA_dx
             rhs_compact[:, 2] -= (
-                state.velocity[idx] * (state_array[:, 2] + state.pressure[idx])
+                state.velocity[idx] * (state_array_local[:, 2] + state.pressure[idx])
             ) * dlnA_dx
 
         return rhs_compact
@@ -168,24 +170,24 @@ class AreaChange(FastSlowSource):
     def source_fast(
         self,
         time: float,
-        state_array: Array | None,
+        state_array_local: Array | None,
         state: FluidState | None,
         face_states: FluidState | None,
         avg_face_states: FluidState | None,
         face_gradients: FluidState | None,
     ) -> Array:
         """Fast source terms for quasi-1D geometry."""
-        assert state_array is not None
+        assert state_array_local is not None
         _ = face_states, avg_face_states, face_gradients
         x: Array = self.geometry.xc[self.idx_implicit]
         n: int = len(x)
-        r: Array = state_array[0:n]
-        ru: Array = state_array[n : 2 * n]
-        rE: Array = state_array[2 * n : 3 * n]
+        r: Array = state_array_local[0:n]
+        ru: Array = state_array_local[n : 2 * n]
+        rE: Array = state_array_local[2 * n : 3 * n]
         assert state is not None
         assert state.pressure is not None
         p: Array = state.pressure
-        rhs: Array = np.zeros_like(state_array)
+        rhs: Array = np.zeros_like(state_array_local)
 
         # create quasi-1D right hand side
         if self.geometry.dlnA_dt is not None:

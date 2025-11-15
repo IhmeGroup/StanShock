@@ -287,7 +287,6 @@ class Combustor:
                 dt=dt,
                 time=self.t,
                 state_array=state_array,
-                physics=self.physics,
                 gamma_star=gamma_star,
                 e0_star=e0_star,
             )

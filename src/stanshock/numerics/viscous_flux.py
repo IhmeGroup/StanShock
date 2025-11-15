@@ -17,23 +17,20 @@ class ViscousFlux(RightHandSide):
         "gradient",
     )
 
-    def __init__(
-        self,
-        **precompute_steps: Unpack[PrecomputeSteps],
-    ) -> None:
+    def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         super().__init__(**precompute_steps)
         self.F = 1.0
 
     def source_implementation(
         self,
         time: float,
-        state_array: Array | None,
+        state_array_local: Array | None,
         state: FluidState | None,
         face_states: FluidState | None,
         avg_face_states: FluidState | None,
         face_gradients: FluidState | None,
     ) -> Array:
-        _ = time, state_array, state, face_states
+        _ = time, state_array_local, state, face_states
         assert self.physics is not None
         assert avg_face_states is not None
         assert face_gradients is not None

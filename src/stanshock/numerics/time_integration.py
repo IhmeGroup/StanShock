@@ -19,8 +19,8 @@ class TimeIntegrator(ABC):
         dt: float,
         time: float,
         state_array: Array,
-        gamma_star: Array,
-        e0_star: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[float, Array]:
         """Integrate the state from `time` to `time+dt` given the rhs."""
 
@@ -48,16 +48,16 @@ class ScipyIVP(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        gamma_star: Array,
-        e0_star: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[float, Array]:
-        y0, state0, _, _, _ = self.rhs.precompute(
+        y0, state0, _, _, _ = self.rhs.precompute_for_source(
             time, state_array, gamma_star, e0_star
         )
         assert state0 is not None
 
         results = self.integrator(
-            fun=self.rhs.source,
+            fun=self.rhs.source_full,
             t_span=(time, time + dt),
             y0=y0,
             method=self.method,
@@ -79,8 +79,8 @@ class RungeKuttaBase(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        gamma_star: Array,
-        e0_star: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[float, Array]:
         t = time
         y: Array = np.ravel(state_array)
@@ -93,7 +93,7 @@ class RungeKuttaBase(TimeIntegrator):
 
             dydt = self.rhs.source(
                 time=t,
-                state_array=y,
+                state_array_local=y,
                 gamma_star=gamma_star,
                 e0_star=e0_star,
             )
@@ -171,10 +171,10 @@ class StrangSplitting(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        gamma_star: Array,
-        e0_star: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[float, Array]:
-        y = state_array.flatten()
+        y: Array = state_array.flatten()
 
         # Take half-step with transport terms
         _, y = self.transport_operator.advance(
@@ -226,10 +226,10 @@ class LieSplitting(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        gamma_star: Array,
-        e0_star: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[float, Array]:
-        y = state_array.flatten()
+        y: Array = state_array.flatten()
 
         for operator in self.operators:
             _, y = operator.advance(
@@ -243,7 +243,10 @@ class LieSplitting(TimeIntegrator):
             # Optionally: Update the double flux variables
             if self.update_double_flux:
                 assert self.physics is not None
-                state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
+                state_array = y.reshape(operator.rhs.shape)
+                state = self.physics.conservative_to_primitive(
+                    state_array, gamma_star, e0_star
+                )
                 state.temperature = self.physics.get_temperature(state)
                 gamma_star, e0_star = self.physics.get_double_flux_variables(state)
 
@@ -267,25 +270,29 @@ class FastSlowIntegrator(TimeIntegrator):
         dt: float,
         time: float,
         state_array: Array,
-        gamma_star: Array,
-        e0_star: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[float, Array]:
         assert isinstance(self.rhs, FastSlowSource)
-        y_full = np.zeros_like(state_array)
-        self.rhs.update_indices(time)
 
         # Integrate fast terms
         self.rhs.mode = "fast"
-        _, y_fast = self.fast_integrator.advance(
-            dt, time, state_array, gamma_star, e0_star
+        state_array_local, gamma_star, e0_star = self.rhs.before_time_integration(
+            time, state_array
         )
-        y_full = self.rhs.add_source(y_full, y_fast)
+        _, state_array_local = self.fast_integrator.advance(
+            dt, time, state_array_local, gamma_star, e0_star
+        )
+        state_array = self.rhs.after_time_integration(state_array, state_array_local)
 
         # Integrate slow terms
         self.rhs.mode = "slow"
-        _, y_slow = self.slow_integrator.advance(
+        state_array_local, gamma_star, e0_star = self.rhs.before_time_integration(
+            time, state_array
+        )
+        _, state_array_local = self.slow_integrator.advance(
             dt, time, state_array, gamma_star, e0_star
         )
-        y_full = self.rhs.add_source(y_full, y_slow)
+        state_array = self.rhs.after_time_integration(state_array, state_array_local)
 
-        return time + dt, y_full
+        return time + dt, state_array

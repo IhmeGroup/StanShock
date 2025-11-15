@@ -12,7 +12,6 @@ from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 
 from stanshock.physics.flamelet import FPVTable
-from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
 
@@ -878,20 +877,17 @@ class JICModel(RightHandSide):
 
     def source(
         self,
-        _time: float,
-        state_array: Array,
-        _physics: FluidPhysics,
-        _gamma_star: Array,
-        _e0_star: Array,
+        time: float,
+        state_array_local: Array | None,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
     ) -> Array:
-        """
-        This method computes a fuel injector source term to target the desired
-        mixture fraction profile.
-        """
-        rhs = np.zeros_like(state_array)
+        """Compute a fuel injector source term to target the desired mixture fraction profile."""
+        _ = time, gamma_star, e0_star
+        rhs = np.zeros_like(state_array_local)
 
-        rho = state_array[:, 2]
-        rhoZ = state_array[:, 3]
+        rho = state_array_local[:, 2]
+        rhoZ = state_array_local[:, 3]
 
         Z = rhoZ / rho
         mdot_inj = np.interp(

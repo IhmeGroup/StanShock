@@ -125,14 +125,14 @@ class BoundaryLayer(RightHandSide):
     def source_implementation(
         self,
         time: float,
-        state_array: Array | None,
+        state_array_local: Array | None,
         state: FluidState | None,
         face_states: FluidState | None,
         avg_face_states: FluidState | None,
         face_gradients: FluidState | None,
     ) -> Array:
         """Boundary layer contribution to RHS."""
-        _ = time, state_array, face_states, avg_face_states, face_gradients
+        _ = time, state_array_local, face_states, avg_face_states, face_gradients
         assert self.physics is not None
         assert state is not None
         assert state.density is not None
@@ -141,7 +141,7 @@ class BoundaryLayer(RightHandSide):
         hydraulic_diameter = self.geometry.hydraulic_diameter(time)
         characteristic_length = self.geometry.characteristic_length(time)
 
-        x = self.geometry.xc[self.idx_domain]
+        x = self.geometry.xc[self.idx_update]
         characteristic_length = self.geometry.characteristic_length(time, x)
         hydraulic_diameter = self.geometry.hydraulic_diameter(time, x)
 

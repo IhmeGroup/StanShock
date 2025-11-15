@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import cast
 
 import numpy as np
 from numba import double, njit
@@ -283,9 +282,7 @@ class InviscidFlux(RightHandSide):
     )
 
     def __init__(
-        self,
-        riemann_solver: RiemannSolver,
-        **precompute_steps: Unpack[PrecomputeSteps],
+        self, riemann_solver: RiemannSolver, **precompute_steps: Unpack[PrecomputeSteps]
     ) -> None:
         super().__init__(**precompute_steps)
         assert self.geometry is not None
@@ -297,13 +294,13 @@ class InviscidFlux(RightHandSide):
     def source_implementation(
         self,
         time: float,
-        state_array: Array | None,
+        state_array_local: Array | None,
         state: FluidState | None,
         face_states: FluidState | None,
         avg_face_states: FluidState | None,
         face_gradients: FluidState | None,
     ) -> Array:
-        _ = state_array, state, avg_face_states, face_gradients
+        _ = state_array_local, state, avg_face_states, face_gradients
         assert face_states is not None
         assert face_states.density is not None
         assert face_states.velocity is not None
@@ -342,8 +339,4 @@ class InviscidFlux(RightHandSide):
                 time, right_face_flux
             )
 
-        return cast(
-            Array,
-            (left_face_flux[:-1, :] - right_face_flux[1:, :])
-            / self.dx,  # Central difference
-        )
+        return (left_face_flux[:-1, :] - right_face_flux[1:, :]) / self.dx
