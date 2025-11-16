@@ -5,10 +5,8 @@ from dataclasses import dataclass
 
 import cantera as ct
 import numpy as np
-from typing_extensions import Unpack
 
 from stanshock.system.backend import Array, Composition
-from stanshock.system.base import PrecomputeSteps, RightHandSide
 
 
 @dataclass
@@ -285,26 +283,3 @@ class FluidPhysics(ABC):
     @abstractmethod
     def get_source_terms(self, state: FluidState) -> Array:
         """Compute reaction source terms corresponding to transported scalars."""
-
-
-class ChemistrySource(RightHandSide):
-    PRECOMPUTE_STEPS = ("geometry", "physics")
-
-    def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
-        super().__init__(**precompute_steps)
-        self.idx_source = np.s_[2:]
-
-    def source_implementation(
-        self,
-        time: float,
-        state_array_local: Array | None,
-        state: FluidState | None,
-        face_states: FluidState | None,
-        avg_face_states: FluidState | None,
-        face_gradients: FluidState | None,
-    ) -> Array:
-        """Compute the temporal gradient of the current state of the system."""
-        _ = time, state_array_local, face_states, avg_face_states, face_gradients
-        assert self.physics is not None
-        assert state is not None
-        return self.physics.get_source_terms(state)

@@ -27,7 +27,8 @@ from stanshock.numerics.time_integration import (
     TimeIntegrator,
 )
 from stanshock.numerics.viscous_flux import ViscousFlux
-from stanshock.physics.fluid_base import ChemistrySource, FluidPhysics
+from stanshock.physics.chemistry_source import ChemistrySource, ConstantVolumeChemistry
+from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.processing.initialize import (
     initialize_constant,
     initialize_diffuse_interface,
@@ -170,14 +171,20 @@ class Combustor:
         advection = SSPRK3(self.inviscid_flux)
         if self.physics.is_flamelet:
             integrators += [
-                HeunsMethod(ChemistrySource),
+                HeunsMethod(
+                    ChemistrySource(geometry=self.geometry, physics=self.physics)
+                ),
                 advection,
             ]
         else:
             integrators += [
                 StrangSplitting(
                     transport_operator=advection,
-                    reaction_operator=ScipyIVP(ChemistrySource),
+                    reaction_operator=ScipyIVP(
+                        ConstantVolumeChemistry(
+                            geometry=self.geometry, physics=self.physics
+                        )
+                    ),
                 )
             ]
 
