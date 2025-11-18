@@ -14,6 +14,7 @@ _directory_prefix = Path("tests/resources")
 IN_GITHUB_ACTIONS = os.getenv("GITHUB_ACTIONS") == "true"
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip validation tests.")
 def test_validation_case1():
     results = case1.main(plot_results=False, results_location=None)
@@ -21,6 +22,7 @@ def test_validation_case1():
     assert all(np.allclose(results[name], baseline[name]) for name in baseline)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip validation tests.")
 def test_validation_case2():
     results = case2.main(plot_results=False, results_location=None)
@@ -28,6 +30,7 @@ def test_validation_case2():
     assert all(np.allclose(results[name], baseline[name]) for name in baseline)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip validation tests.")
 def test_validation_case3():
     results = case3.main(plot_results=False, results_location=None)
@@ -35,6 +38,7 @@ def test_validation_case3():
     assert all(np.allclose(results[name], baseline[name]) for name in baseline)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip validation tests.")
 def test_validation_case4():
     results = case4.main(plot_results=False, results_location=None)
@@ -42,6 +46,7 @@ def test_validation_case4():
     assert all(np.allclose(results[name], baseline[name]) for name in baseline)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip examples.")
 def test_laminar_flame():
     results = laminar_flame.main(
@@ -51,6 +56,7 @@ def test_laminar_flame():
     assert all(np.allclose(results[name], baseline[name]) for name in baseline)
 
 
+@pytest.mark.slow
 @pytest.mark.skipif(IN_GITHUB_ACTIONS, reason="Skip examples.")
 def test_optimization():
     results = optimization.main(plot_results=False, results_location=None)

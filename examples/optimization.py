@@ -18,6 +18,7 @@ from stanshock.processing.initialize import (
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
+from stanshock.system.geometry import Cylinder
 
 
 def main(
@@ -25,7 +26,7 @@ def main(
     plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
-) -> None:
+) -> dict[str, Array]:
     # parameters
     fontsize = 12
     tFinal = 7.5e-3
@@ -128,6 +129,7 @@ def main(
         dlnA_dx=dlnA_dx,
     )
     ss.state.gamma = ss.physics.get_gamma(ss.state)
+    assert isinstance(ss.geometry, Cylinder)
 
     # Solve
     t0 = time.perf_counter()
@@ -158,11 +160,11 @@ def main(
         dlnA_dx=ss.geometry.dlnA_dx,
     )
 
+    diagram_settings = [
+        ("pressure", [0.5, 25]),
+        ("temperature", [200.0, 1800.0]),
+    ]
     if plot_results:
-        diagram_settings = [
-            ("pressure", [0.5, 25]),
-            ("temperature", [200.0, 1800.0]),
-        ]
         ss.xt_diagrams += [
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
@@ -178,6 +180,7 @@ def main(
     for diagram in ss.xt_diagrams:
         diagram.plot()
 
+    assert isinstance(ss.geometry, Cylinder)
     xInsert = ss.geometry.xc
     d_outer_insert = ss.geometry.d_outer(0.0, ss.geometry.xc)
     d_inner_insert = ss.geometry.d_inner(0.0, ss.geometry.xc)
