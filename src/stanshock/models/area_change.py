@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from typing import Unpack
-
 import numpy as np
-from scipy import integrate
 
 from stanshock.physics.fluid_base import FluidState
-from stanshock.system.backend import Array, Index
+from stanshock.system.backend import Array, Index, Unpack
 from stanshock.system.base import FastSlowSource, PrecomputeSteps
 
 
@@ -15,24 +12,23 @@ class AreaChange(FastSlowSource):
 
     def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         super().__init__(**precompute_steps)
-        # self.integrator = integrate.ode(f=self.source_fast).set_integrator(name="lsoda")
-        self.integrator = integrate.ode(
-            f=self.source_fast, jac=self.source_fast_jacobian_banded
-        ).set_integrator("lsoda", lband=0, uband=0)
+        self.shape_update = (-1, 3)
+        self.jac = self.source_fast_jacobian_banded
+        self.x: Array = self.geometry.xc[self.idx_domain]
 
         # For geometries with no area change, replace the source term with a no-op
         self.no_area_change: bool = (
             self.geometry.dlnA_dt is None and self.geometry.dlnA_dx is None
         )
 
-    def update_indices(self, time: float) -> None:
+    def update_indices(self, time: float, state: FluidState) -> None:
         """Divide domain between explicit and implicit source terms."""
-        idx_explicit: Index = self.geometry.idx_cells
+        _ = state
+        idx_explicit: Index = np.s_[:]
         idx_implicit: Index = np.array([], dtype=np.int64)
 
         if self.geometry.dlnA_dt is not None:
-            x = self.geometry.xc[self.idx_update]
-            dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)
+            dlnA_dt: Array | float = self.geometry.dlnA_dt(time, self.x)
             assert isinstance(dlnA_dt, np.ndarray)
             idx_implicit = np.where(dlnA_dt != 0.0)[0]
             idx_explicit = np.where(dlnA_dt == 0.0)[0]
@@ -44,14 +40,15 @@ class AreaChange(FastSlowSource):
         self,
         time: float,
         state_array: Array,
-        update_double_flux: bool = True,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[Array, Array | None, Array | None]:
         """Replace species transport equations with mass continuity."""
         state_array_local, gamma_star, e0_star = super().before_time_integration(
-            time, state_array, update_double_flux
+            time, state_array, gamma_star, e0_star
         )
 
-        assert self.physics is not None
+        state_array_local = np.reshape(state_array_local, self.shape_domain)
         state_compact = state_array_local[:, :3].copy()
         n = self.physics.n_scalars_rho_sum
         if n > 1:
@@ -60,20 +57,41 @@ class AreaChange(FastSlowSource):
         # Store the frozen composition
         self.composition_frozen = state_array_local[:, 2:] / state_compact[:, 2:3]
 
-        return state_compact, gamma_star, e0_star
+        return np.ravel(state_compact), gamma_star, e0_star
 
     def after_time_integration(
-        self, state_array: Array, state_array_local: Array
-    ) -> Array:
+        self,
+        time: float,
+        state_array_local: Array,
+        gamma_star_local: Array | None,
+        e0_star_local: Array | None,
+        state_array: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
+    ) -> tuple[Array, Array | None, Array | None]:
         """Apply density update to all scalars."""
-        assert self.physics is not None
+        state_array_local = np.reshape(state_array_local, shape=self.shape_update)
         state_array_local = np.pad(
-            state_array_local, (0, (0, self.physics.n_scalars - 1)), mode="edge"
+            state_array_local, ((0, 0), (0, self.physics.n_scalars - 1)), mode="edge"
         )
         state_array_local[:, 2:] *= self.composition_frozen
-        state_array[self.idx_domain] = np.ravel(state_array_local)
 
-        return state_array
+        return super().after_time_integration(
+            time=time,
+            state_array_local=state_array_local,
+            gamma_star_local=gamma_star_local,
+            e0_star_local=e0_star_local,
+            state_array=state_array,
+            gamma_star=gamma_star,
+            e0_star=e0_star,
+        )
+
+    def add_source(self, y: Array, dy: Array) -> Array:
+        """Add (2D) source term to the (1D) state array."""
+        dy = np.reshape(dy, self.shape_update)
+        state_array_local = np.reshape(y, self.shape_update)
+        state_array_local[self.idx_update, self.idx_source] += dy
+        return np.ravel(state_array_local)
 
     def precompute_for_source(
         self,
@@ -89,6 +107,7 @@ class AreaChange(FastSlowSource):
         FluidState | None,
     ]:
         _ = time
+        state_array_local = np.reshape(state_array_local, shape=self.shape_update)
         ru = state_array_local[:, 0]
         re_t = state_array_local[:, 1]
         r = state_array_local[:, 2]
@@ -105,8 +124,10 @@ class AreaChange(FastSlowSource):
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
+        state.pressure = self.physics.get_pressure(state)
+        state.temperature = self.physics.get_temperature(state)
 
-        return state_array_local, state, None, None, None
+        return np.ravel(state_array_local), state, None, None, None
 
     def source(
         self,
@@ -119,20 +140,23 @@ class AreaChange(FastSlowSource):
             return np.zeros_like(state_array_local)
         return super().source(time, state_array_local, gamma_star, e0_star)
 
-        # # Integrate fast terms implicitly
-        # if idx_implicit.size != 0:
-        #     # Initialize
-        #     y0: Array = state0_compact[idx_implicit, :].copy()
-        #     args: tuple[Array, Array] = (
-        #         xc[idx_implicit],
-        #         gamma_star[idx][idx_implicit],
-        #     )
-        #     self.integrator.set_initial_value(y=y0, t=time)
-        #     self.integrator.set_f_params(args)
-        #     self.integrator.set_jac_params(args)
+    def source_full(
+        self,
+        time: float,
+        state_array_local: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        """Transform the RHS into standard format."""
+        rhs = self.source(time, state_array_local, gamma_star, e0_star)
+        rhs = np.reshape(rhs, self.shape_update)
+        rhs = np.pad(rhs, ((0, 0), (0, self.physics.n_scalars - 1)), mode="edge")
+        rhs[:, 2:] *= self.composition_frozen
 
-        #     # Solve
-        #     self.integrator.integrate(t=time + dt)
+        rhs_full = np.zeros(self.shape_domain)
+        rhs_full[self.idx_update, :] = rhs
+
+        return np.ravel(rhs_full)
 
     def source_slow(
         self,
@@ -146,26 +170,26 @@ class AreaChange(FastSlowSource):
         """Area change contributions to RHS."""
         assert state_array_local is not None
         _ = face_states, avg_face_states, face_gradients
-        idx = self.idx_explicit
-        state_array_local = state_array_local[idx, :]
+        state_array_local = np.reshape(state_array_local, shape=self.shape_update)
         rhs_compact: Array = np.zeros_like(state_array_local)
 
         if self.geometry.dlnA_dx is not None:
             assert state is not None
-            assert state.pressure is not None
             assert state.velocity is not None
+            assert state.pressure is not None
+            ru: Array = state_array_local[:, 0]
+            rE: Array = state_array_local[:, 1]
+            u: Array = state.velocity
+            p: Array = state.pressure
 
-            x: Array = self.geometry.xc[idx]
+            x: Array = self.x[self.idx_explicit]
             dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
-            rhs_compact[:, 0] -= state_array_local[:, 1] * dlnA_dx
-            rhs_compact[:, 1] -= (
-                state_array_local[:, 1] ** 2.0 / state_array_local[:, 0]
-            ) * dlnA_dx
-            rhs_compact[:, 2] -= (
-                state.velocity[idx] * (state_array_local[:, 2] + state.pressure[idx])
-            ) * dlnA_dx
 
-        return rhs_compact
+            rhs_compact[:, 0] -= u * ru * dlnA_dx
+            rhs_compact[:, 1] -= u * (rE + p) * dlnA_dx
+            rhs_compact[:, 2] -= ru * dlnA_dx
+
+        return np.ravel(rhs_compact)
 
     def source_fast(
         self,
@@ -179,39 +203,47 @@ class AreaChange(FastSlowSource):
         """Fast source terms for quasi-1D geometry."""
         assert state_array_local is not None
         _ = face_states, avg_face_states, face_gradients
-        x: Array = self.geometry.xc[self.idx_implicit]
-        n: int = len(x)
-        r: Array = state_array_local[0:n]
-        ru: Array = state_array_local[n : 2 * n]
-        rE: Array = state_array_local[2 * n : 3 * n]
-        assert state is not None
-        assert state.pressure is not None
-        p: Array = state.pressure
-        rhs: Array = np.zeros_like(state_array_local)
+        x: Array = self.x[self.idx_implicit]
+        state_array_local = np.reshape(state_array_local, shape=self.shape_update)
+        rhs_compact: Array = np.zeros_like(state_array_local)
 
         # create quasi-1D right hand side
         if self.geometry.dlnA_dt is not None:
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)
-            rhs[0:n] -= r * dlnA_dt
-            rhs[n : 2 * n] -= ru * dlnA_dt
-            rhs[2 * n : 3 * n] -= rE * dlnA_dt
+            if isinstance(dlnA_dt, np.ndarray):
+                dlnA_dt = dlnA_dt[:, None]
+            rhs_compact -= state_array_local * dlnA_dt
 
         if self.geometry.dlnA_dx is not None:
+            assert state is not None
+            assert state.velocity is not None
+            assert state.pressure is not None
+            ru: Array = state_array_local[:, 0]
+            rE: Array = state_array_local[:, 1]
+            u: Array = state.velocity
+            p: Array = state.pressure
             dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
-            rhs[0:n] -= ru * dlnA_dx
-            rhs[n : 2 * n] -= (ru**2 / r) * dlnA_dx
-            rhs[2 * n : 3 * n] -= (ru / r * (rE + p)) * dlnA_dx
 
-        return rhs
+            rhs_compact[:, 0] -= u * ru * dlnA_dx
+            rhs_compact[:, 1] -= u * (rE + p) * dlnA_dx
+            rhs_compact[:, 2] -= ru * dlnA_dx
+
+        return np.ravel(rhs_compact)
 
     def source_fast_jacobian_banded(
-        self, time: float, y: Array, args: tuple[Array, Array]
+        self,
+        time: float,
+        state_array_local: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> Array:
-        x: Array = args[0]
-        gamma_star: Array = args[1]
+        assert gamma_star is not None
+        _ = e0_star
+        x: Array = self.geometry.xc[self.idx_implicit]
         n: int = len(x)
-        r: Array = y[0:n]
-        ru: Array = y[n : 2 * n]
+        state_array_local = np.reshape(state_array_local, shape=self.shape_update)
+        ru: Array = state_array_local[:, 0]
+        r: Array = state_array_local[:, 2]
         # rE: Array = y[2 * n : 3 * n]
         # p = (gamma_star - 1) * (rE - r*e0_star - 0.5 * ru**2 / r)
 
@@ -222,12 +254,12 @@ class AreaChange(FastSlowSource):
             self.geometry.dlnA_dx(time, x) if self.geometry.dlnA_dx is not None else 0.0
         )
 
-        J_diag: Array = np.zeros(3 * n)
+        J_diag: Array = np.zeros((n, 3))
 
         # Diagonal entries per variable
-        J_diag[0:n] = -dlnAdt  # ∂R/∂ρ  # noqa: RUF003
-        J_diag[n : 2 * n] = -dlnAdt  # ∂R/∂(ρu)  # noqa: RUF003
-        J_diag[2 * n : 3 * n] = -dlnAdt - (ru / r) * gamma_star * dlnAdx  # ∂R/∂E
+        J_diag[:, 0] = -dlnAdt  # ∂R/∂(ρu)  # noqa: RUF003
+        J_diag[:, 1] = -dlnAdt - (ru / r) * gamma_star * dlnAdx  # ∂R/∂E
+        J_diag[:, 2] = -dlnAdt  # ∂R/∂ρ  # noqa: RUF003
         return J_diag.reshape(
             1, 3 * n
         )  # shape (1, 3n): banded with 0 lower and upper bandwidth

@@ -75,6 +75,7 @@ class BoundaryLayer(RightHandSide):
 
         # Provides momentum and energy source terms
         self.idx_source: Index = np.array([0, 1])
+        self.shape_update = (self.shape_update[0], 2)
 
     def get_nusselt_number(self, Re: Array, Pr: Array, cf: Array) -> Array:
         """
@@ -138,10 +139,7 @@ class BoundaryLayer(RightHandSide):
         assert state.density is not None
         assert state.velocity is not None
         rhs = np.zeros((*state.shape, 2))
-        hydraulic_diameter = self.geometry.hydraulic_diameter(time)
-        characteristic_length = self.geometry.characteristic_length(time)
-
-        x = self.geometry.xc[self.idx_update]
+        x = self.geometry.xc[self.idx_domain]
         characteristic_length = self.geometry.characteristic_length(time, x)
         hydraulic_diameter = self.geometry.hydraulic_diameter(time, x)
 
@@ -167,4 +165,4 @@ class BoundaryLayer(RightHandSide):
 
             rhs[:, 1] = -4.0 / hydraulic_diameter * qloss
 
-        return rhs
+        return np.ravel(rhs)

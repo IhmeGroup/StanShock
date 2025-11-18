@@ -81,11 +81,13 @@ class FluidPhysics(ABC):
 
     def get_double_flux_variables(self, state: FluidState) -> tuple[Array, Array]:
         """Compute effective specific heat ratio, gamma*, and reference energy, e_0^*."""
-        assert state.internal_energy is not None
         assert state.pressure is not None
         assert state.density is not None
         # Valid for any ideal gas, g* = rho*c^2/p = g
         state.gamma_star = self.get_gamma(state)
+        if state.internal_energy is None:
+            state.internal_energy = self.get_internal_energy(state)
+        assert state.internal_energy is not None
         state.e0_star = state.internal_energy - state.pressure / (
             state.density * (state.gamma_star - 1.0)
         )

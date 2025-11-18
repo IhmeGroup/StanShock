@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Literal, TypedDict
 
 import numpy as np
@@ -26,7 +27,7 @@ PrecomputeStepName: TypeAlias = Literal[
 
 class PrecomputeSteps(TypedDict):
     geometry: Geometry
-    physics: NotRequired[FluidPhysics]
+    physics: FluidPhysics
     boundary_conditions: NotRequired[BoundaryConditions]
     face_extrapolator: NotRequired[FaceExtrapolator]
     face_average: NotRequired[FaceAverage]
@@ -34,23 +35,44 @@ class PrecomputeSteps(TypedDict):
 
 
 class RightHandSide:
-    REQUIRED_PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ("geometry",)
+    REQUIRED_PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ("geometry", "physics")
+    jac: Callable[[float, Array, Array | None, Array | None], Array] | None = None
 
     def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         # Any precompute steps not provided will default to None
-        self.geometry = precompute_steps.get("geometry")
-        self.physics = precompute_steps.get("physics")
+        self.geometry: Geometry = precompute_steps.get("geometry")
+        self.physics: FluidPhysics = precompute_steps.get("physics")
         self.boundary_conditions = precompute_steps.get("boundary_conditions")
         self.face_extrapolator = precompute_steps.get("face_extrapolator")
         self.face_average = precompute_steps.get("face_average")
         self.gradient = precompute_steps.get("gradient")
 
-        # Index into (1D) global state array to be accessed by this source term
-        self.idx_domain: Index = np.s_[:]
-        # Index of cells to which the source term applies
-        self.idx_update: Index = self.geometry.idx_cells
-        # Index of transport equations to update
-        self.idx_source: Index = np.s_[:]
+        n_vars = self.physics.n_scalars + 2
+
+        # How to reshape the state_array subsets
+        self.shape_full: tuple[int, int] = (-1, n_vars)
+        self.shape_domain: tuple[int, int] = (self.geometry.n_cells, n_vars)
+        self.shape_update: tuple[int, int] = (self.geometry.n_cells_interior, n_vars)
+
+        self.idx_domain: Index  # Index into (2D) global state array to be accessed by this source term
+        self.idx_update: Index  # Index into (2D) local state array of cells to which the source term applies
+        self.idx_source: (
+            Index  # Index into (2D) local state array of transport equations to update
+        )
+
+        if self.face_extrapolator is not None:
+            # Generally we want to include ghost layers when using face extrapolation
+            self.idx_domain = np.s_[:]
+            # And only update the interior cells
+            self.idx_update = self.geometry.idx_cells
+        else:
+            # Otherwise we can drop the ghost cells
+            self.idx_domain = self.geometry.idx_cells
+            self.shape_domain = (self.geometry.n_cells_interior, n_vars)
+            self.idx_update = np.s_[:]
+
+        # Default to updating all source terms
+        self.idx_source = np.s_[:]
 
         # Ensure required routines were provided
         for step in self.REQUIRED_PRECOMPUTE_STEPS:
@@ -58,54 +80,76 @@ class RightHandSide:
                 msg: str = f"Must provide {step} for {self.__class__.__name__}."
                 raise ValueError(msg)
 
-        if self.physics is not None:
-            self.shape: tuple[int, int] = (
-                self.geometry.n_cells,
-                self.physics.n_scalars + 2,
-            )
-        else:
-            self.shape = (self.geometry.n_cells, -1)
-
-    def update_indices(self, time: float) -> None:
-        """Hook to update time-varying idx_update indices."""
-        _ = time
+    def update_indices(self, time: float, state: FluidState) -> None:
+        """Hook to update time-varying indices."""
+        _ = time, state
 
     def before_time_integration(
         self,
         time: float,
         state_array: Array,
-        update_double_flux: bool = True,
+        gamma_star: Array | None,
+        e0_star: Array | None,
     ) -> tuple[Array, Array | None, Array | None]:
         """Extract the state_array to be operated on.
 
         May include optional forward transforms.
         """
-        self.update_indices(time)
+        _ = time
+        state_array_local = np.reshape(state_array, self.shape_full)[self.idx_domain]
 
-        state_array_local: Array = state_array[self.idx_domain].reshape(self.shape)
-        gamma_star = None
-        e0_star = None
-        if update_double_flux:
-            assert self.physics is not None
-            state = self.physics.conservative_to_primitive(state_array_local)
-            gamma_star, e0_star = self.physics.get_double_flux_variables(state)
+        gamma_star_local: Array | None = None
+        e0_star_local: Array | None = None
+        if gamma_star is not None:
+            gamma_star_local = gamma_star[self.idx_domain]
+        if e0_star is not None:
+            e0_star_local = e0_star[self.idx_domain]
 
-        return state_array_local, gamma_star, e0_star
+        return np.ravel(state_array_local), gamma_star_local, e0_star_local
 
     def after_time_integration(
-        self, state_array: Array, state_array_local: Array
-    ) -> Array:
+        self,
+        time: float,
+        state_array_local: Array,
+        gamma_star_local: Array | None,
+        e0_star_local: Array | None,
+        state_array: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
+    ) -> tuple[Array, Array | None, Array | None]:
         """Insert the result back into the original state_array.
 
         Can also apply any necessary inverse transforms.
         """
-        state_array[self.idx_domain] = np.ravel(state_array_local)
+        state_array_local = state_array_local.reshape(self.shape_domain)
+        state = self.physics.conservative_to_primitive(
+            state_array_local, gamma_star_local, e0_star_local
+        )
+        # Update total energy if using double-flux method
+        if gamma_star is not None:
+            state.temperature = self.physics.get_temperature(state)
+            state.internal_energy = None
+            state_array_local = self.physics.primitive_to_conservative(state)
+            gamma_star_local, e0_star_local = self.physics.get_double_flux_variables(
+                state
+            )
 
-        return state_array
+            gamma_star[self.idx_domain] = gamma_star_local
+            assert e0_star is not None
+            e0_star[self.idx_domain] = e0_star_local
+
+        state_array = np.reshape(state_array, self.shape_full)
+        state_array[self.idx_domain] = state_array_local
+
+        # Update the domain indices for next time step
+        self.update_indices(time, state)
+
+        return np.ravel(state_array), gamma_star, e0_star
 
     def add_source(self, y: Array, dy: Array) -> Array:
         """Add (2D) source term to the (1D) state array."""
-        state_array_local = y.reshape(self.shape)
+        dy = np.reshape(dy, self.shape_update)
+        state_array_local = np.reshape(y, self.shape_domain)
         state_array_local[self.idx_update, self.idx_source] += dy
         return np.ravel(state_array_local)
 
@@ -124,7 +168,7 @@ class RightHandSide:
     ]:
         """Perform all calculations which must occur prior to source term evaluation."""
         assert self.physics is not None
-        state_array_local = state_array_local.reshape(self.shape)
+        state_array_local = state_array_local.reshape(self.shape_domain)
 
         if self.boundary_conditions is not None:
             state_array_local = self.boundary_conditions.update_ghost_layers(
@@ -143,6 +187,7 @@ class RightHandSide:
         avg_face_states: FluidState | None = None
         if self.face_extrapolator is not None:
             assert state is not None
+            state.gamma_star, state.e0_star = gamma_star, e0_star
             face_states = self.face_extrapolator(state)
             if self.boundary_conditions is not None:
                 face_states = self.boundary_conditions.update_face_states(
@@ -199,11 +244,6 @@ class RightHandSide:
     ) -> Array:
         """Concrete implementation of the source term calculation."""
 
-    def postcompute(self, state_array_local: Array, state: FluidState) -> Array:
-        """Undo any transforms to the state array during precompute steps."""
-        _ = state
-        return np.ravel(state_array_local)
-
 
 FastSlowMode: TypeAlias = Literal["fast", "slow"]
 
@@ -217,8 +257,8 @@ class FastSlowSource(RightHandSide):
         """Split RHS into fast and slow source terms accessed by setting the mode."""
         super().__init__(**precompute_steps)
         self.idx_implicit = np.array([], dtype=np.int64)
-        self.idx_explicit = self.geometry.idx_cells
-        self._mode = "slow"
+        self.idx_explicit = np.s_[:]
+        self.mode = "slow"
 
     @property
     def mode(self) -> FastSlowMode:

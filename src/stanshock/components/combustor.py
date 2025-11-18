@@ -19,6 +19,7 @@ from stanshock.numerics.gradient import CentralDifference
 from stanshock.numerics.inviscid_flux import InviscidFlux, RiemannSolver, hllc_flux
 from stanshock.numerics.time_integration import (
     SSPRK3,
+    FastSlowIntegrator,
     ForwardEuler,
     HeunsMethod,
     LieSplitting,
@@ -120,7 +121,7 @@ class Combustor:
 
         # Add area-change related source terms
         if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None:
-            self.area_change = AreaChange(geometry=self.geometry)
+            self.area_change = AreaChange(geometry=self.geometry, physics=self.physics)
 
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
@@ -176,7 +177,7 @@ class Combustor:
                 ),
                 advection,
             ]
-        else:
+        elif self.physics.gas.n_reactions > 0:
             integrators += [
                 StrangSplitting(
                     transport_operator=advection,
@@ -187,6 +188,8 @@ class Combustor:
                     ),
                 )
             ]
+        else:
+            integrators += [advection]
 
         if self.include_diffusion:
             self.viscous_flux = ViscousFlux(
@@ -203,7 +206,8 @@ class Combustor:
             integrators += [HeunsMethod(self.viscous_flux)]
 
         if self.area_change is not None:
-            integrators += [ForwardEuler(self.area_change)]
+            # integrators += [ForwardEuler(self.area_change)]
+            integrators += [FastSlowIntegrator(self.area_change)]
 
         if self.include_boundary_layer:
             # Initialize the boundary layer source terms
@@ -211,6 +215,7 @@ class Combustor:
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
                 geometry=self.geometry,
+                physics=self.physics,
             )
             integrators += [ForwardEuler(self.boundary_layer)]
 
@@ -221,7 +226,7 @@ class Combustor:
             integrators += [HeunsMethod(self.injector)]
 
         # Apply Lie splitting approach
-        self.time_integrator = LieSplitting(integrators, update_double_flux=True)
+        self.time_integrator = LieSplitting(integrators)
 
         self.F = np.ones(self.geometry.n_cells)  # thickening
 
@@ -285,12 +290,15 @@ class Combustor:
         res_p = np.inf
         gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
         state_array = self.physics.primitive_to_conservative(self.state)
+        self.shape_full: tuple[int, int] = state_array.shape
+        state_array = np.ravel(state_array)
+        p_new = self.physics.get_pressure(self.state)
         while self.t < tFinal and res_p > res_p_target:
-            p_old = self.state.pressure
             dt = min(tFinal - self.t, self.get_time_step())
+            p_old = p_new + 0.0
 
             # Update the system state
-            self.t, state_array = self.time_integrator.advance(
+            self.t, state_array, gamma_star, e0_star = self.time_integrator.advance(
                 dt=dt,
                 time=self.t,
                 state_array=state_array,
@@ -298,15 +306,16 @@ class Combustor:
                 e0_star=e0_star,
             )
             self.state = self.physics.conservative_to_primitive(
-                state_array, gamma_star, e0_star
+                np.reshape(state_array, self.shape_full), gamma_star, e0_star
             )
-            gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
+            p_new = self.physics.get_pressure(self.state)
+            self.state.gamma = self.physics.get_gamma(self.state)
 
             # perform other updates
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
             iters += 1
-            res_p = np.linalg.norm(self.state.pressure - p_old)
+            res_p = np.linalg.norm(p_new - p_old)
             if self.verbose and iters % self.output_every == 0:
                 print(
                     f"Iteration: {iters}. Current time: {self.t}. Time step: {dt:e}. "

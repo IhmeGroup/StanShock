@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from stanshock.physics.fluid_base import FluidPhysics
-from stanshock.system.backend import Array
+from stanshock.system.backend import Array, Unpack
 from stanshock.system.base import FastSlowSource, RightHandSide
+
+if TYPE_CHECKING:
+    from scipy.integrate._ivp.ivp import _IVPMethod, _SolverOptions
 
 
 class TimeIntegrator(ABC):
@@ -21,27 +24,35 @@ class TimeIntegrator(ABC):
         state_array: Array,
         gamma_star: Array | None,
         e0_star: Array | None,
-    ) -> tuple[float, Array]:
+    ) -> tuple[float, Array, Array | None, Array | None]:
         """Integrate the state from `time` to `time+dt` given the rhs."""
 
 
 class ScipyIVP(TimeIntegrator):
-    def __init__(self, rhs: RightHandSide, method: str = "LSODA", **kwargs) -> None:  # type: ignore[no-untyped-def]
+    def __init__(
+        self,
+        rhs: RightHandSide,
+        method: _IVPMethod = "LSODA",
+        **options: Unpack[_SolverOptions],
+    ) -> None:
         """Interface to SciPy's IVP solvers.
 
         The specific solver can be selected with the `method` input, and additional
         solver options can be passed in as keyword arguments. See documentation for
         `scipy.integrate.solve_ivp`.
         """
-        # from scipy.integrate import ode
         from scipy.integrate import solve_ivp
 
-        # self.integrator = ode
         self.integrator = solve_ivp
 
         self.rhs = rhs
+        self.solver_options = options
+
+        if self.rhs.jac is not None:
+            self.solver_options["jac"] = self.rhs.jac
+            self.solver_options["lband"] = 0
+            self.solver_options["uband"] = 0
         self.method = method
-        self.solver_options = kwargs
 
     def advance(
         self,
@@ -50,24 +61,32 @@ class ScipyIVP(TimeIntegrator):
         state_array: Array,
         gamma_star: Array | None,
         e0_star: Array | None,
-    ) -> tuple[float, Array]:
-        y0, state0, _, _, _ = self.rhs.precompute_for_source(
+    ) -> tuple[float, Array, Array | None, Array | None]:
+        y0, gamma_star_local, e0_star_local = self.rhs.before_time_integration(
             time, state_array, gamma_star, e0_star
         )
-        assert state0 is not None
 
         results = self.integrator(
-            fun=self.rhs.source_full,
+            fun=self.rhs.source,
             t_span=(time, time + dt),
             y0=y0,
             method=self.method,
-            args=(gamma_star, e0_star),
+            args=(gamma_star_local, e0_star_local),
             **self.solver_options,
         )
 
-        state_array = self.rhs.postcompute(results.y[:, -1], state0)
+        time = results.t[-1]
+        state_array, gamma_star, e0_star = self.rhs.after_time_integration(
+            time=time,
+            state_array_local=results.y[:, -1],
+            gamma_star_local=gamma_star_local,
+            e0_star_local=e0_star_local,
+            state_array=state_array,
+            gamma_star=gamma_star,
+            e0_star=e0_star,
+        )
 
-        return results.t[-1], state_array
+        return time, state_array, gamma_star, e0_star
 
 
 class RungeKuttaBase(TimeIntegrator):
@@ -81,12 +100,14 @@ class RungeKuttaBase(TimeIntegrator):
         state_array: Array,
         gamma_star: Array | None,
         e0_star: Array | None,
-    ) -> tuple[float, Array]:
+    ) -> tuple[float, Array, Array | None, Array | None]:
         t = time
-        y: Array = np.ravel(state_array)
+        y0, gamma_star_local, e0_star_local = self.rhs.before_time_integration(
+            t, state_array, gamma_star, e0_star
+        )
 
         t0 = t + 0
-        y0 = y.copy()
+        y = y0.copy()
 
         for i_rk_stage in range(self.n_rk_stage):
             a, b, c, d = self.rk_coeff[i_rk_stage]
@@ -94,21 +115,30 @@ class RungeKuttaBase(TimeIntegrator):
             dydt = self.rhs.source(
                 time=t,
                 state_array_local=y,
-                gamma_star=gamma_star,
-                e0_star=e0_star,
+                gamma_star=gamma_star_local,
+                e0_star=e0_star_local,
             )
 
             if b != 1.0:
-                y *= b
+                y = b * y
 
             if a != 0.0:
-                y += a * y0
+                y = y + a * y0
 
             y = self.rhs.add_source(y, c * dt * dydt)
 
             t = t0 + d * dt
 
-        return t, y
+        state_array, gamma_star, e0_star = self.rhs.after_time_integration(
+            time=time,
+            state_array_local=y,
+            gamma_star_local=gamma_star_local,
+            e0_star_local=e0_star_local,
+            state_array=state_array,
+            gamma_star=gamma_star,
+            e0_star=e0_star,
+        )
+        return t, state_array, gamma_star, e0_star
 
 
 class ForwardEuler(RungeKuttaBase):
@@ -163,8 +193,8 @@ class StrangSplitting(TimeIntegrator):
     def __init__(
         self, transport_operator: TimeIntegrator, reaction_operator: TimeIntegrator
     ) -> None:
-        self.transport_operator = transport_operator
-        self.reaction_operator = reaction_operator
+        self.transport_operator: TimeIntegrator = transport_operator
+        self.reaction_operator: TimeIntegrator = reaction_operator
 
     def advance(
         self,
@@ -173,53 +203,43 @@ class StrangSplitting(TimeIntegrator):
         state_array: Array,
         gamma_star: Array | None,
         e0_star: Array | None,
-    ) -> tuple[float, Array]:
-        y: Array = state_array.flatten()
-
+    ) -> tuple[float, Array, Array | None, Array | None]:
         # Take half-step with transport terms
-        _, y = self.transport_operator.advance(
+        _, state_array, _, _ = self.transport_operator.advance(
             dt=0.5 * dt,
             time=time,
-            state_array=y,
+            state_array=state_array,
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
 
         # Take full-step with reaction terms
-        t, y = self.reaction_operator.advance(
+        t, state_array, _, _ = self.reaction_operator.advance(
             dt=dt,
             time=time,
-            state_array=y,
+            state_array=state_array,
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
 
         # Take half-step with transport terms
-        _, y = self.transport_operator.advance(
+        _, state_array, gamma_star, e0_star = self.transport_operator.advance(
             dt=0.5 * dt,
             time=time + 0.5 * dt,
-            state_array=y,
+            state_array=state_array,
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
 
-        return t, y
+        return t, state_array, gamma_star, e0_star
 
 
 class LieSplitting(TimeIntegrator):
     def __init__(
         self, operators: list[TimeIntegrator], update_double_flux: bool = False
     ) -> None:
-        self.operators = operators
-        self.update_double_flux = update_double_flux
-
-        # Get fluid physics from any of the operators
-        self.physics: FluidPhysics | None = None
-        if self.update_double_flux:
-            for operator in operators:
-                if operator.rhs.physics is not None:
-                    self.physics = operator.rhs.physics
-                    break
+        self.operators: list[TimeIntegrator] = operators
+        self.update_double_flux: bool = update_double_flux
 
     def advance(
         self,
@@ -228,29 +248,27 @@ class LieSplitting(TimeIntegrator):
         state_array: Array,
         gamma_star: Array | None,
         e0_star: Array | None,
-    ) -> tuple[float, Array]:
-        y: Array = state_array.flatten()
-
+    ) -> tuple[float, Array, Array | None, Array | None]:
+        gamma_star_temp: Array | None = None
+        e0_star_temp: Array | None = None
         for operator in self.operators:
-            _, y = operator.advance(
+            _, state_array, gamma_star_temp, e0_star_temp = operator.advance(
                 dt=dt,
                 time=time,
-                state_array=y,
+                state_array=state_array,
                 gamma_star=gamma_star,
                 e0_star=e0_star,
             )
 
-            # Optionally: Update the double flux variables
+            # Optionally: Update the double flux variables after each step
             if self.update_double_flux:
-                assert self.physics is not None
-                state_array = y.reshape(operator.rhs.shape)
-                state = self.physics.conservative_to_primitive(
-                    state_array, gamma_star, e0_star
-                )
-                state.temperature = self.physics.get_temperature(state)
-                gamma_star, e0_star = self.physics.get_double_flux_variables(state)
+                gamma_star, e0_star = gamma_star_temp, e0_star_temp
 
-        return time + dt, y
+        # Otherwise, only update the double flux at the end
+        if not self.update_double_flux:
+            gamma_star, e0_star = gamma_star_temp, e0_star_temp
+
+        return time + dt, state_array, gamma_star, e0_star
 
 
 class FastSlowIntegrator(TimeIntegrator):
@@ -261,9 +279,9 @@ class FastSlowIntegrator(TimeIntegrator):
         slow_integrator: type[TimeIntegrator] = ForwardEuler,
     ) -> None:
         """Apply different integrators to stiff and non-stiff terms."""
-        self.rhs = rhs
-        self.fast_integrator = fast_integrator(self.rhs)
-        self.slow_integrator = slow_integrator(self.rhs)
+        self.rhs: RightHandSide = rhs
+        self.fast_integrator: TimeIntegrator = fast_integrator(self.rhs)
+        self.slow_integrator: TimeIntegrator = slow_integrator(self.rhs)
 
     def advance(
         self,
@@ -272,27 +290,20 @@ class FastSlowIntegrator(TimeIntegrator):
         state_array: Array,
         gamma_star: Array | None,
         e0_star: Array | None,
-    ) -> tuple[float, Array]:
+    ) -> tuple[float, Array, Array | None, Array | None]:
         assert isinstance(self.rhs, FastSlowSource)
 
         # Integrate fast terms
         self.rhs.mode = "fast"
-        state_array_local, gamma_star, e0_star = self.rhs.before_time_integration(
-            time, state_array
-        )
-        _, state_array_local = self.fast_integrator.advance(
-            dt, time, state_array_local, gamma_star, e0_star
-        )
-        state_array = self.rhs.after_time_integration(state_array, state_array_local)
+        if len(state_array[self.rhs.idx_implicit]) > 0:
+            _, state_array, gamma_star, e0_star = self.fast_integrator.advance(
+                dt, time, state_array, gamma_star, e0_star
+            )
 
         # Integrate slow terms
         self.rhs.mode = "slow"
-        state_array_local, gamma_star, e0_star = self.rhs.before_time_integration(
-            time, state_array
-        )
-        _, state_array_local = self.slow_integrator.advance(
+        _, state_array, gamma_star, e0_star = self.slow_integrator.advance(
             dt, time, state_array, gamma_star, e0_star
         )
-        state_array = self.rhs.after_time_integration(state_array, state_array_local)
 
-        return time + dt, state_array
+        return time + dt, state_array, gamma_star, e0_star
