@@ -110,7 +110,7 @@ def main(
     gas4.TPX = T4, p4, "HE:1"
 
     # set up solver parameters
-    boundary_conditions = ["reflecting", "reflecting"]
+    boundary_conditions = {"left": "reflecting", "right": "reflecting"}
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)

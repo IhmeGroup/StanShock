@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from stanshock.components.combustor import Combustor
-from stanshock.numerics.boundary_conditions import Inflow
+from stanshock.numerics.boundary_conditions import SpecifiedFace
 from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.system.backend import Array
@@ -94,7 +94,9 @@ gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
 W_in = gas_init.mean_molecular_weight
 
 # Define the boundary conditions
-BC_inlet = Inflow(reference_state=(gas_init.density, U_in, gas_init.P, gas_init.Y))
+BC_inlet = SpecifiedFace(
+    reference_state=(gas_init.density, U_in, gas_init.P, gas_init.Y)
+)
 BC_outlet = "outflow"
 BCs = (BC_inlet, BC_outlet)
 

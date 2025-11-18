@@ -218,7 +218,7 @@ def weno5(
     # ^ all the characteristic values in the stencil
 
     for iFace in range(nFaces):  # iterate through each cell right edge
-        iCell = iFace + 2  # face is on the right side of the cell
+        iCell = iFace + n_ghost_layers - 1  # face is on the right side of the cell
 
         # Face averages
         rAverage = 0.5 * (r[iCell] + r[iCell + 1])
@@ -382,23 +382,6 @@ def weno5(
             for kSc in range(nSc):
                 PLR[N, iFace, 3 + kSc] = U[mn + kSc] / rLR
 
-    # First order at boundaries
-    for N in range(nLR):
-        for iFace in range(n_ghost_layers):
-            iCell = iFace + 2
-            PLR[N, iFace, 0] = r[iCell + N]
-            PLR[N, iFace, 1] = u[iCell + N]
-            PLR[N, iFace, 2] = p[iCell + N]
-            for kSc in range(nSc):
-                PLR[N, iFace, 3 + kSc] = Y[iCell + N, kSc]
-        for iFace in range(nFaces - n_ghost_layers, nFaces):
-            iCell = iFace + 2
-            PLR[N, iFace, 0] = r[iCell + N]
-            PLR[N, iFace, 1] = u[iCell + N]
-            PLR[N, iFace, 2] = p[iCell + N]
-            for kSc in range(nSc):
-                PLR[N, iFace, 3 + kSc] = Y[iCell + N, kSc]
-
     # Create primitive matrix for limiter
     P = np.zeros((nCells + 2 * n_ghost_layers, nVar + 1))
     P[:, 0] = r[:]
@@ -469,17 +452,17 @@ class FifthOrderWeno(FaceExtrapolator):
         assert state.gamma_star is not None
         assert state.e0_star is not None
 
-        face_states_array = weno5(
-            state.density,
-            state.velocity,
-            state.pressure,
-            state.composition,
-            state.gamma_star,
-            self.n_ghost_layers,
-            self.n_scalars_rho_sum,
+        face_states_array: Array = weno5(
+            r=state.density,
+            u=state.velocity,
+            p=state.pressure,
+            Y=state.composition,
+            gamma=state.gamma_star,
+            n_ghost_layers=self.n_ghost_layers,
+            n_scalars_rho_sum=self.n_scalars_rho_sum,
         )
 
-        n_faces: int = state.shape[0] - 2 * self.n_ghost_layers + 1
+        n_faces: int = state.shape[0]
 
         return FluidState(
             shape=(2, n_faces),

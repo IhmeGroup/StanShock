@@ -11,6 +11,7 @@ from stanshock.numerics.face_extrapolation import FaceExtrapolator
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array, TypeAlias
 from stanshock.system.base import RightHandSide
+from stanshock.system.geometry import Geometry
 
 # Global variables (parameters) used by the solver
 mn = 2  # number of 1D Euler equations
@@ -46,9 +47,7 @@ def lax_friedrichs_flux(
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
-    nLR = len(rLR)
-    nFaces = len(rLR[0])
-    nSc = YLR[0].shape[1]
+    nLR, nFaces, nSc = YLR.shape
     nDim = mn + nSc
 
     # find the maximum wave speed
@@ -109,9 +108,7 @@ def hllc_flux(
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
-    nLR = len(rLR)
-    nFaces = len(rLR[0])
-    nSc = YLR[0].shape[1]
+    nLR, nFaces, nSc = YLR.shape
     nDim = mn + nSc
 
     # compute the wave speeds
@@ -219,20 +216,22 @@ class InviscidFlux(RightHandSide):
         face_extrapolator: FaceExtrapolator,
         boundary_conditions: BoundaryConditions,
         riemann_solver: RiemannSolver,
-        dx: float,
+        geometry: Geometry,
     ) -> None:
         self.face_extrapolator = face_extrapolator
         self.boundary_conditions = boundary_conditions
         self.riemann_solver = riemann_solver
-        self.dx = dx
+        self.dx: Array | float = geometry.dx
+        if isinstance(self.dx, np.ndarray):
+            self.dx = self.dx[geometry.idx_cells]
 
     def source(
         self,
         time: float,
         state_array: Array,
         physics: FluidPhysics,
-        gamma_star: Array,
-        e0_star: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
     ) -> Array:
         state_array = self.boundary_conditions.update_ghost_layers(time, state_array)
 
@@ -241,6 +240,7 @@ class InviscidFlux(RightHandSide):
         )
         state.gamma_star = gamma_star
         state.e0_star = e0_star
+        state = self.boundary_conditions.update_ghost_states(time, state)
 
         face_states: FluidState = self.face_extrapolator(state)
         face_states = self.boundary_conditions.update_face_states(time, face_states)
@@ -248,7 +248,7 @@ class InviscidFlux(RightHandSide):
         return self.source_from_primitives(time, face_states, physics)
 
     def source_from_primitives(
-        self, _time: float, face_states: FluidState, _physics: FluidPhysics
+        self, time: float, face_states: FluidState, _physics: FluidPhysics
     ) -> Array:
         assert face_states.density is not None
         assert face_states.velocity is not None
@@ -257,6 +257,8 @@ class InviscidFlux(RightHandSide):
         assert face_states.gamma_star is not None
         assert face_states.e0_star is not None
 
+        # Flux from face on cell's left side, using double-flux variables
+        # from cell on the face's right side
         left_face_flux: Array = self.riemann_solver(
             face_states.density,
             face_states.velocity,
@@ -265,6 +267,8 @@ class InviscidFlux(RightHandSide):
             face_states.gamma_star[1, :],
             face_states.e0_star[1, :],
         )
+        # Flux from face on cell's right side, using double-flux variables
+        # from cell on the face's left side
         right_face_flux: Array = self.riemann_solver(
             face_states.density,
             face_states.velocity,
@@ -273,6 +277,9 @@ class InviscidFlux(RightHandSide):
             face_states.gamma_star[0, :],
             face_states.e0_star[0, :],
         )
+
+        self.boundary_conditions.update_face_flux(time, left_face_flux)
+        self.boundary_conditions.update_face_flux(time, right_face_flux)
 
         return cast(
             Array,

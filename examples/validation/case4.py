@@ -145,7 +145,7 @@ def main(
         return dA_dx(time, x) / A(time, x)
 
     # solve with boundary layer model
-    boundary_conditions = ["reflecting", "reflecting"]
+    boundary_conditions = {"left": "reflecting", "right": "reflecting"}
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
@@ -167,8 +167,8 @@ def main(
     ssbl.state.gamma = ssbl.physics.get_gamma(ssbl.state)
     ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
     diagram_settings = [
-        ("pressure", [p1 / 101325, p4 / 101325]),
-        ("temperature", [T1, 800.0]),
+        ("pressure", (p1 / 101325, p4 / 101325)),
+        ("temperature", (T1, 800.0)),
     ]
     ssbl.xt_diagrams += [
         XTDiagram(ssbl, variable=variable, limits=limits)
@@ -180,7 +180,7 @@ def main(
     XN2Upper = 1.5 - XN2Lower
     idx = ssbl.geometry.idx_cells
     xc = ssbl.geometry.xc[idx]
-    dV = ssbl.geometry.volume(0.0, xc)
+    dV = ssbl.geometry.volume(0.0, ssbl.geometry.xf)
     VDriver = np.sum(dV[xc < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
@@ -211,7 +211,7 @@ def main(
             diagram.plot()
 
     # Solve without boundary layer model
-    boundary_conditions = ["reflecting", "reflecting"]
+    boundary_conditions = {"left": "reflecting", "right": "reflecting"}
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
@@ -240,7 +240,7 @@ def main(
     XN2Upper = 1.5 - XN2Lower
     idx = ssnbl.geometry.idx_cells
     xc = ssnbl.geometry.xc[idx]
-    dV = ssnbl.geometry.volume(0.0, xc)
+    dV = ssnbl.geometry.volume(0.0, ssnbl.geometry.xf)
     VDriver = np.sum(dV[xc < xShock])
     V = np.cumsum(dV)
     V -= V[0] / 2.0  # center
