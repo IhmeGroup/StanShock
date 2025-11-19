@@ -132,6 +132,15 @@ module = "stanshock.*"
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
+[[tool.mypy.overrides]]
+module = ["numba.*", "h5py.*"]
+ignore_missing_imports = true
+
+
+[tool.basedpyright]
+reportImplicitOverride = false
+reportConstantRedefinition = false
+
 
 [tool.ruff]
 

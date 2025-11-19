@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import cantera as ct
 import numpy as np
 
-from stanshock.system.backend import Array
+from stanshock.system.backend import Array, Composition
 
 
 @dataclass
@@ -39,21 +39,28 @@ class FluidState:
 
 
 class FluidPhysics(ABC):
-    def __init__(self, gas: ct.Solution, ox_def=None, fuel_def=None, prog_def=None):
-        self.gas = gas
-        self.n_scalars = self.gas.n_species
-        self.n_scalars_rho_sum = self.n_scalars
-        self.scalar_names = [species.lower() for species in self.gas.species_names]
+    def __init__(
+        self,
+        gas: ct.Solution,
+        ox_def: Composition | None = None,
+        fuel_def: Composition | None = None,
+        prog_def: Composition | None = None,
+    ) -> None:
+        self.gas: ct.Solution = gas
+        self.n_scalars: int = self.gas.n_species
+        self.n_scalars_rho_sum: int = self.n_scalars
+        self.scalar_names: list[str] = [
+            species.lower() for species in self.gas.species_names
+        ]
 
-        self.is_flamelet = False
+        self.is_flamelet: bool = False
 
         # For mixture fraction and progress variable definitions (optional):
-        self.ox_def = ox_def  # Oxidizer molar composition
-        self.fuel_def = fuel_def  # Fuel molar composition
-        self.prog_def = prog_def  # Progress variable molar composition
-        self.Z_weights = None
-        self.Z_offset = None
-        self.prog_weights = None
+        self.ox_def: Composition | None = ox_def  # Oxidizer molar composition
+        self.fuel_def: Composition | None = fuel_def  # Fuel molar composition
+        self.prog_def: Composition | None = (
+            prog_def  # Progress variable molar composition
+        )
 
         if self.ox_def is not None and self.fuel_def is not None:
             self.initialize_bilger_mixture_fraction()
@@ -62,15 +69,18 @@ class FluidPhysics(ABC):
             self.initialize_progress_variable(self.prog_def)
 
     @abstractmethod
-    def get_cp(self, state: FluidState):
+    def get_cp(self, state: FluidState) -> Array:
         """Compute specific heat capacity at constant pressure."""
 
     @abstractmethod
-    def get_gamma(self, state: FluidState):
+    def get_gamma(self, state: FluidState) -> Array:
         """Compute specific heat ratio, gamma."""
 
     def get_double_flux_variables(self, state: FluidState) -> tuple[Array, Array]:
         """Compute effective specific heat ratio, gamma*, and reference energy, e_0^*."""
+        assert state.internal_energy is not None
+        assert state.pressure is not None
+        assert state.density is not None
         # Valid for any ideal gas, g* = rho*c^2/p = g
         state.gamma_star = self.get_gamma(state)
         state.e0_star = state.internal_energy - state.pressure / (
@@ -80,48 +90,51 @@ class FluidPhysics(ABC):
         return state.gamma_star, state.e0_star
 
     @abstractmethod
-    def get_mu(self, state: FluidState):
+    def get_mu(self, state: FluidState) -> Array:
         """Compute dynamic viscosity."""
 
     @abstractmethod
-    def get_thermal_conductivity(self, state: FluidState):
+    def get_thermal_conductivity(self, state: FluidState) -> Array:
         """Compute thermal conductivity."""
 
     @abstractmethod
-    def get_temperature(self, state: FluidState):
+    def get_temperature(self, state: FluidState) -> Array:
         """Compute temperature of the gas."""
 
     @abstractmethod
-    def get_pressure(self, state: FluidState):
+    def get_pressure(self, state: FluidState) -> Array:
         """Compute pressure of the gas."""
 
     @abstractmethod
-    def get_internal_energy(self, state: FluidState):
+    def get_internal_energy(self, state: FluidState) -> Array:
         """Compute internal energy of the gas."""
 
     @abstractmethod
-    def get_species_enthalpies(self, state: FluidState):
+    def get_species_enthalpies(self, state: FluidState) -> Array:
         """Compute total enthalpies of each species."""
 
     @abstractmethod
-    def get_sound_speed(self, state: FluidState):
+    def get_sound_speed(self, state: FluidState) -> Array:
         """Compute speed of sound of the gas."""
 
-    def get_thermal_diffusivity(self, state: FluidState):
+    def get_thermal_diffusivity(self, state: FluidState) -> Array:
         """Compute thermal diffusivity, alpha = kappa / (rho * cp)."""
         kappa = self.get_thermal_conductivity(state)
         density = state.density
+        assert density is not None
         cp = self.get_cp(state)
         return kappa / (density * cp)
 
-    def get_mass_diffusivity(self, state: FluidState):
+    def get_mass_diffusivity(self, state: FluidState) -> Array:
         """Compute mass diffusivity (Unity Lewis Number assumption)."""
         return self.get_thermal_diffusivity(state)[:, None]
 
-    def initialize_bilger_mixture_fraction(self):
+    def initialize_bilger_mixture_fraction(self) -> None:
         """Compute coefficients defining Bilger mixture fraction."""
-        self.Z_weights = np.zeros(self.gas.n_species)
-        self.Z_offset = 0.0
+        assert self.ox_def is not None
+        assert self.fuel_def is not None
+        self.Z_weights: Array = np.zeros(self.gas.n_species)
+        self.Z_offset: float = 0.0
         denom = 0.0
 
         # Set the values for C, H, and O:
@@ -155,13 +168,17 @@ class FluidPhysics(ABC):
         self.Z_weights /= denom * self.gas.molecular_weights
         self.Z_offset /= denom
 
-    def get_bilger_mixture_fraction(self, Y):
+    def get_bilger_mixture_fraction(self, Y: Array) -> Array:
         """Compute the Bilger mixture fraction from given mass fractions."""
-        return np.clip(np.dot(Y, self.Z_weights) + self.Z_offset, 0.0, 1.0)
+        assert self.Z_weights is not None
+        assert self.Z_offset is not None
+        tmp = np.dot(Y, self.Z_weights)
+        assert isinstance(tmp, np.ndarray)
+        return np.clip(tmp + self.Z_offset, 0.0, 1.0)
 
-    def initialize_progress_variable(self, prog_def: dict[str, float]):
+    def initialize_progress_variable(self, prog_def: Composition) -> None:
         """Set coefficients defining progress variable."""
-        self.prog_weights = np.zeros(self.gas.n_species)
+        self.prog_weights: Array = np.zeros(self.gas.n_species)
 
         for sp, val in prog_def.items():
             self.prog_weights[self.gas.species_index(sp)] = val
@@ -172,37 +189,44 @@ class FluidPhysics(ABC):
 
         self.prog_weights /= np.sum(self.prog_weights)
 
-    def get_progress_variable(self, Y):
+    def get_progress_variable(self, Y: Array) -> Array:
         """Compute the progress variable from given mass fractions."""
-        if self.prog_weights is None:
+        if self.prog_def is None:
             msg = "Progress Variable Not Defined"
             raise Exception(msg)
 
-        return np.clip(np.dot(Y, self.prog_weights), 0.0, 1.0)
+        tmp = np.dot(Y, self.prog_weights)
+        assert isinstance(tmp, np.ndarray)
+        return np.clip(tmp, 0.0, 1.0)
 
     def set_state(self, state: FluidState) -> FluidState:
         """Updates internal representation of the fluid state if needed."""
-        self._cache_valid = True
+        state._cache_valid = True
         return state
 
-    def get_composition(self, Y):
+    def get_composition(self, Y: Array) -> Array:
         """Converts mass fractions to set of transported scalars."""
         return Y
 
-    def get_normalized_progress_variable(self, Z, C):
+    def get_normalized_progress_variable(self, Z: Array, C: Array) -> Array:
+        _ = Z, C
         msg = f"Normalized progress variable not implemented for {self.__class__}."
         raise NotImplementedError(msg)
 
-    def lookup(self, var: str, state: FluidState):
+    def lookup(self, var: str, state: FluidState) -> Array:
+        _ = var, state
         msg = (
             f"Looking up a variable by string is not implemented for {self.__class__}."
         )
         raise NotImplementedError(msg)
 
-    def primitive_to_conservative(self, state: FluidState):
+    def primitive_to_conservative(self, state: FluidState) -> Array:
         """Transform primitive variables into vector of conservatives, accounting for chemical contributions."""
         # Compute total energy including chemical contributions
-        self.set_state(state)
+        state = self.set_state(state)
+        assert state.velocity is not None
+        assert state.density is not None
+        assert state.composition is not None
 
         e_int = state.internal_energy
         if e_int is None:
@@ -216,6 +240,7 @@ class FluidPhysics(ABC):
                 state.density[..., None] * state.composition,
             ),
             axis=-1,
+            dtype=np.float64,
         )
 
     def conservative_to_primitive(
@@ -230,9 +255,10 @@ class FluidPhysics(ABC):
         rY = state_array[..., 2:]
 
         # Enforce non-negativity
-        np.clip(rY, 0, None, out=rY)
+        rY = np.clip(rY, 0, None, out=rY)
 
-        r = rY[..., : self.n_scalars_rho_sum].sum(axis=-1)
+        r = np.sum(rY[..., : self.n_scalars_rho_sum], axis=-1, dtype=np.float64)
+        assert isinstance(r, np.ndarray)
         u = ru / r
         e_int = (re_t / r) - 0.5 * u**2.0
         Y = rY / r[..., None]
@@ -247,10 +273,11 @@ class FluidPhysics(ABC):
 
         if gamma_star is not None:
             # Compute pressure using double-flux method
+            assert e0_star is not None
             state.pressure = (gamma_star - 1.0) * r * (e_int - e0_star)
 
         return self.set_state(state)
 
     @abstractmethod
-    def get_source_terms(self, state: FluidState):
+    def get_source_terms(self, state: FluidState) -> Array:
         """Compute reaction source terms corresponding to transported scalars."""
