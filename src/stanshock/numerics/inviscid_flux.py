@@ -339,4 +339,4 @@ class InviscidFlux(RightHandSide):
                 time, right_face_flux
             )
 
-        return (left_face_flux[:-1, :] - right_face_flux[1:, :]) / self.dx
+        return np.ravel((left_face_flux[:-1, :] - right_face_flux[1:, :]) / self.dx)

@@ -58,17 +58,30 @@ def test_isentropic_flow_relations(isentropic_flow: Combustor) -> None:
     # Get initial state from given solution
     t = isentropic_flow.t
     state = isentropic_flow.state
-    physics = isentropic_flow.physics
-    y = isentropic_flow.physics.primitive_to_conservative(state)
+    state_array = np.ravel(isentropic_flow.physics.primitive_to_conservative(state))
     gamma_star, e0_star = isentropic_flow.physics.get_double_flux_variables(state)
 
     # Get source terms from inviscid flux
+    y, gamma_star_local, e0_star_local = (
+        isentropic_flow.inviscid_flux.before_time_integration(
+            t, state_array, gamma_star, e0_star
+        )
+    )
     source_flux = isentropic_flow.inviscid_flux.source(
-        t, y, physics, gamma_star, e0_star
+        t, y, gamma_star_local, e0_star_local
     )
 
     # Get source terms from area change
-    source_area = isentropic_flow.area_change.source(
-        t, y, physics, gamma_star, e0_star, 1.0
+    assert isentropic_flow.area_change is not None
+    y, gamma_star_local, e0_star_local = (
+        isentropic_flow.area_change.before_time_integration(
+            t, state_array, gamma_star, e0_star
+        )
+    )
+    source_area = isentropic_flow.area_change.source_full(
+        t,
+        y,
+        gamma_star_local,
+        e0_star_local,
     )
     assert source_flux == pytest.approx(-source_area, rel=1e-3)

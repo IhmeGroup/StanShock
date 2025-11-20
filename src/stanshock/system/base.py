@@ -223,7 +223,11 @@ class RightHandSide:
         )
 
     def source_full(
-        self, time: float, state_array_local: Array, gamma_star: Array, e0_star: Array
+        self,
+        time: float,
+        state_array_local: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
     ) -> Array:
         """Reshape the source term to match the state array."""
         dydt = np.zeros_like(state_array_local)
