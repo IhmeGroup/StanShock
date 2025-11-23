@@ -148,7 +148,7 @@ class ForwardEuler(RungeKuttaBase):
 
 class MidpointMethod(RungeKuttaBase):
     n_rk_stage: int = 2
-    rk_coeff: Array = np.array([[0.0, 0.5, 0.5, 0.5], [0.0, 1.0, 1.0, 1.0]])
+    rk_coeff: Array = np.array([[0.0, 1.0, 0.5, 0.5], [1.0, 0.0, 1.0, 1.0]])
 
 
 class HeunsMethod(RungeKuttaBase):
@@ -173,18 +173,6 @@ class SSPRK3(RungeKuttaBase):
             [0.0, 1.0, 1.0, 1.0],
             [0.75, 0.25, 0.25, 0.5],
             [1.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 1.0],
-        ]
-    )
-
-
-class RK4(RungeKuttaBase):
-    n_rk_stage: int = 4
-    rk_coeff: Array = np.array(
-        [
-            [0.0, 1.0, 0.5, 0.5],
-            [0.5, 0.5, 1.0 / 6.0, 0.5],
-            [0.5, 0.5, 1.0 / 3.0, 1.0],
-            [0.0, 1.0, 1.0 / 6.0, 1.0],
         ]
     )
 
