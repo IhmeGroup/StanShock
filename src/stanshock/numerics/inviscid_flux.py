@@ -27,12 +27,7 @@ RiemannSolver: TypeAlias = Callable[[Array, Array, Array, Array, Array, Array], 
 
 @njit(double2D(double2D, double2D, double2D, double3D, double1D, double1D))
 def lax_friedrichs_flux(
-    rLR: Array,
-    uLR: Array,
-    pLR: Array,
-    YLR: Array,
-    gamma: Array,
-    e0: Array,
+    rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array, e0: Array
 ) -> Array:
     """
     This method computes the flux at each interface
@@ -146,6 +141,7 @@ def hllc_flux(
         )
         SLR[0, iFace] = uLR[0, iFace] - aLR[0, iFace] * qLR[0, iFace]
         SLR[1, iFace] = uLR[1, iFace] + aLR[1, iFace] * qLR[1, iFace]
+
         SStar[iFace] = pLR[1, iFace] - pLR[0, iFace]
         SStar[iFace] += rLR[0, iFace] * uLR[0, iFace] * (SLR[0, iFace] - uLR[0, iFace])
         SStar[iFace] -= rLR[1, iFace] * uLR[1, iFace] * (SLR[1, iFace] - uLR[1, iFace])
@@ -208,6 +204,77 @@ def hllc_flux(
                 F[iFace, iDim] = FLR[K, iFace, iDim] + SFace * (UStar[iDim] - U[iDim])
 
     return F
+
+
+def hllc_flux_vectorized(
+    rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array, e0: Array
+) -> Array:
+    """Vectorized version of HLLC flux based on DoubleFlux-1D implementation."""
+    nLR, nFaces = rLR.shape
+
+    aLR = np.sqrt(gamma[None, :] * pLR / rLR)
+    ELR = pLR / (gamma[None, :] - 1.0) + rLR * (e0[None, :] + 0.5 * uLR**2)
+
+    FLR = np.concatenate(
+        (
+            (rLR * uLR**2 + pLR)[..., None],
+            (uLR * (ELR + pLR))[..., None],
+            (rLR * uLR)[..., None] * YLR,
+        ),
+        axis=2,
+    )
+
+    WLR = np.concatenate(
+        (
+            (rLR * uLR)[..., None],
+            ELR[..., None],
+            rLR[..., None] * YLR,
+        ),
+        axis=2,
+    )
+
+    sLR = np.empty((2, nFaces))
+    rBar = 0.5 * (rLR[0] + rLR[1])
+    aBar = 0.5 * (aLR[0] + aLR[1])
+    pStar = 0.5 * (pLR[0] + pLR[1]) - 0.5 * (uLR[1] - uLR[0]) * rBar * aBar
+    qLR = np.ones((2, nFaces))
+    for K in range(nLR):
+        idx = np.where(pStar > pLR[K])[0]
+        qLR[K, idx] = np.sqrt(
+            1.0
+            + (gamma[idx] + 1.0) / (2.0 * gamma[idx]) * (pStar[idx] / pLR[K, idx] - 1.0)
+        )
+    sLR[0] = uLR[0] - aLR[0] * qLR[0]
+    sLR[1] = uLR[1] + aLR[1] * qLR[1]
+
+    sM = (
+        pLR[0]
+        - pLR[1]
+        - rLR[0] * uLR[0] * (sLR[0] - uLR[0])
+        + rLR[1] * uLR[1] * (sLR[1] - uLR[1])
+    ) / (rLR[1] * (sLR[1] - uLR[1]) - rLR[0] * (sLR[0] - uLR[0]))
+    pM = rLR[1] * (uLR[1] - sLR[1]) * (uLR[1] - sM) + pLR[1]
+
+    WMLR = (
+        np.concatenate(
+            (
+                ((sLR - uLR) * rLR * uLR + (pM[None, :] - pLR))[..., None],
+                ((sLR - uLR) * ELR - pLR * uLR + (pM * sM)[None, :])[..., None],
+                ((sLR - uLR) * rLR)[..., None] * YLR,
+            ),
+            axis=2,
+        )
+        / (sLR - sM[None, :])[..., None]
+    )
+
+    sminus = np.minimum(sLR[0], 0.0)
+    splus = np.maximum(sLR[1], 0.0)
+
+    return 0.5 * (1.0 + np.sign(sM)[..., None]) * (
+        FLR[0] + sminus[:, None] * (WMLR[0] - WLR[0])
+    ) + 0.5 * (1.0 - np.sign(sM)[..., None]) * (
+        FLR[1] + splus[:, None] * (WMLR[1] - WLR[1])
+    )
 
 
 class InviscidFlux(RightHandSide):
