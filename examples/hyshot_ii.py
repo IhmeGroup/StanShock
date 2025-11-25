@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import code
+from typing import Unpack
 
 import cantera as ct
 import matplotlib.pyplot as plt
@@ -8,11 +9,11 @@ import numpy as np
 
 from stanshock.components.combustor import Combustor
 from stanshock.numerics.boundary_conditions import SpecifiedFace
-from stanshock.physics.fluid_base import FluidPhysics
+from stanshock.physics.fluid_base import FluidState
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.system.backend import Array
-from stanshock.system.base import RightHandSide
-from stanshock.system.geometry import Box, Geometry
+from stanshock.system.base import PrecomputeSteps, RightHandSide
+from stanshock.system.geometry import Box
 
 plt.rcParams.update(
     {
@@ -98,12 +99,16 @@ BC_inlet = SpecifiedFace(
     reference_state=(gas_init.density, U_in, gas_init.P, gas_init.Y)
 )
 BC_outlet = "outflow"
-BCs = (BC_inlet, BC_outlet)
+BCs = {"left": BC_inlet, "right": BC_outlet}
 
 
 # Define the fuel inflow
 class HydrogenInjection(RightHandSide):
-    def __init__(self, gas: ct.Solution, geometry: Geometry) -> None:
+    def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
+        super().__init__(**precompute_steps)
+        gas = self.physics.gas
+        n_variables = self.physics.n_scalars + 2
+
         # Injector area
         r_f = 0.2e-3  # m
         N_f = 4  # -
@@ -134,45 +139,53 @@ class HydrogenInjection(RightHandSide):
         scale_factor = 3.960715337483353
 
         # Get geometry information
-        xf = geometry.xf
-        index = np.where(np.logical_and(xf >= x_inj, xf < x_inj + L_src))[0]
+        xf = self.geometry.xf
+        self.idx_domain = (
+            np.where(np.logical_and(xf >= x_inj, xf < x_inj + L_src))[0]
+            + self.geometry.n_ghost_layers
+        )
+        self.xc = self.geometry.xc[self.idx_domain]
+        n_cells = len(self.xc)
+        self.shape_domain = (n_cells, n_variables)
+        self.shape_update = (n_cells, 3)
+        self.idx_source = np.array([0, 1, 2 + gas.species_index("H2")])
 
-        nsp = gas.n_species
-        self.rhs = np.zeros([geometry.n_cells, 2 + nsp])
-        self.rhs[index, 0] = rho_f
-        self.rhs[index, 1] = rhoE_f
-        self.rhs[index, 2 + gas.species_index("H2")] = rhoYH2_f
-        self.rhs[index, :] *= U_f * A_f / L_src * scale_factor
+        self.rhs = np.zeros(self.shape_update)
+        self.rhs[:, 0] = rho_f * U_f
+        self.rhs[:, 1] = rhoE_f
+        self.rhs[:, 2] = rhoYH2_f
+        self.rhs *= U_f * A_f / L_src * scale_factor
 
-        self.xc = geometry.xc[index]
-        self.geometry = geometry
-        self.index = index
-
-    def source(
+    def source_implementation(
         self,
         time: float,
-        _state_array: Array,
-        _physics: FluidPhysics,
-        _gamma_star: Array | None = None,
-        _e0_star: Array | None = None,
+        state_array_local: Array | None,
+        state: FluidState | None,
+        face_states: FluidState | None,
+        avg_face_states: FluidState | None,
+        face_gradients: FluidState | None,
     ) -> Array:
-        rhs = self.rhs.copy()
-        rhs[self.index, :] /= self.geometry.area(time, self.xc)[:, None]
-        return rhs
+        _ = state_array_local, state, face_states, avg_face_states, face_gradients
+        area = self.geometry.area(time, self.xc)
+        if isinstance(area, np.ndarray):
+            area = area[:, None]
+
+        return np.ravel(self.rhs / area)
 
 
 # Initialize and run the simulation
+physics = ThermoTable(gas)
 ss = Combustor(
     xf=xf,
     geometry=geometry,
     initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,
-    source_terms=HydrogenInjection(gas, geometry),
+    source_terms=HydrogenInjection(geometry=geometry, physics=physics),
     cfl=0.5,
     reacting=True,
     include_diffusion=False,
     output_every=10,
-    physics=ThermoTable(gas),
+    physics=physics,
 )
 ss.advance_simulation(t_end)
 
