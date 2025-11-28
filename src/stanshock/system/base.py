@@ -11,7 +11,7 @@ from stanshock.numerics.face_average import FaceAverage
 from stanshock.numerics.face_extrapolation import FaceExtrapolator
 from stanshock.numerics.gradient import Gradient
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array, Index, NotRequired, TypeAlias, Unpack
+from stanshock.system.backend import Array, Index, TypeAlias, Unpack
 from stanshock.system.geometry import Geometry
 
 # Define the optional precomputation steps to be called before a given source term
@@ -25,54 +25,68 @@ PrecomputeStepName: TypeAlias = Literal[
 ]
 
 
-class PrecomputeSteps(TypedDict):
+class PrecomputeSteps(TypedDict, total=False):
     geometry: Geometry
     physics: FluidPhysics
-    boundary_conditions: NotRequired[BoundaryConditions]
-    face_extrapolator: NotRequired[FaceExtrapolator]
-    face_average: NotRequired[FaceAverage]
-    gradient: NotRequired[Gradient]
+    boundary_conditions: BoundaryConditions
+    face_extrapolator: FaceExtrapolator
+    face_average: FaceAverage
+    gradient: Gradient
 
 
 class RightHandSide:
     REQUIRED_PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ("geometry", "physics")
     jac: Callable[[float, Array, Array | None, Array | None], Array] | None = None
 
+    # Index into (2D) global state array to be accessed by this source term
+    idx_domain: Index
+    # Index into (2D) local state array of cells to which the source term applies
+    idx_update: Index
+    # Index into (2D) local state array of transport equations to update
+    idx_source: Index
+
     def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         # Any precompute steps not provided will default to None
-        self.geometry: Geometry = precompute_steps.get("geometry")
-        self.physics: FluidPhysics = precompute_steps.get("physics")
-        self.boundary_conditions = precompute_steps.get("boundary_conditions")
-        self.face_extrapolator = precompute_steps.get("face_extrapolator")
-        self.face_average = precompute_steps.get("face_average")
-        self.gradient = precompute_steps.get("gradient")
+        self.geometry: Geometry | None = precompute_steps.get("geometry")
+        self.physics: FluidPhysics | None = precompute_steps.get("physics")
+        self.boundary_conditions: BoundaryConditions | None = precompute_steps.get(
+            "boundary_conditions"
+        )
+        self.face_extrapolator: FaceExtrapolator | None = precompute_steps.get(
+            "face_extrapolator"
+        )
+        self.face_average: FaceAverage | None = precompute_steps.get("face_average")
+        self.gradient: Gradient | None = precompute_steps.get("gradient")
 
-        n_vars = self.physics.n_scalars + 2
+        # Default sizes and shapes
+        n_cells_input: int = -1
+        n_cells_output: int = -1
+        n_vars = self.physics.n_scalars + 2 if self.physics is not None else 1
+
+        # Default to updating everything
+        self.idx_domain = np.s_[:]
+        self.idx_update = np.s_[:]
+        self.idx_source = np.s_[:]
+
+        if self.geometry is not None:
+            if self.face_extrapolator is not None:
+                # Generally we want to include ghost layers when using face extrapolation
+                n_cells_input = self.geometry.n_cells
+                self.idx_domain = np.s_[:]
+                self.idx_update = self.geometry.idx_cells
+            else:
+                # Otherwise we can drop the ghost cells
+                n_cells_input = self.geometry.n_cells_interior
+                self.idx_domain = self.geometry.idx_cells
+                self.idx_update = np.s_[:]
+
+            # Don't update the ghost cells either way
+            n_cells_output = self.geometry.n_cells_interior
 
         # How to reshape the state_array subsets
         self.shape_full: tuple[int, int] = (-1, n_vars)
-        self.shape_domain: tuple[int, int] = (self.geometry.n_cells, n_vars)
-        self.shape_update: tuple[int, int] = (self.geometry.n_cells_interior, n_vars)
-
-        self.idx_domain: Index  # Index into (2D) global state array to be accessed by this source term
-        self.idx_update: Index  # Index into (2D) local state array of cells to which the source term applies
-        self.idx_source: (
-            Index  # Index into (2D) local state array of transport equations to update
-        )
-
-        if self.face_extrapolator is not None:
-            # Generally we want to include ghost layers when using face extrapolation
-            self.idx_domain = np.s_[:]
-            # And only update the interior cells
-            self.idx_update = self.geometry.idx_cells
-        else:
-            # Otherwise we can drop the ghost cells
-            self.idx_domain = self.geometry.idx_cells
-            self.shape_domain = (self.geometry.n_cells_interior, n_vars)
-            self.idx_update = np.s_[:]
-
-        # Default to updating all source terms
-        self.idx_source = np.s_[:]
+        self.shape_domain: tuple[int, int] = (n_cells_input, n_vars)
+        self.shape_update: tuple[int, int] = (n_cells_output, n_vars)
 
         # Ensure required routines were provided
         for step in self.REQUIRED_PRECOMPUTE_STEPS:
@@ -80,7 +94,7 @@ class RightHandSide:
                 msg: str = f"Must provide {step} for {self.__class__.__name__}."
                 raise ValueError(msg)
 
-    def update_indices(self, time: float, state: FluidState) -> None:
+    def update_indices(self, time: float, state: FluidState | None) -> None:
         """Hook to update time-varying indices."""
         _ = time, state
 
@@ -122,21 +136,24 @@ class RightHandSide:
         Can also apply any necessary inverse transforms.
         """
         state_array_local = state_array_local.reshape(self.shape_domain)
-        state = self.physics.conservative_to_primitive(
-            state_array_local, gamma_star_local, e0_star_local
-        )
-        # Update total energy if using double-flux method
-        if gamma_star is not None:
-            state.temperature = self.physics.get_temperature(state)
-            state.internal_energy = None
-            state_array_local = self.physics.primitive_to_conservative(state)
-            gamma_star_local, e0_star_local = self.physics.get_double_flux_variables(
-                state
-            )
 
-            gamma_star[self.idx_domain] = gamma_star_local
-            assert e0_star is not None
-            e0_star[self.idx_domain] = e0_star_local
+        state = None
+        if self.physics is not None:
+            state = self.physics.conservative_to_primitive(
+                state_array_local, gamma_star_local, e0_star_local
+            )
+            # Update total energy if using double-flux method
+            if gamma_star is not None:
+                state.temperature = self.physics.get_temperature(state)
+                state.internal_energy = None
+                state_array_local = self.physics.primitive_to_conservative(state)
+                gamma_star_local, e0_star_local = (
+                    self.physics.get_double_flux_variables(state)
+                )
+
+                gamma_star[self.idx_domain] = gamma_star_local
+                assert e0_star is not None
+                e0_star[self.idx_domain] = e0_star_local
 
         state_array = np.reshape(state_array, self.shape_full)
         state_array[self.idx_domain] = state_array_local
@@ -167,8 +184,7 @@ class RightHandSide:
         FluidState | None,
     ]:
         """Perform all calculations which must occur prior to source term evaluation."""
-        assert self.physics is not None
-        state_array_local = state_array_local.reshape(self.shape_domain)
+        state_array_local = np.reshape(state_array_local, self.shape_domain)
 
         if self.boundary_conditions is not None:
             state_array_local = self.boundary_conditions.update_ghost_layers(
@@ -199,6 +215,7 @@ class RightHandSide:
 
         face_gradients: FluidState | None = None
         if self.gradient is not None:
+            assert self.geometry is not None
             assert self.physics is not None
             assert state is not None
             state.temperature = self.physics.get_temperature(state)
@@ -254,14 +271,16 @@ FastSlowMode: TypeAlias = Literal["fast", "slow"]
 
 class FastSlowSource(RightHandSide):
     _mode: FastSlowMode
-    idx_implicit: Index
-    idx_explicit: Index
+
+    # By default, all locations and sources are set to slow:
+    idx_update_implicit: Index = np.array([], dtype=np.int64)
+    idx_source_implicit: Index = np.s_[:]
+    idx_update_explicit: Index = np.s_[:]
+    idx_source_explicit: Index = np.s_[:]
 
     def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         """Split RHS into fast and slow source terms accessed by setting the mode."""
         super().__init__(**precompute_steps)
-        self.idx_implicit = np.array([], dtype=np.int64)
-        self.idx_explicit = np.s_[:]
         self.mode = "slow"
 
     @property
@@ -272,10 +291,12 @@ class FastSlowSource(RightHandSide):
     def mode(self, mode: FastSlowMode) -> None:
         self._mode = mode
         if mode == "fast":
-            self.idx_update = self.idx_implicit
+            self.idx_update = self.idx_update_implicit
+            self.idx_source = self.idx_source_implicit
             self.source_implementation = self.source_fast
         elif mode == "slow":
-            self.idx_update = self.idx_explicit
+            self.idx_update = self.idx_update_explicit
+            self.idx_source = self.idx_source_explicit
             self.source_implementation = self.source_slow
 
     @abstractmethod
@@ -304,6 +325,8 @@ class FastSlowSource(RightHandSide):
 
 
 class CombinedSource(RightHandSide):
+    REQUIRED_PRECOMPUTE_STEPS = ()
+
     def __init__(self, sources: list[RightHandSide]) -> None:
         self.sources = sources
 
@@ -312,6 +335,21 @@ class CombinedSource(RightHandSide):
             x for source in self.sources for x in source.REQUIRED_PRECOMPUTE_STEPS
         }
         self.REQUIRED_PRECOMPUTE_STEPS = tuple(required_steps)
+
+        # Pull the needed modules out of the rhs objects
+        precompute_steps: PrecomputeSteps = {}
+        for step in required_steps:
+            for source in self.sources:
+                if step in dir(source):
+                    precompute_steps[step] = getattr(source, step)
+                    break
+
+        super().__init__(**precompute_steps)
+
+        # Don't modify the shapes, as the sources will handle that internally
+        self.shape_full = max(source.shape_full for source in self.sources)
+        self.shape_domain = self.shape_update = self.shape_full
+        self.idx_domain = self.idx_update = np.s_[:]
 
     def source(
         self,

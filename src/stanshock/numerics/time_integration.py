@@ -283,7 +283,7 @@ class FastSlowIntegrator(TimeIntegrator):
 
         # Integrate fast terms
         self.rhs.mode = "fast"
-        if len(state_array[self.rhs.idx_implicit]) > 0:
+        if len(state_array[self.rhs.idx_update_implicit]) > 0:
             _, state_array, gamma_star, e0_star = self.fast_integrator.advance(
                 dt, time, state_array, gamma_star, e0_star
             )
