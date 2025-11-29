@@ -178,16 +178,10 @@ class Combustor:
                 advection,
             ]
         elif self.physics.gas.n_reactions > 0:
-            integrators += [
-                StrangSplitting(
-                    transport_operator=advection,
-                    reaction_operator=ScipyIVP(
-                        ConstantVolumeChemistry(
-                            geometry=self.geometry, physics=self.physics
-                        )
-                    ),
-                )
-            ]
+            chemistry = ScipyIVP(
+                ConstantVolumeChemistry(geometry=self.geometry, physics=self.physics)
+            )
+            integrators += [StrangSplitting((chemistry, advection))]
         else:
             integrators += [advection]
 
@@ -226,7 +220,7 @@ class Combustor:
             integrators += [HeunsMethod(self.injector)]
 
         # Apply Lie splitting approach
-        self.time_integrator = LieSplitting(integrators)
+        self.time_integrator = LieSplitting(tuple(integrators))
 
         self.F = np.ones(self.geometry.n_cells)  # thickening
 

@@ -89,9 +89,32 @@ class ScipyIVP(TimeIntegrator):
         return time, state_array, gamma_star, e0_star
 
 
-class RungeKuttaBase(TimeIntegrator):
+class SimpleRungeKuttaBase(TimeIntegrator):
+    """Simplified form for explicit Runge-Kutta approaches.
+
+    This base class implements a simplified form of the Runge-Kutta equations,
+    where each stage requires only the initial value, `y0`, the current `y`
+    value computed by the previous stage, and the corresponding gradient. This
+    is in contrast to the standard approach in which gradients from all prior
+    steps must be retained.
+
+    Coefficients `(a, b, c, d)` determine he update from stage `i` to `i+1` as:
+
+    ```
+    y[i+1] = a*y0 + b*y[i] + c*dt*rhs(t[i], y[i])
+    t[i+1] = t0 + d*dt
+    ```
+
+    Note that not all explicit Runge-Kutta methods can be expressed in this
+    format. Each approach is implemented via the following class attributes:
+
+    `n_rk_stage`: Number of stages.
+    `rk_coeff`: Array of shape `(n_rk_stage, 4)`, where each row provides
+                the coefficients `(a, b, c, d)` for its corresponding stage.
+    """
+
     n_rk_stage: int = 0
-    rk_coeff: Array = np.zeros((1, 4))
+    rk_coeff: Array = np.zeros((0, 4))
 
     def advance(
         self,
@@ -101,12 +124,12 @@ class RungeKuttaBase(TimeIntegrator):
         gamma_star: Array | None,
         e0_star: Array | None,
     ) -> tuple[float, Array, Array | None, Array | None]:
-        t = time
+        t0 = time
         y0, gamma_star_local, e0_star_local = self.rhs.before_time_integration(
-            t, state_array, gamma_star, e0_star
+            t0, state_array, gamma_star, e0_star
         )
 
-        t0 = t + 0
+        t = t0 + 0
         y = y0.copy()
 
         for i_rk_stage in range(self.n_rk_stage):
@@ -141,22 +164,22 @@ class RungeKuttaBase(TimeIntegrator):
         return t, state_array, gamma_star, e0_star
 
 
-class ForwardEuler(RungeKuttaBase):
+class ForwardEuler(SimpleRungeKuttaBase):
     n_rk_stage: int = 1
     rk_coeff: Array = np.array([[0.0, 1.0, 1.0, 1.0]])
 
 
-class MidpointMethod(RungeKuttaBase):
+class MidpointMethod(SimpleRungeKuttaBase):
     n_rk_stage: int = 2
     rk_coeff: Array = np.array([[0.0, 1.0, 0.5, 0.5], [1.0, 0.0, 1.0, 1.0]])
 
 
-class HeunsMethod(RungeKuttaBase):
+class HeunsMethod(SimpleRungeKuttaBase):
     n_rk_stage: int = 2
     rk_coeff: Array = np.array([[0.0, 1.0, 1.0, 1.0], [0.5, 0.5, 0.5, 1.0]])
 
 
-class SSPRK3(RungeKuttaBase):
+class SSPRK3(SimpleRungeKuttaBase):
     """
     3rd-order strong stability preserving Runge Kutta (SSPRK3). This scheme is
     stable for CFL <= 1.
@@ -177,7 +200,215 @@ class SSPRK3(RungeKuttaBase):
     )
 
 
-class StrangSplitting(TimeIntegrator):
+class RungeKuttaBase(TimeIntegrator):
+    """Explicit Runge-Kutta methods using Butcher tableau.
+
+    Simply set the following class attributes on a derived class:
+
+    `n_rk_stage`: Number of stages.
+    `butcher`: Butcher tableau for the method with `n_rk_stage + 1` rows and
+               `n_rk_stage` columns. The extra row stores the `b` coefficients.
+    `c`: The `c` coefficients, which determine the intermediate time steps.
+    """
+
+    n_rk_stage: int = 0
+    butcher: Array = np.zeros((n_rk_stage + 1, n_rk_stage))
+    c: Array = np.zeros((n_rk_stage + 1,))
+
+    def advance(
+        self,
+        dt: float,
+        time: float,
+        state_array: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
+    ) -> tuple[float, Array, Array | None, Array | None]:
+        t0 = time
+        y0, gamma_star_local, e0_star_local = self.rhs.before_time_integration(
+            t0, state_array, gamma_star, e0_star
+        )
+
+        t = t0 + 0
+        y = y0.copy()
+        k = []
+
+        for i_rk_stage in range(1, self.n_rk_stage + 1):
+            # Compute gradient from previous stage
+            k_stage = self.rhs.source(
+                time=t,
+                state_array_local=y,
+                gamma_star=gamma_star_local,
+                e0_star=e0_star_local,
+            )
+            k += [k_stage]
+
+            # Update state and time for current stage
+            t = t0 + self.c[i_rk_stage] * dt
+            y = y0.copy()
+            for j in range(i_rk_stage):
+                y = self.rhs.add_source(y, self.butcher[i_rk_stage, j] * k[j] * dt)
+
+        state_array, gamma_star, e0_star = self.rhs.after_time_integration(
+            time=t,
+            state_array_local=y,
+            gamma_star_local=gamma_star_local,
+            e0_star_local=e0_star_local,
+            state_array=state_array,
+            gamma_star=gamma_star,
+            e0_star=e0_star,
+        )
+        return t, state_array, gamma_star, e0_star
+
+
+class RK4(RungeKuttaBase):
+    """ "Classic" 4th-order Runge-Kutta scheme."""
+
+    n_rk_stage: int = 4
+    butcher: Array = np.array(
+        [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.5, 0.0, 0.0, 0.0],
+            [0.0, 0.5, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [1.0 / 6.0, 1.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0],
+        ]
+    )
+    c: Array = np.array([0.0, 0.5, 0.5, 1.0, 1.0])
+
+
+class OperatorSplitting(TimeIntegrator):
+    """Base class for operator-splitting approaches.
+
+    Takes in a tuple of two or more operators (`TimeIntegrator` objects) to be
+    integrated together using an operator-splitting approach.
+
+    In each stage of the approach multiple operators are applied sequentially,
+    and in some approaches the results across multiple stages are averaged
+    together for improved accuracy or stability.
+    """
+
+    stages: tuple[tuple[tuple[int, float], ...], ...] = ()
+    stage_coeffs: tuple[float, ...] = ()
+
+    def __init__(
+        self,
+        operators: tuple[TimeIntegrator, ...],
+        update_double_flux: bool = False,
+    ) -> None:
+        self.operators = operators
+        self.update_double_flux: bool = update_double_flux
+
+    def advance(
+        self,
+        dt: float,
+        time: float,
+        state_array: Array,
+        gamma_star: Array | None,
+        e0_star: Array | None,
+    ) -> tuple[float, Array, Array | None, Array | None]:
+        # Initialize final values
+        state_array_final = np.zeros_like(state_array)
+        gamma_star_final = np.zeros_like(gamma_star) if gamma_star is not None else None
+        e0_star_final = np.zeros_like(e0_star) if e0_star is not None else None
+
+        # Initialize intermediate double-flux variables
+        gamma_star_stage: Array | None = None
+        e0_star_stage: Array | None = None
+        gamma_star_temp: Array | None = None
+        e0_star_temp: Array | None = None
+
+        for istage, stage in enumerate(self.stages):
+            state_array_stage = state_array.copy()
+            if gamma_star is not None and e0_star is not None:
+                gamma_star_stage = gamma_star.copy()
+                e0_star_stage = e0_star.copy()
+
+            for ioperator, cdt in stage:
+                advance = self.operators[ioperator].advance
+
+                _, state_array_stage, gamma_star_temp, e0_star_temp = advance(
+                    dt=cdt * dt,
+                    time=time,
+                    state_array=state_array_stage,
+                    gamma_star=gamma_star_stage,
+                    e0_star=e0_star_stage,
+                )
+
+                # Optionally: Update the double flux variables after each step
+                if self.update_double_flux:
+                    gamma_star_stage, e0_star_stage = gamma_star_temp, e0_star_temp
+
+            # Otherwise, only update the double flux at the end
+            if not self.update_double_flux:
+                gamma_star_stage, e0_star_stage = gamma_star_temp, e0_star_temp
+
+            # Accumulate data from each stage
+            coeff = self.stage_coeffs[istage]
+            state_array_final = state_array_final + coeff * state_array_stage
+
+            if gamma_star_stage is not None and gamma_star_final is not None:
+                gamma_star_final = gamma_star_final + coeff * gamma_star_stage
+
+            if e0_star_stage is not None and e0_star_final is not None:
+                e0_star_final = e0_star_final + coeff * e0_star_stage
+
+        return time + dt, state_array_final, gamma_star_final, e0_star_final
+
+
+class StrangSplitting(OperatorSplitting):
+    """Classical Strang-Splitting approach.
+
+    In this approach, the first operator is integrated to the midpoint, then
+    the second operator is integrated for the full time step, and finally the
+    first operator is integrated from the midpoint to the end.
+    """
+
+    stages = (((0, 0.5), (1, 1.0), (0, 0.5)),)
+    stage_coeffs = (1.0,)
+
+
+class SymmetricallyWeightedSequentialSplitting(OperatorSplitting):
+    """This approach applies Strang splitting twice, swapping the operators and
+    then averaging the results together to make the approach symmetric.
+    """
+
+    stages = (
+        ((0, 0.5), (1, 1.0), (0, 0.5)),
+        ((1, 0.5), (0, 1.0), (1, 0.5)),
+    )
+    stage_coeffs = (0.5, 0.5)
+
+
+class ThirdOrderSplitting(OperatorSplitting):
+    stages: tuple[tuple[tuple[int, float], ...], ...] = (
+        ((0, 0.5), (1, 1.0), (0, 0.5)),
+        ((1, 0.5), (0, 1.0), (1, 0.5)),
+        ((0, 1.0), (1, 1.0)),
+        ((1, 1.0), (0, 1.0)),
+    )
+    stage_coeffs: tuple[float, ...] = (-1.0 / 6.0, -1.0 / 6.0, 2.0 / 3.0, 2.0 / 3.0)
+
+
+class LieSplitting(OperatorSplitting):
+    """Simplest splitting approach, in which each term is integrated in
+    sequence.
+    """
+
+    def __init__(
+        self,
+        operators: tuple[TimeIntegrator, ...],
+        update_double_flux: bool = False,
+    ) -> None:
+        self.operators = operators
+        self.update_double_flux: bool = update_double_flux
+
+        n_operators = len(self.operators)
+        self.stages = (tuple((i, 1.0) for i in range(n_operators)),)
+        # self.stage_coeffs = tuple(i for i in range(n_operators))
+        self.stage_coeffs = (1.0,)
+
+
+class StrangSplittingOld(TimeIntegrator):
     def __init__(
         self, transport_operator: TimeIntegrator, reaction_operator: TimeIntegrator
     ) -> None:
@@ -222,7 +453,7 @@ class StrangSplitting(TimeIntegrator):
         return t, state_array, gamma_star, e0_star
 
 
-class LieSplitting(TimeIntegrator):
+class LieSplittingOld(TimeIntegrator):
     def __init__(
         self, operators: list[TimeIntegrator], update_double_flux: bool = False
     ) -> None:
