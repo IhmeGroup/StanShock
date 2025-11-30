@@ -1,0 +1,248 @@
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import TypedDict
+
+import numpy as np
+import pytest
+from scipy.integrate import solve_ivp
+
+from stanshock.numerics.time_integration import (
+    RK4,
+    SSPRK3,
+    ForwardEuler,
+    HeunsMethod,
+    MidpointMethod,
+    TimeIntegrator,
+)
+from stanshock.system.backend import Array
+from stanshock.system.base import RightHandSide
+
+from .conftest import FixtureRequest
+
+
+# Set up some analytic test problems
+class Brusselator(RightHandSide):
+    REQUIRED_PRECOMPUTE_STEPS = ()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.shape_full = (-1, 2)
+        self.shape_domain = (-1, 2)
+        self.shape_update = (-1, 2)
+
+        self.abcd: tuple[float, float, float, float] = (1.0, 3.0, 1.0, 1.0)
+
+    def source(
+        self,
+        time: float,
+        state_array_local: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        _ = time, gamma_star, e0_star
+        a, b, c, _ = self.abcd
+        state_array_local = np.reshape(state_array_local, self.shape_domain)
+        rhs = np.zeros_like(state_array_local)
+
+        x = state_array_local[:, 0]
+        y = state_array_local[:, 1]
+
+        rhs[:, 0] = a - (b + 1.0) * x + c * x**2 * y
+        rhs[:, 1] = b * x - c * x**2 * y
+
+        return np.ravel(rhs)
+
+
+class Circle(RightHandSide):
+    REQUIRED_PRECOMPUTE_STEPS = ()
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.shape_full = (-1, 2)
+        self.shape_domain = (-1, 2)
+        self.shape_update = (-1, 2)
+
+    def source(
+        self,
+        time: float,
+        state_array_local: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        _ = time, gamma_star, e0_star
+        state_array_local = np.reshape(state_array_local, self.shape_domain)
+        rhs = np.zeros_like(state_array_local)
+
+        x = state_array_local[:, 0]
+        y = state_array_local[:, 1]
+
+        theta = np.arctan2(y, x)
+        r = np.sqrt(x**2 + y**2)
+
+        rhs[:, 0] = -r * np.sin(theta)
+        rhs[:, 1] = r * np.cos(theta)
+
+        return np.ravel(rhs)
+
+
+# Set up test cases for typical source terms and integrators
+@dataclass
+class TimeIntegrationCase:
+    rhs: RightHandSide
+    t_span: tuple[float, float]
+    y_init: Array
+    analytical_function: Callable[[Array], Array] | None = None
+    reference_solution: Array = field(init=False)
+
+    def __post_init__(self) -> None:
+        n = 5 * 7 * 8 * 9 * 11 + 1
+        t_eval = np.linspace(*self.t_span, n)
+
+        if self.analytical_function is None:
+            ode_result = solve_ivp(
+                fun=self.rhs.source,
+                t_span=self.t_span,
+                y0=self.y_init,
+                t_eval=t_eval,
+                method="DOP853",
+                atol=1e-15,
+                rtol=3e-14,
+                # dense_output=True,
+            )
+            self.reference_solution = ode_result.y
+        else:
+            self.reference_solution = self.analytical_function(t_eval)
+
+
+class IntegratorInfo(TypedDict):
+    integrator: type[TimeIntegrator]
+    order: int
+
+
+test_problems: dict[str, TimeIntegrationCase] = {
+    "brusselator": TimeIntegrationCase(
+        rhs=Brusselator(),
+        t_span=(0.0, 20.0),
+        y_init=np.array((1.0, 0.0)),
+    ),
+    "circle": TimeIntegrationCase(
+        rhs=Circle(),
+        t_span=(0.0, 6.0 * np.pi),
+        y_init=np.array((1.0, 0.0)),
+        analytical_function=lambda t: np.array((np.cos(t), np.sin(t))),
+    ),
+}
+
+test_integrators: dict[str, IntegratorInfo] = {
+    "FE": {"integrator": ForwardEuler, "order": 1},
+    "heun": {"integrator": HeunsMethod, "order": 2},
+    "midpnt": {"integrator": MidpointMethod, "order": 2},
+    "ssprk3": {"integrator": SSPRK3, "order": 3},
+    "rk4": {"integrator": RK4, "order": 4},
+}
+
+
+def get_convergence_order(x: Array, y: Array, n_discard: int = 4) -> float:
+    resid = 1.0
+    slope = -5.0
+    for i in range(n_discard + 1):
+        # Estimate the order of convergence
+        poly, (resid, _, _, _) = np.polynomial.Polynomial.fit(
+            x[i:], y[i:], 1, full=True
+        )
+        slope = poly.convert().coef[1]
+
+        if resid < 0.01:
+            # If the fit is poor, optionally discard up to n_discard of the
+            # smallest values, in case truncation error is dominating.
+            break
+
+    return slope
+
+
+@pytest.fixture(
+    params=list(test_problems.values()), ids=list(test_problems.keys()), scope="module"
+)
+def test_case(request: FixtureRequest[TimeIntegrationCase]) -> TimeIntegrationCase:
+    return request.param
+
+
+@pytest.fixture(
+    params=list(test_integrators.values()),
+    ids=list(test_integrators.keys()),
+    scope="module",
+)
+def integrator_info(request: FixtureRequest[IntegratorInfo]) -> IntegratorInfo:
+    return request.param
+
+
+@pytest.fixture
+def integrator(
+    integrator_info: IntegratorInfo, test_case: TimeIntegrationCase
+) -> TimeIntegrator:
+    return integrator_info["integrator"](test_case.rhs)
+
+
+def test_local_truncation_error_convergence(
+    test_case: TimeIntegrationCase, integrator_info: IntegratorInfo
+) -> None:
+    """Verify that error from a single step converges with the expected order."""
+    integrator = integrator_info["integrator"](test_case.rhs)
+
+    # Preallocate different time step sizes
+    t0, tf = test_case.t_span
+    n = np.shape(test_case.reference_solution)[1] - 1
+    dt0 = (tf - t0) / n
+    t_ref = np.linspace(t0, tf, n + 1)
+
+    N = 12
+    dt = np.arange(1, N + 1) * dt0
+
+    # Get reference solution
+    y_ref = test_case.reference_solution
+
+    # Take single time step with different step sizes
+    y_err_local = np.zeros((N,))
+    for i in range(N):
+        assert dt[i] == pytest.approx(t_ref[i + 1] - t_ref[0])
+        _, y, _, _ = integrator.advance(dt[i], t0, test_case.y_init.copy(), None, None)
+        y_err_local[i] = np.linalg.norm(y_ref[:, i + 1] - y)
+
+    err_slope = get_convergence_order(np.log(dt), np.log(y_err_local))
+
+    assert err_slope == pytest.approx(integrator_info["order"] + 1, abs=0.03)
+
+
+def test_global_truncation_error_convergence(
+    test_case: TimeIntegrationCase, integrator_info: IntegratorInfo
+) -> None:
+    """Verify that error over a fixed interval converges with time step size."""
+    integrator = integrator_info["integrator"](test_case.rhs)
+
+    # Preallocate different time step sizes
+    t0, tf = test_case.t_span
+    n = 5 * 7 * 8 * 9 * 11
+    dt0 = (tf - t0) / n
+
+    N = 12
+    dt = np.arange(1, N + 1) * dt0
+
+    # Get reference solution
+    y_init = test_case.y_init
+    y_ref = test_case.reference_solution[:, -1]
+
+    # Integrate over t_span with different step sizes
+    y_err_global = np.zeros((N,))
+    for i in range(N):
+        t = t0 + 0
+        y = y_init.copy()
+        for _j in range(n // (i + 1)):
+            t, y, _, _ = integrator.advance(dt[i], t, y, None, None)
+        assert t == pytest.approx(tf)
+        y_err_global[i] = np.linalg.norm(y_ref - y)
+
+    err_slope = get_convergence_order(np.log(dt), np.log(y_err_global))
+
+    assert err_slope == pytest.approx(integrator_info["order"], abs=0.02)
