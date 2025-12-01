@@ -40,9 +40,9 @@ class ConstantVolumeChemistry(RightHandSide):
 
         # Restrict the domain to the cells
         n_species = self.physics.n_scalars
-        self.idx_domain = self.geometry.idx_cells
-        self.idx_update = np.s_[:]
-        self.shape_domain = self.shape_update = (self.shape_update[0], n_species + 1)
+        self.idx_input = self.geometry.idx_cells
+        self.idx_output = np.s_[:]
+        self.shape_input = self.shape_output = (self.shape_output[0], n_species + 1)
 
         # Define density and velocity as constants to be set before time integration
         self.density_initial: Array = np.zeros((0,))
@@ -73,7 +73,7 @@ class ConstantVolumeChemistry(RightHandSide):
         self.velocity_initial = state.velocity
 
         assert state.composition is not None
-        state_array_new: Array = np.zeros(self.shape_update)
+        state_array_new: Array = np.zeros(self.shape_output)
         state_array_new[:, 0] = self.physics.get_temperature(state)
         state_array_new[:, 1:] = state.composition
 
@@ -103,13 +103,13 @@ class ConstantVolumeChemistry(RightHandSide):
             gamma_star_local, e0_star_local = self.physics.get_double_flux_variables(
                 state
             )
-            gamma_star[self.idx_domain] = gamma_star_local
+            gamma_star[self.idx_input] = gamma_star_local
             assert e0_star is not None
-            e0_star[self.idx_domain] = e0_star_local
+            e0_star[self.idx_input] = e0_star_local
 
         # Update the state array
         state_array = np.reshape(state_array, self.shape_full)
-        state_array[self.idx_domain] = state_array_local
+        state_array[self.idx_input] = state_array_local
 
         # Update the domain indices for next time step
         self.update_indices(time, state)
@@ -131,10 +131,10 @@ class ConstantVolumeChemistry(RightHandSide):
     ]:
         """Store temperature and mass fractions in the state array."""
         _ = time, gamma_star, e0_star
-        state_array_local = state_array_local.reshape(self.shape_update)
+        state_array_local = state_array_local.reshape(self.shape_output)
 
         state: FluidState = FluidState(
-            shape=(self.shape_update[0],),
+            shape=(self.shape_output[0],),
             density=self.density_initial,
             velocity=self.velocity_initial,
             temperature=state_array_local[:, 0],
@@ -164,7 +164,7 @@ class ConstantVolumeChemistry(RightHandSide):
         eRT = self.physics.sol.standard_int_energies_RT
         cv = self.physics.get_cp(state) / self.physics.get_gamma(state)
 
-        dydt: Array = np.zeros(self.shape_update)
+        dydt: Array = np.zeros(self.shape_output)
         dydt[:, 0] = -np.sum(eRT * wdot, axis=-1) * (
             gas_constant * temperature / (self.density_initial * cv)
         )

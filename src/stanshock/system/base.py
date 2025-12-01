@@ -39,9 +39,9 @@ class RightHandSide:
     jac: Callable[[float, Array, Array | None, Array | None], Array] | None = None
 
     # Index into (2D) global state array to be accessed by this source term
-    idx_domain: Index
+    idx_input: Index
     # Index into (2D) local state array of cells to which the source term applies
-    idx_update: Index
+    idx_output: Index
     # Index into (2D) local state array of transport equations to update
     idx_source: Index
 
@@ -64,29 +64,29 @@ class RightHandSide:
         n_vars = self.physics.n_scalars + 2 if self.physics is not None else 1
 
         # Default to updating everything
-        self.idx_domain = np.s_[:]
-        self.idx_update = np.s_[:]
+        self.idx_input = np.s_[:]
+        self.idx_output = np.s_[:]
         self.idx_source = np.s_[:]
 
         if self.geometry is not None:
             if self.face_extrapolator is not None:
                 # Generally we want to include ghost layers when using face extrapolation
                 n_cells_input = self.geometry.n_cells
-                self.idx_domain = np.s_[:]
-                self.idx_update = self.geometry.idx_cells
+                self.idx_input = np.s_[:]
+                self.idx_output = self.geometry.idx_cells
             else:
                 # Otherwise we can drop the ghost cells
                 n_cells_input = self.geometry.n_cells_interior
-                self.idx_domain = self.geometry.idx_cells
-                self.idx_update = np.s_[:]
+                self.idx_input = self.geometry.idx_cells
+                self.idx_output = np.s_[:]
 
             # Don't update the ghost cells either way
             n_cells_output = self.geometry.n_cells_interior
 
         # How to reshape the state_array subsets
         self.shape_full: tuple[int, int] = (-1, n_vars)
-        self.shape_domain: tuple[int, int] = (n_cells_input, n_vars)
-        self.shape_update: tuple[int, int] = (n_cells_output, n_vars)
+        self.shape_input: tuple[int, int] = (n_cells_input, n_vars)
+        self.shape_output: tuple[int, int] = (n_cells_output, n_vars)
 
         # Ensure required routines were provided
         for step in self.REQUIRED_PRECOMPUTE_STEPS:
@@ -110,14 +110,14 @@ class RightHandSide:
         May include optional forward transforms.
         """
         _ = time
-        state_array_local = np.reshape(state_array, self.shape_full)[self.idx_domain]
+        state_array_local = np.reshape(state_array, self.shape_full)[self.idx_input]
 
         gamma_star_local: Array | None = None
         e0_star_local: Array | None = None
         if gamma_star is not None:
-            gamma_star_local = gamma_star[self.idx_domain]
+            gamma_star_local = gamma_star[self.idx_input]
         if e0_star is not None:
-            e0_star_local = e0_star[self.idx_domain]
+            e0_star_local = e0_star[self.idx_input]
 
         return np.ravel(state_array_local), gamma_star_local, e0_star_local
 
@@ -135,7 +135,7 @@ class RightHandSide:
 
         Can also apply any necessary inverse transforms.
         """
-        state_array_local = state_array_local.reshape(self.shape_domain)
+        state_array_local = state_array_local.reshape(self.shape_input)
 
         state = None
         if self.physics is not None:
@@ -151,14 +151,14 @@ class RightHandSide:
                     self.physics.get_double_flux_variables(state)
                 )
 
-                gamma_star[self.idx_domain] = gamma_star_local
+                gamma_star[self.idx_input] = gamma_star_local
                 assert e0_star is not None
-                e0_star[self.idx_domain] = e0_star_local
+                e0_star[self.idx_input] = e0_star_local
 
         state_array = np.reshape(state_array, self.shape_full)
-        state_array[self.idx_domain] = state_array_local
+        state_array[self.idx_input] = state_array_local
 
-        # Update the domain indices for next time step
+        # Update the input indices for next time step
         self.update_indices(time, state)
 
         return np.ravel(state_array), gamma_star, e0_star
@@ -177,7 +177,7 @@ class RightHandSide:
         FluidState | None,
     ]:
         """Perform all calculations which must occur prior to source term evaluation."""
-        state_array_local = np.reshape(state_array_local, self.shape_domain)
+        state_array_local = np.reshape(state_array_local, self.shape_input)
 
         if self.boundary_conditions is not None:
             state_array_local = self.boundary_conditions.update_ghost_layers(
@@ -234,9 +234,9 @@ class RightHandSide:
 
     def add_source(self, y: Array, dy: Array) -> Array:
         """Add (2D) source term to the (1D) state array."""
-        dy = np.reshape(dy, self.shape_update)
-        state_array_local = np.reshape(y, self.shape_domain)
-        state_array_local[self.idx_update, self.idx_source] += dy
+        dy = np.reshape(dy, self.shape_output)
+        state_array_local = np.reshape(y, self.shape_input)
+        state_array_local[self.idx_output, self.idx_source] += dy
         return np.ravel(state_array_local)
 
     def source_full(
@@ -273,9 +273,9 @@ class FastSlowSource(RightHandSide):
     _mode: FastSlowMode
 
     # By default, all locations and sources are set to slow:
-    idx_update_implicit: Index = np.array([], dtype=np.int64)
+    idx_output_implicit: Index = np.array([], dtype=np.int64)
     idx_source_implicit: Index = np.s_[:]
-    idx_update_explicit: Index = np.s_[:]
+    idx_output_explicit: Index = np.s_[:]
     idx_source_explicit: Index = np.s_[:]
 
     def __init__(
@@ -293,11 +293,11 @@ class FastSlowSource(RightHandSide):
     def mode(self, mode: FastSlowMode) -> None:
         self._mode = mode
         if mode == "fast":
-            self.idx_update = self.idx_update_implicit
+            self.idx_output = self.idx_output_implicit
             self.idx_source = self.idx_source_implicit
             self.source_implementation = self.source_fast
         elif mode == "slow":
-            self.idx_update = self.idx_update_explicit
+            self.idx_output = self.idx_output_explicit
             self.idx_source = self.idx_source_explicit
             self.source_implementation = self.source_slow
 
@@ -350,8 +350,8 @@ class CombinedSource(RightHandSide):
 
         # Don't modify the shapes, as the sources will handle that internally
         self.shape_full = max(source.shape_full for source in self.sources)
-        self.shape_domain = self.shape_update = self.shape_full
-        self.idx_domain = self.idx_update = np.s_[:]
+        self.shape_input = self.shape_output = self.shape_full
+        self.idx_input = self.idx_output = np.s_[:]
 
     def source(
         self,

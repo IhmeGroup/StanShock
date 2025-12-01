@@ -140,17 +140,17 @@ class HydrogenInjection(RightHandSide):
 
         # Get geometry information
         xf = self.geometry.xf
-        self.idx_domain = (
+        self.idx_input = (
             np.where(np.logical_and(xf >= x_inj, xf < x_inj + L_src))[0]
             + self.geometry.n_ghost_layers
         )
-        self.xc = self.geometry.xc[self.idx_domain]
+        self.xc = self.geometry.xc[self.idx_input]
         n_cells = len(self.xc)
-        self.shape_domain = (n_cells, n_variables)
-        self.shape_update = (n_cells, 3)
+        self.shape_input = (n_cells, n_variables)
+        self.shape_output = (n_cells, 3)
         self.idx_source = np.array([0, 1, 2 + gas.species_index("H2")])
 
-        self.rhs = np.zeros(self.shape_update)
+        self.rhs = np.zeros(self.shape_output)
         self.rhs[:, 0] = rho_f * U_f
         self.rhs[:, 1] = rhoE_f
         self.rhs[:, 2] = rhoYH2_f

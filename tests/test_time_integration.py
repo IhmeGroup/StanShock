@@ -41,8 +41,8 @@ class Brusselator(RightHandSide):
     def __init__(self) -> None:
         super().__init__()
         self.shape_full = (-1, 2)
-        self.shape_domain = (-1, 2)
-        self.shape_update = (-1, 2)
+        self.shape_input = (-1, 2)
+        self.shape_output = (-1, 2)
 
         self.abcd: tuple[float, float, float, float] = (1.0, 3.0, 1.0, 1.0)
 
@@ -55,7 +55,7 @@ class Brusselator(RightHandSide):
     ) -> Array:
         _ = time, gamma_star, e0_star
         a, b, c, _ = self.abcd
-        state_array_local = np.reshape(state_array_local, self.shape_domain)
+        state_array_local = np.reshape(state_array_local, self.shape_input)
         rhs = np.zeros_like(state_array_local)
 
         x = state_array_local[:, 0]
@@ -73,8 +73,8 @@ class Circle(RightHandSide):
     def __init__(self) -> None:
         super().__init__()
         self.shape_full = (-1, 2)
-        self.shape_domain = (-1, 2)
-        self.shape_update = (-1, 2)
+        self.shape_input = (-1, 2)
+        self.shape_output = (-1, 2)
 
     def source(
         self,
@@ -84,7 +84,7 @@ class Circle(RightHandSide):
         e0_star: Array | None = None,
     ) -> Array:
         _ = time, gamma_star, e0_star
-        state_array_local = np.reshape(state_array_local, self.shape_domain)
+        state_array_local = np.reshape(state_array_local, self.shape_input)
         rhs = np.zeros_like(state_array_local)
 
         x = state_array_local[:, 0]
@@ -101,8 +101,8 @@ class Circle(RightHandSide):
 
 class LotkaVolterra(FastSlowSource):
     REQUIRED_PRECOMPUTE_STEPS = ()
-    idx_update_explicit = np.s_[:]
-    idx_update_implicit = np.s_[:]
+    idx_output_explicit = np.s_[:]
+    idx_output_implicit = np.s_[:]
     idx_source_explicit = np.array([0])
     idx_source_implicit = np.array([1])
 
@@ -113,8 +113,8 @@ class LotkaVolterra(FastSlowSource):
     ) -> None:
         """Split RHS into fast and slow source terms accessed by setting the mode."""
         super().__init__(mode, **precompute_steps)
-        self.shape_full = self.shape_domain = (-1, 2)
-        self.shape_update = (-1, 1)
+        self.shape_full = self.shape_input = (-1, 2)
+        self.shape_output = (-1, 1)
 
     def source_slow(
         self,
