@@ -67,7 +67,7 @@ class ScipyIVP(TimeIntegrator):
         )
 
         results = self.integrator(
-            fun=self.rhs.source,
+            fun=self.rhs.source_full,
             t_span=(time, time + dt),
             y0=y0,
             method=self.method,
@@ -186,7 +186,7 @@ class SSPRK3(SimpleRungeKuttaBase):
 
     References
     ----------
-    Dale E. Durran, “Numerical Methods for Fluid Dynamics”, Springer.
+    Dale E. Durran, "Numerical Methods for Fluid Dynamics", Springer.
     Second Edition.
     """
 
@@ -356,7 +356,7 @@ class OperatorSplitting(TimeIntegrator):
 
 
 class StrangSplitting(OperatorSplitting):
-    """Classical Strang-Splitting approach.
+    """Classical second-order operator-splitting approach by Strang.
 
     In this approach, the first operator is integrated to the midpoint, then
     the second operator is integrated for the full time step, and finally the
@@ -368,8 +368,15 @@ class StrangSplitting(OperatorSplitting):
 
 
 class SymmetricallyWeightedSequentialSplitting(OperatorSplitting):
-    """This approach applies Strang splitting twice, swapping the operators and
+    """Second-order operator splitting approach from Csomós et. al [1].
+
+    This approach applies Strang splitting twice, swapping the operators and
     then averaging the results together to make the approach symmetric.
+
+    References
+    ----------
+    [1] Csomós et al. 2005. "Weighted sequential splittings and their analysis."
+        Comput. Math. with Appl. 50, 7 (2005), 1017-1031.
     """
 
     stages = (
@@ -380,6 +387,19 @@ class SymmetricallyWeightedSequentialSplitting(OperatorSplitting):
 
 
 class ThirdOrderSplitting(OperatorSplitting):
+    """Third-order operator splitting approach from Jia and Li [1].
+
+    Essentially a weighted combination of a symmetric Lie-splitting and symmetric
+    Strang-splitting approach. Note that third-order accuracy has not been
+    observed in practice with this scheme, so there may be some error in its
+    implementation or constraints on achieving third-order convergence.
+
+    References
+    ----------
+    [1] Jia et al. 2011. "A third accurate operator splitting method."
+        Math. Comput. Model. 53, 1-2 (2011), 387-396.
+    """
+
     stages: tuple[tuple[tuple[int, float], ...], ...] = (
         ((0, 0.5), (1, 1.0), (0, 0.5)),
         ((1, 0.5), (0, 1.0), (1, 0.5)),
@@ -390,8 +410,9 @@ class ThirdOrderSplitting(OperatorSplitting):
 
 
 class LieSplitting(OperatorSplitting):
-    """Simplest splitting approach, in which each term is integrated in
-    sequence.
+    """First-order operator splitting approach by Lie.
+
+    Simplest splitting approach, in which each term is integrated in sequence.
     """
 
     def __init__(
@@ -409,6 +430,22 @@ class LieSplitting(OperatorSplitting):
 
 
 class StrangSplittingOld(TimeIntegrator):
+    """Deprecated implementation of Strang splitting.
+
+    This specifies a transport and reaction operator, where the Strang approach
+    is more general than this. In fact, the order of the operators can be safely
+    swapped; however, there have been publications [1,2] which indicate lower
+    error is achieved when the stiff terms (the reactions) take the half steps.
+
+    References
+    ----------
+    [1] Ren et al. 2014. "Dynamic adaptive chemistry with operator splitting
+        schemes for reactive flow simulations." J. Comput. Phys. 263,
+        (April 2014), 19-36.
+    [2] Sportisse. 2000. "An Analysis of Operator Splitting Techniques in the
+        Stiff Case." J. Comput. Phys. 161, 1 (2000), 140-168.
+    """
+
     def __init__(
         self, transport_operator: TimeIntegrator, reaction_operator: TimeIntegrator
     ) -> None:
@@ -423,8 +460,8 @@ class StrangSplittingOld(TimeIntegrator):
         gamma_star: Array | None,
         e0_star: Array | None,
     ) -> tuple[float, Array, Array | None, Array | None]:
-        # Take half-step with transport terms
-        _, state_array, _, _ = self.transport_operator.advance(
+        # Take half-step with reaction terms
+        _, state_array, _, _ = self.reaction_operator.advance(
             dt=0.5 * dt,
             time=time,
             state_array=state_array,
@@ -432,8 +469,8 @@ class StrangSplittingOld(TimeIntegrator):
             e0_star=e0_star,
         )
 
-        # Take full-step with reaction terms
-        t, state_array, _, _ = self.reaction_operator.advance(
+        # Take full-step with transport terms
+        t, state_array, _, _ = self.transport_operator.advance(
             dt=dt,
             time=time,
             state_array=state_array,
@@ -441,8 +478,8 @@ class StrangSplittingOld(TimeIntegrator):
             e0_star=e0_star,
         )
 
-        # Take half-step with transport terms
-        _, state_array, gamma_star, e0_star = self.transport_operator.advance(
+        # Take half-step with reaction terms
+        _, state_array, gamma_star, e0_star = self.reaction_operator.advance(
             dt=0.5 * dt,
             time=time + 0.5 * dt,
             state_array=state_array,
@@ -493,9 +530,9 @@ class LieSplittingOld(TimeIntegrator):
 class FastSlowIntegrator(TimeIntegrator):
     def __init__(
         self,
-        rhs: RightHandSide,
+        rhs: FastSlowSource,
         fast_integrator: type[TimeIntegrator] = ScipyIVP,
-        slow_integrator: type[TimeIntegrator] = ForwardEuler,
+        slow_integrator: type[TimeIntegrator] = MidpointMethod,
     ) -> None:
         """Apply different integrators to stiff and non-stiff terms."""
         self.rhs: RightHandSide = rhs
@@ -512,17 +549,17 @@ class FastSlowIntegrator(TimeIntegrator):
     ) -> tuple[float, Array, Array | None, Array | None]:
         assert isinstance(self.rhs, FastSlowSource)
 
+        # Integrate slow terms
+        self.rhs.mode = "slow"
+        _, state_array, gamma_star, e0_star = self.slow_integrator.advance(
+            dt, time, state_array, gamma_star, e0_star
+        )
+
         # Integrate fast terms
         self.rhs.mode = "fast"
         if len(state_array[self.rhs.idx_update_implicit]) > 0:
             _, state_array, gamma_star, e0_star = self.fast_integrator.advance(
                 dt, time, state_array, gamma_star, e0_star
             )
-
-        # Integrate slow terms
-        self.rhs.mode = "slow"
-        _, state_array, gamma_star, e0_star = self.slow_integrator.advance(
-            dt, time, state_array, gamma_star, e0_star
-        )
 
         return time + dt, state_array, gamma_star, e0_star

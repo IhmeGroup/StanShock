@@ -163,13 +163,6 @@ class RightHandSide:
 
         return np.ravel(state_array), gamma_star, e0_star
 
-    def add_source(self, y: Array, dy: Array) -> Array:
-        """Add (2D) source term to the (1D) state array."""
-        dy = np.reshape(dy, self.shape_update)
-        state_array_local = np.reshape(y, self.shape_domain)
-        state_array_local[self.idx_update, self.idx_source] += dy
-        return np.ravel(state_array_local)
-
     def precompute_for_source(
         self,
         time: float,
@@ -239,6 +232,13 @@ class RightHandSide:
             time, state_array_local, state, face_states, avg_face_states, face_gradients
         )
 
+    def add_source(self, y: Array, dy: Array) -> Array:
+        """Add (2D) source term to the (1D) state array."""
+        dy = np.reshape(dy, self.shape_update)
+        state_array_local = np.reshape(y, self.shape_domain)
+        state_array_local[self.idx_update, self.idx_source] += dy
+        return np.ravel(state_array_local)
+
     def source_full(
         self,
         time: float,
@@ -278,10 +278,12 @@ class FastSlowSource(RightHandSide):
     idx_update_explicit: Index = np.s_[:]
     idx_source_explicit: Index = np.s_[:]
 
-    def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
+    def __init__(
+        self, mode: FastSlowMode = "slow", **precompute_steps: Unpack[PrecomputeSteps]
+    ) -> None:
         """Split RHS into fast and slow source terms accessed by setting the mode."""
         super().__init__(**precompute_steps)
-        self.mode = "slow"
+        self.mode = mode
 
     @property
     def mode(self) -> FastSlowMode:

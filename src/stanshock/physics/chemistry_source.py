@@ -42,7 +42,7 @@ class ConstantVolumeChemistry(RightHandSide):
         n_species = self.physics.n_scalars
         self.idx_domain = self.geometry.idx_cells
         self.idx_update = np.s_[:]
-        self.shape_update = (self.shape_update[0], n_species + 1)
+        self.shape_domain = self.shape_update = (self.shape_update[0], n_species + 1)
 
         # Define density and velocity as constants to be set before time integration
         self.density_initial: Array = np.zeros((0,))
@@ -62,7 +62,7 @@ class ConstantVolumeChemistry(RightHandSide):
         )
 
         state = self.physics.conservative_to_primitive(
-            state_array_local.reshape(self.shape_domain),
+            state_array_local.reshape(self.shape_full),
             gamma_star_local,
             e0_star_local,
         )
