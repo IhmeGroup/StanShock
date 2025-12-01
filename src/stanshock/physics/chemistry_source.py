@@ -35,12 +35,14 @@ class ChemistrySource(RightHandSide):
 class ConstantVolumeChemistry(RightHandSide):
     def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         super().__init__(**precompute_steps)
+        assert self.physics is not None
+        assert self.geometry is not None
 
         # Restrict the domain to the cells
         n_species = self.physics.n_scalars
         self.idx_domain = self.geometry.idx_cells
         self.idx_update = np.s_[:]
-        self.shape_subset: tuple[int, ...] = (self.shape_update[0], n_species + 1)
+        self.shape_update = (self.shape_update[0], n_species + 1)
 
         # Define density and velocity as constants to be set before time integration
         self.density_initial: Array = np.zeros((0,))
@@ -54,12 +56,13 @@ class ConstantVolumeChemistry(RightHandSide):
         e0_star: Array | None,
     ) -> tuple[Array, Array | None, Array | None]:
         """Store temperature and mass fractions in the state array."""
+        assert self.physics is not None
         state_array_local, gamma_star_local, e0_star_local = (
             super().before_time_integration(time, state_array, gamma_star, e0_star)
         )
 
         state = self.physics.conservative_to_primitive(
-            state_array_local.reshape(self.shape_update),
+            state_array_local.reshape(self.shape_domain),
             gamma_star_local,
             e0_star_local,
         )
@@ -70,7 +73,7 @@ class ConstantVolumeChemistry(RightHandSide):
         self.velocity_initial = state.velocity
 
         assert state.composition is not None
-        state_array_new: Array = np.zeros(self.shape_subset)
+        state_array_new: Array = np.zeros(self.shape_update)
         state_array_new[:, 0] = self.physics.get_temperature(state)
         state_array_new[:, 1:] = state.composition
 
@@ -87,16 +90,11 @@ class ConstantVolumeChemistry(RightHandSide):
         e0_star: Array | None,
     ) -> tuple[Array, Array | None, Array | None]:
         # Compute conservative state from initial density and updated mass fractions + temperature
-        state_array_local = np.reshape(state_array_local, self.shape_subset)
-        state: FluidState = FluidState(
-            shape=(self.shape_subset[0],),
-            density=self.density_initial,
-            velocity=self.velocity_initial,
-            temperature=state_array_local[:, 0],
-            composition=state_array_local[:, 1:],
-            gamma_star=gamma_star_local,
-            e0_star=e0_star_local,
+        _, state, _, _, _ = self.precompute_for_source(
+            time, state_array_local, gamma_star_local, e0_star_local
         )
+        assert state is not None
+        assert self.physics is not None
         state.pressure = self.physics.get_pressure(state)
         state_array_local = self.physics.primitive_to_conservative(state)
 
@@ -133,14 +131,16 @@ class ConstantVolumeChemistry(RightHandSide):
     ]:
         """Store temperature and mass fractions in the state array."""
         _ = time, gamma_star, e0_star
-        state_array_local = state_array_local.reshape(self.shape_subset)
+        state_array_local = state_array_local.reshape(self.shape_update)
 
         state: FluidState = FluidState(
-            shape=(self.shape_subset[0],),
+            shape=(self.shape_update[0],),
             density=self.density_initial,
             velocity=self.velocity_initial,
             temperature=state_array_local[:, 0],
             composition=state_array_local[:, 1:],
+            gamma_star=gamma_star,
+            e0_star=e0_star,
         )
 
         return np.ravel(state_array_local), state, None, None, None
@@ -164,7 +164,7 @@ class ConstantVolumeChemistry(RightHandSide):
         eRT = self.physics.sol.standard_int_energies_RT
         cv = self.physics.get_cp(state) / self.physics.get_gamma(state)
 
-        dydt: Array = np.zeros(self.shape_subset)
+        dydt: Array = np.zeros(self.shape_update)
         dydt[:, 0] = -np.sum(eRT * wdot, axis=-1) * (
             gas_constant * temperature / (self.density_initial * cv)
         )
