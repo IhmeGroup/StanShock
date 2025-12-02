@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from stanshock.components.combustor import Combustor
-from stanshock.numerics.boundary_conditions import SpecifiedFace
+from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.fluid_base import FluidState
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.system.backend import Array
@@ -99,7 +99,7 @@ BC_inlet = SpecifiedFace(
     reference_state=(gas_init.density, U_in, gas_init.P, gas_init.Y)
 )
 BC_outlet = "outflow"
-BCs = {"left": BC_inlet, "right": BC_outlet}
+BCs: BCInput = {"left": BC_inlet, "right": BC_outlet}
 
 
 # Define the fuel inflow
@@ -176,7 +176,6 @@ class HydrogenInjection(RightHandSide):
 # Initialize and run the simulation
 physics = ThermoTable(gas)
 ss = Combustor(
-    xf=xf,
     geometry=geometry,
     initialization=("constant", gas_init, U_in),
     boundary_conditions=BCs,

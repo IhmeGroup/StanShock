@@ -75,10 +75,9 @@ class ShockTube(Combustor):
         )  # RBF is the gaussian correlation
 
         # Check for boundary layer terms
-        if not self.include_boundary_layer:
-            self.include_boundary_layer = True
-            if self.verbose:
-                print("WARNING: Boundary Layer Terms Included")
+        if not hasattr(self, "boundary_layer"):
+            msg = "Boundary layer terms have not been set."
+            raise AttributeError(msg)
 
         assert isinstance(self.geometry, Cylinder)
         geometry: Cylinder = self.geometry

@@ -10,7 +10,7 @@ from scipy import optimize
 
 from stanshock.components.combustor import Combustor
 from stanshock.models.jicf import JICModel
-from stanshock.numerics.boundary_conditions import SpecifiedFace
+from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
 from stanshock.processing.plot import XTDiagram
 from stanshock.system.geometry import Box
@@ -242,7 +242,7 @@ BC_inlet = SpecifiedFace(
     reference_state=(gas_init.density, U_in, gas_init.P, (1.0, 0.0, 0.0))
 )
 BC_outlet = "outflow"
-BCs = (BC_inlet, BC_outlet)
+BCs: BCInput = {"left": BC_inlet, "right": BC_outlet}
 
 # Load the FPV table
 fpv_table = FPVTable(
@@ -405,7 +405,6 @@ jic = JICModel(
 
 # Initialize and run the simulation
 ss = Combustor(
-    xf=xf,
     geometry=geometry,
     wall_temperature=300.0,
     include_boundary_layer=True,

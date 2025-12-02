@@ -9,9 +9,11 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
+from stanshock.system.geometry import initialize_geometry
 from stanshock.utils.csv_loader import get_pressure_data
 
 
@@ -93,16 +95,17 @@ def main(
     def dlnA_dx(time: float, x: Array) -> Array:
         return dA_dx(time, x) / A(time, x)
 
+    geometry = initialize_geometry(xf, d_outer=D, dlnA_dx=dlnA_dx)
+
     # set up solver parameters
     print("Solving with boundary layer terms")
-    boundary_conditions = {"left": "reflecting", "right": "reflecting"}
+    boundary_conditions: BCInput = {"left": "reflecting", "right": "reflecting"}
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
 
     ssbl = ShockTube(
-        n_cells=nX,
-        xf=xf,
+        geometry=geometry,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -110,8 +113,6 @@ def main(
         output_every=100,
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
-        d_outer=D,
-        dlnA_dx=dlnA_dx,
     )
     ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
 
@@ -127,16 +128,13 @@ def main(
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(
-        n_cells=nX,
-        xf=xf,
+        geometry=geometry,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
         include_boundary_layer=False,
-        d_outer=D,
-        dlnA_dx=dlnA_dx,
     )
     ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xf)))  # end wall probe
 
