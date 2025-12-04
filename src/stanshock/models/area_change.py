@@ -129,7 +129,13 @@ class AreaChange(FastSlowSource):
             gamma_star=gamma_star,
             e0_star=e0_star,
         )
-        state.pressure = self.physics.get_pressure(state)
+        if gamma_star is not None:
+            # Compute pressure using double-flux method
+            assert e0_star is not None
+            state.pressure = (gamma_star - 1.0) * r * (e_int - e0_star)
+        else:
+            state.pressure = self.physics.get_pressure(state)
+
         state.temperature = self.physics.get_temperature(state)
 
         return np.ravel(state_array_local), state, None, None, None

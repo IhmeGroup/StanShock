@@ -13,6 +13,7 @@ from stanshock.components.shocktube import ShockTube
 from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import (
+    InitializeRiemannProblem,
     smoothing_function,
     smoothing_function_gradient,
 )
@@ -118,11 +119,14 @@ def main(
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
+    initialization = InitializeRiemannProblem(
+        geometry, physics_model, state4, state1, xShock
+    )
 
     ss = ShockTube(
         geometry=geometry,
         physics=physics_model,
-        initialization=("riemann", state4, state1, xShock),
+        initialization=initialization,
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
@@ -148,12 +152,13 @@ def main(
     geometry = Cylinder(
         xf=xf, d_inner=ss.geometry.d_inner, d_outer=d_outer, dlnA_dx=ss.geometry.dlnA_dx
     )
+    initialization.geometry = geometry
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
         geometry=geometry,
         physics=physics_model,
-        initialization=("riemann", state4, state1, xShock),
+        initialization=initialization,
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
@@ -188,12 +193,13 @@ def main(
 
     # recalculate at higher resolution without the insert
     geometry = Cylinder(xf=xf, d_outer=d_outer, dlnA_dx=dlnA_dx)
+    initialization.geometry = geometry
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
         geometry=geometry,
         physics=physics_model,
-        initialization=("riemann", state4, state1, xShock),
+        initialization=initialization,
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,

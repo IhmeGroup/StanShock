@@ -12,6 +12,7 @@ from stanshock.components.shocktube import ShockTube
 from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import (
+    InitializeRiemannProblem,
     smoothing_function,
     smoothing_function_gradient,
 )
@@ -154,11 +155,14 @@ def main(
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
+    initialization = InitializeRiemannProblem(
+        geometry, physics_model, state4, state1, xShock
+    )
 
     ssbl = ShockTube(
         geometry=geometry,
         physics=physics_model,
-        initialization=("riemann", state4, state1, xShock),
+        initialization=initialization,
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
@@ -181,7 +185,7 @@ def main(
     ssnbl = ShockTube(
         geometry=geometry,
         physics=physics_model,
-        initialization=("riemann", state4, state1, xShock),
+        initialization=initialization,
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,

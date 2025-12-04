@@ -12,6 +12,7 @@ from stanshock.components.combustor import Combustor
 from stanshock.numerics.boundary_conditions import BCInput, FreezeCells
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.thermotable import ThermoTable
+from stanshock.processing.initialize import InitializeRiemannProblem
 from stanshock.system.geometry import initialize_geometry
 
 
@@ -69,10 +70,13 @@ def main(
         physics = ThermoTable(gas)
     else:
         physics = CanteraInterface(gas)
+    initialization = InitializeRiemannProblem(
+        geometry, physics, unburnedState, burnedState, flame_center
+    )
 
     ss = Combustor(
         geometry=geometry,
-        initialization=("Riemann", unburnedState, burnedState, flame_center),
+        initialization=initialization,
         physics=physics,
         boundary_conditions=boundary_conditions,
         cfl=0.9,

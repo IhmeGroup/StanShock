@@ -1,8 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
-from typing import Any
-
 import numpy as np
 
 from stanshock.models.area_change import AreaChange
@@ -37,12 +34,7 @@ from stanshock.numerics.time_integration import (
 from stanshock.numerics.viscous_flux import ViscousFlux
 from stanshock.physics.chemistry_source import ChemistrySource, ConstantVolumeChemistry
 from stanshock.physics.fluid_base import FluidPhysics
-from stanshock.processing.initialize import (
-    initialize_constant,
-    initialize_diffuse_interface,
-    initialize_isentropic,
-    initialize_riemann_problem,
-)
+from stanshock.processing.initialize import Initialization
 from stanshock.processing.plot import XTDiagram, plot_state
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
@@ -61,7 +53,7 @@ class Combustor:
         physics: FluidPhysics,  # Model handling all fluid property evaluations
         geometry: Geometry,
         boundary_conditions: BoundaryConditions | BCInput,
-        initialization: Sequence[str | Any],  # initialization options
+        initialization: Initialization,  # initialization options
         cfl: float = 1.0,  # stability condition
         t: float = 0.0,  # time
         verbose: bool = True,  # console output switch
@@ -96,6 +88,7 @@ class Combustor:
         self.injector = injector
         self.optimization_iteration = optimization_iteration
         self.physics: FluidPhysics = physics
+        self.initialization: Initialization = initialization
         self.include_diffusion = include_diffusion
         self.thickening = thickening
         self.plot_state_interval = plot_state_interval
@@ -127,22 +120,7 @@ class Combustor:
         )
 
         # initialize the state
-        if initialization[0].lower() == "constant":
-            self.state = initialize_constant(
-                self.geometry, self.physics, *initialization[1:]
-            )
-        elif initialization[0].lower() == "riemann":
-            self.state = initialize_riemann_problem(
-                self.geometry, self.physics, *initialization[1:]
-            )
-        elif initialization[0].lower() == "diffuse_interface":
-            self.state = initialize_diffuse_interface(
-                self.geometry, self.physics, *initialization[1:]
-            )
-        elif initialization[0].lower() == "isentropic":
-            self.state = initialize_isentropic(
-                self.geometry, self.physics, *initialization[1:]
-            )
+        self.state = self.initialization()
 
         # Initialize the key physics
         self.inviscid_flux = InviscidFlux(
