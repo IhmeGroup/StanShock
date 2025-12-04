@@ -61,6 +61,9 @@ class FluidPhysics(ABC):
         self.prog_def: Composition | None = (
             prog_def  # Progress variable molar composition
         )
+        self.Z_weights: Array = np.zeros(self.gas.n_species)
+        self.Z_offset: float = 0.0
+        self.prog_weights: Array = np.zeros(self.gas.n_species)
 
         if self.ox_def is not None and self.fuel_def is not None:
             self.initialize_bilger_mixture_fraction()
@@ -78,11 +81,13 @@ class FluidPhysics(ABC):
 
     def get_double_flux_variables(self, state: FluidState) -> tuple[Array, Array]:
         """Compute effective specific heat ratio, gamma*, and reference energy, e_0^*."""
-        assert state.internal_energy is not None
         assert state.pressure is not None
         assert state.density is not None
         # Valid for any ideal gas, g* = rho*c^2/p = g
         state.gamma_star = self.get_gamma(state)
+        if state.internal_energy is None:
+            state.internal_energy = self.get_internal_energy(state)
+        assert state.internal_energy is not None
         state.e0_star = state.internal_energy - state.pressure / (
             state.density * (state.gamma_star - 1.0)
         )
@@ -133,12 +138,13 @@ class FluidPhysics(ABC):
         """Compute coefficients defining Bilger mixture fraction."""
         assert self.ox_def is not None
         assert self.fuel_def is not None
-        self.Z_weights: Array = np.zeros(self.gas.n_species)
-        self.Z_offset: float = 0.0
+
+        self.Z_weights = np.zeros(self.gas.n_species)
+        self.Z_offset = 0.0
         denom = 0.0
 
         # Set the values for C, H, and O:
-        stoich = {
+        stoich: dict[str, float] = {
             "C": 2.0,
             "H": 0.5,
             "O": -1.0,
@@ -178,7 +184,7 @@ class FluidPhysics(ABC):
 
     def initialize_progress_variable(self, prog_def: Composition) -> None:
         """Set coefficients defining progress variable."""
-        self.prog_weights: Array = np.zeros(self.gas.n_species)
+        self.prog_weights = np.zeros(self.gas.n_species)
 
         for sp, val in prog_def.items():
             self.prog_weights[self.gas.species_index(sp)] = val
@@ -210,14 +216,12 @@ class FluidPhysics(ABC):
 
     def get_normalized_progress_variable(self, Z: Array, C: Array) -> Array:
         _ = Z, C
-        msg = f"Normalized progress variable not implemented for {self.__class__}."
+        msg = f"Normalized progress variable not implemented for {self.__class__.__name__}."
         raise NotImplementedError(msg)
 
     def lookup(self, var: str, state: FluidState) -> Array:
         _ = var, state
-        msg = (
-            f"Looking up a variable by string is not implemented for {self.__class__}."
-        )
+        msg = f"Looking up a variable by string is not implemented for {self.__class__.__name__}."
         raise NotImplementedError(msg)
 
     def primitive_to_conservative(self, state: FluidState) -> Array:

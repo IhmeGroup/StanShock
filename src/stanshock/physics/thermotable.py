@@ -222,10 +222,21 @@ class ThermoTable(CanteraInterface):
         return state.temperature
 
     def get_pressure(self, state: FluidState) -> Array:
-        assert state.temperature is not None
+        if state.pressure is not None:
+            return state.pressure
+
         assert state.density is not None
-        R = self.get_specific_gas_constant(state)
-        state.pressure = state.temperature * R * state.density
+        if state.gamma_star is not None and state.internal_energy is not None:
+            assert state.e0_star is not None
+            state.pressure = (
+                (state.gamma_star - 1.0)
+                * state.density
+                * (state.internal_energy - state.e0_star)
+            )
+        else:
+            assert state.temperature is not None
+            R = self.get_specific_gas_constant(state)
+            state.pressure = state.temperature * R * state.density
         return state.pressure
 
     def get_species_enthalpies(self, state: FluidState) -> Array:

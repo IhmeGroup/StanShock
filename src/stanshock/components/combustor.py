@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import cantera as ct
 import numpy as np
 
 from stanshock.models.area_change import AreaChange
@@ -10,6 +9,7 @@ from stanshock.numerics.boundary_conditions import (
     BoundaryConditions,
     set_boundary_conditions,
 )
+from stanshock.numerics.face_average import SimpleAverage
 from stanshock.numerics.face_extrapolation import (
     FaceExtrapolator,
     FifthOrderWeno,
@@ -17,16 +17,27 @@ from stanshock.numerics.face_extrapolation import (
 )
 from stanshock.numerics.gradient import CentralDifference
 from stanshock.numerics.inviscid_flux import InviscidFlux, RiemannSolver, hllc_flux
+from stanshock.numerics.time_integration import (
+    SSPRK3,
+    FastSlowIntegrator,
+    ForwardEuler,
+    HeunsMethod,
+    LieSplitting,
+    ScipyIVP,
+    StrangSplitting,
+    TimeIntegrator,
+)
 from stanshock.numerics.viscous_flux import ViscousFlux
-from stanshock.physics.flamelet import FPVTable
-from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.physics.chemistry_source import ChemistrySource, ConstantVolumeChemistry
+from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.processing.initialize import (
     initialize_constant,
     initialize_diffuse_interface,
     initialize_isentropic,
     initialize_riemann_problem,
 )
-from stanshock.processing.plot import plot_state
+from stanshock.processing.plot import XTDiagram, plot_state
+from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
 from stanshock.system.geometry import Geometry, initialize_geometry
@@ -38,13 +49,13 @@ class Combustor:
     1D gasdynamics solver.
     """
 
-    def __init__(
+    def __init__(  # type: ignore[no-untyped-def]
         self,
         physics: FluidPhysics,
         n_cells: int = 10,
         geometry: Geometry | None = None,
         **kwargs,
-    ):
+    ) -> None:
         """
         initialization of the object with default values. The keyword arguments
         allow the user to initialize the state
@@ -74,8 +85,8 @@ class Combustor:
         self.inviscid_face_extrapolator: type[FaceExtrapolator] = FifthOrderWeno
         self.viscous_face_extrapolator: type[FaceExtrapolator] = FirstOrder
         self.initialization = None  # initialization options
-        self.probes = []  # list of probe objects
-        self.xt_diagrams = []  # list of XT diagram objects
+        self.probes: list[Probe] = []  # list of probe objects
+        self.xt_diagrams: list[XTDiagram] = []  # list of XT diagram objects
         self.skin_friction_coefficient = None  # skin friction functor
         self.optimization_iteration = 0  # counter to keep track of optimization
         self.physics = physics  # Model handling all fluid property evaluations
@@ -110,7 +121,7 @@ class Combustor:
 
         # Add area-change related source terms
         if self.geometry.dlnA_dt is not None or self.geometry.dlnA_dx is not None:
-            self.area_change = AreaChange(geometry=self.geometry)
+            self.area_change = AreaChange(geometry=self.geometry, physics=self.physics)
 
         # set the number of scalars
         self.n_scalars = self.physics.n_scalars
@@ -153,26 +164,63 @@ class Combustor:
             boundary_conditions=self.boundary_conditions,
             riemann_solver=self.flux_function,
             geometry=self.geometry,
+            physics=self.physics,
         )
+
+        # Set up time integrators
+        integrators: list[TimeIntegrator] = []
+        advection = SSPRK3(self.inviscid_flux)
+        if self.physics.is_flamelet:
+            integrators += [
+                HeunsMethod(
+                    ChemistrySource(geometry=self.geometry, physics=self.physics)
+                ),
+                advection,
+            ]
+        elif self.physics.gas.n_reactions > 0:
+            chemistry = ScipyIVP(
+                ConstantVolumeChemistry(geometry=self.geometry, physics=self.physics)
+            )
+            integrators += [StrangSplitting((chemistry, advection))]
+        else:
+            integrators += [advection]
 
         if self.include_diffusion:
             self.viscous_flux = ViscousFlux(
+                geometry=self.geometry,
+                physics=self.physics,
                 boundary_conditions=self.boundary_conditions,
                 face_extrapolator=self.viscous_face_extrapolator(
                     n_scalars_rho_sum=self.physics.n_scalars_rho_sum,
                     n_ghost_layers=self.geometry.n_ghost_layers,
                 ),
-                geometry=self.geometry,
+                face_average=SimpleAverage(),
                 gradient=CentralDifference(n_ghost_layers=self.geometry.n_ghost_layers),
             )
+            integrators += [HeunsMethod(self.viscous_flux)]
+
+        if self.area_change is not None:
+            # integrators += [ForwardEuler(self.area_change)]
+            integrators += [FastSlowIntegrator(self.area_change)]
 
         if self.include_boundary_layer:
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
-                geometry=self.geometry,
                 wall_temperature=self.wall_temperature,
                 skin_friction_coefficient=self.skin_friction_coefficient,
+                geometry=self.geometry,
+                physics=self.physics,
             )
+            integrators += [ForwardEuler(self.boundary_layer)]
+
+        if self.source_terms is not None:
+            integrators += [HeunsMethod(self.source_terms)]
+
+        if self.injector is not None:
+            integrators += [HeunsMethod(self.injector)]
+
+        # Apply Lie splitting approach
+        self.time_integrator = LieSplitting(tuple(integrators))
 
         self.F = np.ones(self.geometry.n_cells)  # thickening
 
@@ -207,310 +255,6 @@ class Combustor:
             local_timescale = np.minimum(local_timescale, viscous_timescale)
         return self.cfl * min(local_timescale)
 
-    def advance_advection(self, dt):
-        """
-        This method advances the advection terms by the prescribed timestep.
-        The advection terms are integrated using RK3.
-            inputs
-                dt=time step
-        """
-        idx = self.geometry.idx_cells
-        y = self.physics.primitive_to_conservative(self.state)
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        # 1st stage of RK3
-        dydt = self.inviscid_flux.source(self.t, y, self.physics, gamma_star, e0_star)
-        y1 = y.copy()
-        y1[idx] += dt * dydt
-
-        # 2nd stage of RK3
-        dydt = self.inviscid_flux.source(self.t, y1, self.physics, gamma_star, e0_star)
-        y2 = 0.75 * y + 0.25 * y1
-        y2[idx] += 0.25 * dt * dydt
-
-        # 3rd stage of RK3
-        dydt = self.inviscid_flux.source(self.t, y2, self.physics, gamma_star, e0_star)
-
-        y[idx] = (1.0 / 3.0) * y[idx] + (2.0 / 3.0) * y2[idx] + (2.0 / 3.0) * dt * dydt
-
-        # Remove ghost layers and update gamma
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-
-    def advance_diffusion(self, dt):
-        """
-        This method advances the diffusion terms in the axial direction
-            inputs
-                dt=time step
-        """
-        idx = self.geometry.idx_cells
-        y = self.physics.primitive_to_conservative(self.state)
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        if self.thickening is not None:
-            self.F = self.thickening(self)
-
-            # No gradient in F at boundary
-            self.viscous_flux.F = np.pad(
-                self.F, self.geometry.n_ghost_layers, mode="edge"
-            )
-
-        # 1st stage of RK2
-        dydt = self.viscous_flux.source(self.t, y, self.physics, gamma_star, e0_star)
-        y1 = y.copy()
-        y1[idx] += dt * dydt
-
-        # 2nd stage of RK2
-        dydt = self.viscous_flux.source(self.t, y1, self.physics, gamma_star, e0_star)
-        y[idx] = 0.5 * (y[idx] + y1[idx] + dt * dydt)
-
-        # Remove ghost layers and update gamma
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-
-    def advance_chemistry(self, dt):
-        """
-        This method advances the combustion chemistry of a reacting system. It
-        is only called if the "reacting" flag is set to True.
-            inputs
-                dt=time step
-        """
-        if not self.reacting:
-            return
-        if self.physics.is_flamelet:
-            self.advance_chemistry_FPV(dt)
-        else:
-            self.advance_chemistry_FRC(dt)
-
-    def advance_chemistry_FPV(self, dt):
-        """
-        This method advances the combustion chemistry of a reacting system using
-        the flamelet progress variable approach. It is only called if the "reacting"
-        flag is set to True.
-            inputs
-                dt=time step
-        """
-        # initialize
-        idx = self.geometry.idx_cells
-        y = self.physics.primitive_to_conservative(self.state)
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        # 1st stage of RK2
-        omegaC = self.injector.get_chemical_sources(
-            self.t,
-            y[idx],
-            self.physics,
-            gamma_star[idx],
-            e0_star[idx],
-        )
-        y1 = y.copy()
-        y1[idx, 4] += dt * omegaC
-
-        # 2nd stage of RK2
-        omegaC1 = self.injector.get_chemical_sources(
-            self.t + dt,
-            y1[idx],
-            self.physics,
-            gamma_star[idx],
-            e0_star[idx],
-        )
-        y[idx, 4] = 0.5 * (y[idx, 4] + y1[idx, 4] + dt * omegaC1)
-
-        # update properties
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-        self.state.temperature = self.physics.get_temperature(self.state)
-
-    def advance_chemistry_FRC(self, dt):
-        """
-        This method advances the combustion chemistry of a reacting system using
-        finite rate chemistry. It is only called if the "reacting" flag is set to True.
-            inputs
-                dt=time step
-        """
-
-        #######################################################################
-        def dydt(t, y, args):
-            """
-            function: dydt
-            -------------------------------------------------------------------
-            this function gives the source terms of a constant volume reactor
-                inputs
-                    dt=time step
-            """
-            _ = t  # Hack to silence linter
-            # unpack the input
-            r = args[0]
-            F = args[1]
-            Y = y[:-1]
-            T = y[-1]
-            # set the state for the gas object
-            self.physics.gas.TDY = T, r, Y
-            # gas properties
-            cv = self.physics.gas.cv_mass
-            W = self.physics.gas.molecular_weights
-            wHatDot = self.physics.gas.net_production_rates  # kmol/m^3.s
-            wDot = wHatDot * W  # kg/m^3.s
-            eRT = self.physics.gas.standard_int_energies_RT
-            # compute the derivatives
-            YDot = wDot / r
-            TDot = -np.sum(eRT * wHatDot) * ct.gas_constant * T / (r * cv)
-            f = np.zeros(self.n_scalars + 1)
-            f[:-1] = YDot
-            f[-1] = TDot
-            return f / F
-
-        #######################################################################
-        from scipy import integrate
-
-        # get indices
-        indices = np.where(self.in_reacting_region(self.t, self.geometry.xc))[0]
-        state_temp = FluidState(
-            shape=(len(indices),),
-            density=self.state.density[indices].copy(),
-            pressure=self.state.pressure[indices].copy(),
-            composition=self.state.composition[indices, :].copy(),
-        )
-        state_temp.temperature = Ts = self.physics.get_temperature(state_temp)
-        state_temp.pressure = None
-        state_temp._cache_valid = False
-
-        # initialize integrator
-        y0 = np.zeros(self.physics.n_scalars + 1)
-        integrator = integrate.ode(dydt).set_integrator("lsoda")
-        for TIndex, k in enumerate(indices):
-            # initialize
-            y0[:-1] = self.state.composition[k, :]
-            y0[-1] = Ts[TIndex]
-            args = [self.state.density[k], self.F[k]]
-            integrator.set_initial_value(y0, 0.0)
-            integrator.set_f_params(args)
-            # solve
-            integrator.integrate(dt)
-            # clip and normalize
-            Y = integrator.y[:-1]
-            Y = np.clip(Y, 0.0, 1.0)
-            Y /= np.sum(Y)
-            # update
-            state_temp.composition[TIndex, :] = Y
-            state_temp.temperature[TIndex] = integrator.y[-1]
-
-        # update state
-        self.state.pressure[indices] = self.physics.get_pressure(state_temp)
-        self.state.composition[indices, :] = state_temp.composition
-        self.state.temperature = None
-        self.state._cache_valid = False
-
-    def advance_quasi_1d(self, dt):
-        """
-        This method advances the quasi-1D terms used to model area changes in
-        the shock tube. The client must supply the functions dlnA_dt and dlnA_dx
-        to the Combustor object.
-        """
-        idx = self.geometry.idx_cells
-        y = self.physics.primitive_to_conservative(self.state)
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        dydt = self.area_change.source(self.t, y, self.physics, gamma_star, e0_star, dt)
-
-        # Update
-        y[idx] += dt * dydt
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-
-    def advance_boundary_layer(self, dt):
-        """
-        This method advances the boundary layer terms
-            inputs
-                dt=time step
-        """
-        idx = self.geometry.idx_cells
-        y = self.physics.primitive_to_conservative(self.state)
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        dydt = self.boundary_layer.source(
-            self.t,
-            y[idx],
-            self.physics,
-            gamma_star[idx],
-            e0_star[idx],
-        )
-
-        # Update
-        y[idx] += dydt * dt
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-
-    def advance_source_terms(self, dt):
-        """
-        This method advances the source terms in the axial direction
-            inputs
-                dt=time step
-        """
-        # initialize
-        idx = self.geometry.idx_cells
-        y = self.physics.primitive_to_conservative(self.state)
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        # 1st stage of RK2
-        dydt = self.source_terms.source(
-            self.t,
-            y[idx],
-            self.physics,
-            gamma_star[idx],
-            e0_star[idx],
-        )
-        y1 = y[idx] + dt * dydt
-        # state1 = self.physics.conservative_to_primitive(y1, gamma_star, e0_Star)
-
-        # 2nd stage of RK2
-        dydt = self.source_terms.source(
-            self.t + dt,
-            y1,
-            self.physics,
-            gamma_star[idx],
-            e0_star[idx],
-        )
-
-        y[idx] = 0.5 * (y[idx] + y1 + dt * dydt)
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-
-    def advance_injector(self, dt):
-        """
-        This method advances the source terms from the injector using the
-        jet-in-crossflow model.
-            inputs
-                dt=time step
-        """
-        if not isinstance(self.physics, FPVTable):
-            msg = "JIC injector model requires FPVTable physics."
-            raise Exception(msg)
-
-        # initialize
-        idx = self.geometry.idx_cells
-        y = self.physics.primitive_to_conservative(self.state)
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
-
-        self.injector.update_fluid_tip_positions(dt, self.t, self.state.velocity[idx])
-
-        # 1st stage of RK2
-        dydt = self.injector.source(
-            self.t,
-            y[idx],
-            self.physics,
-            gamma_star[idx],
-            e0_star[idx],
-        )
-        y1 = y[idx] + dt * dydt
-
-        # 2nd stage of RK2
-        dydt = self.injector.source(
-            self.t + dt,
-            y1,
-            self.physics,
-            gamma_star[idx],
-            e0_star[idx],
-        )
-        y[idx] = 0.5 * (y[idx] + y1 + dt * dydt)
-
-        # update
-        self.state = self.physics.conservative_to_primitive(y, gamma_star, e0_star)
-
     def update_probes(self, iters):
         """
         This method updates all the probes to the current value
@@ -526,9 +270,9 @@ class Combustor:
         This method updates all the XT Diagrams to the current value.
         """
         # update diagrams
-        for XTDiagram in self.xt_diagrams:
-            if iters % (XTDiagram.skipSteps + 1) == 0:
-                XTDiagram.update(self)
+        for diagram in self.xt_diagrams:
+            if iters % (diagram.skipSteps + 1) == 0:
+                diagram.update(self)
 
     def advance_simulation(self, tFinal, res_p_target=-1.0):
         """
@@ -538,38 +282,34 @@ class Combustor:
         """
         iters = 0
         res_p = np.inf
+        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
+        state_array = self.physics.primitive_to_conservative(self.state)
+        self.shape_full: tuple[int, int] = state_array.shape
+        state_array = np.ravel(state_array)
+        p_new = self.physics.get_pressure(self.state)
         while self.t < tFinal and res_p > res_p_target:
-            p_old = self.state.pressure
             dt = min(tFinal - self.t, self.get_time_step())
-            # advance advection and chemistry
-            if self.physics.is_flamelet:
-                self.advance_advection(dt)
-                self.advance_chemistry(dt)
-            else:
-                # use Strang splitting
-                self.advance_chemistry(dt / 2.0)
-                self.advance_advection(dt)
-                self.advance_chemistry(dt / 2.0)
-            # advance other terms
-            if self.include_diffusion:
-                self.advance_diffusion(dt)
-            if self.area_change is not None:
-                self.advance_quasi_1d(dt)
-            if self.include_boundary_layer:
-                self.advance_boundary_layer(dt)
-            if self.source_terms is not None:
-                self.advance_source_terms(dt)
-            if self.injector is not None:
-                self.advance_injector(dt)
-            # update properties
-            self.state.temperature = self.physics.get_temperature(self.state)
+            p_old = p_new + 0.0
+
+            # Update the system state
+            self.t, state_array, gamma_star, e0_star = self.time_integrator.advance(
+                dt=dt,
+                time=self.t,
+                state_array=state_array,
+                gamma_star=gamma_star,
+                e0_star=e0_star,
+            )
+            self.state = self.physics.conservative_to_primitive(
+                np.reshape(state_array, self.shape_full), gamma_star, e0_star
+            )
+            p_new = self.physics.get_pressure(self.state)
             self.state.gamma = self.physics.get_gamma(self.state)
+
             # perform other updates
-            self.t += dt
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
             iters += 1
-            res_p = np.linalg.norm(self.state.pressure - p_old)
+            res_p = np.linalg.norm(p_new - p_old)
             if self.verbose and iters % self.output_every == 0:
                 print(
                     f"Iteration: {iters}. Current time: {self.t}. Time step: {dt:e}. "

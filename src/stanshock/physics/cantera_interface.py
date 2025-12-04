@@ -131,6 +131,8 @@ class CanteraInterface(FluidPhysics):
         gamma = state.gamma
         if gamma is None:
             gamma = self.get_gamma(state)
+        assert state.pressure is not None
+        assert state.density is not None
         state.sound_speed = np.sqrt(gamma * state.pressure / state.density)
         return state.sound_speed
 
