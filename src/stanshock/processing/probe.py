@@ -55,7 +55,7 @@ class Probe:
                         self.probeLocation,
                     )
                 )
-                for kSp in range(domain.n_scalars)
+                for kSp in range(domain.physics.n_scalars)
             ]
         )
         self.Y.append(YProbe)

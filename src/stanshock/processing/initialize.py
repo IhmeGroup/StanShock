@@ -492,3 +492,16 @@ class InitializeIsentropicTotal(Initialization):
         state.velocity = mach * self.physics.get_sound_speed(state)
 
         return state
+
+
+class InitializeRestart(Initialization):
+    def __init__(
+        self,
+        groupname: str = "0",
+        filename: str = "fluid_state.hdf5",
+    ) -> None:
+        self.groupname = groupname
+        self.filename = filename
+
+    def __call__(self) -> FluidState:
+        return FluidState.restore(self.groupname, self.filename)

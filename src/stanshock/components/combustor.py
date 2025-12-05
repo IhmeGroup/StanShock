@@ -4,6 +4,7 @@ import numpy as np
 
 from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer, SkinFriction
+from stanshock.models.jicf import JICModel
 from stanshock.numerics.boundary_conditions import (
     BCInput,
     BoundaryConditions,
@@ -34,7 +35,7 @@ from stanshock.numerics.time_integration import (
 from stanshock.numerics.viscous_flux import ViscousFlux
 from stanshock.physics.chemistry_source import ChemistrySource, ConstantVolumeChemistry
 from stanshock.physics.fluid_base import FluidPhysics
-from stanshock.processing.initialize import Initialization
+from stanshock.processing.initialize import Initialization, InitializeRestart
 from stanshock.processing.plot import XTDiagram, plot_state
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
@@ -64,7 +65,7 @@ class Combustor:
         source_terms: RightHandSide
         | list[RightHandSide]
         | None = None,  # Catch-all source term(s)
-        injector: RightHandSide | None = None,  # injector model
+        injector: JICModel | None = None,  # injector model
         flux_function: RiemannSolver = hllc_flux_vectorized,
         inviscid_face_extrapolator: type[FaceExtrapolator] = FifthOrderWeno,
         viscous_face_extrapolator: type[FaceExtrapolator] = FirstOrder,
@@ -75,6 +76,8 @@ class Combustor:
         include_diffusion: bool = False,  # exclude diffusion
         thickening: None = None,  # thickening function
         plot_state_interval: int = -1,  # plot the state every n iterations
+        iteration: int = 0,  # Iteration to start from
+        n_restart_interval: int = -1,  # If >0, saves the fluid state to a file every n_restart_interval iterations
     ) -> None:
         """
         initialization of the object with default values. The keyword arguments
@@ -92,6 +95,8 @@ class Combustor:
         self.include_diffusion = include_diffusion
         self.thickening = thickening
         self.plot_state_interval = plot_state_interval
+        self.iteration = iteration
+        self.n_restart_interval = n_restart_interval
 
         # Initialize values which are passed in as None
         self.probes: list[Probe] = [] if probes is None else probes
@@ -108,19 +113,10 @@ class Combustor:
         self.geometry = geometry
         self.geometry.setup_ghost_layers(n_ghost_layers=n_ghost_layers)
 
-        # Set the number of scalars
-        self.n_scalars = self.physics.n_scalars
-        if not self.physics.is_flamelet and self.injector is not None:
-            msg = "JIC injector model requires FPVTable physics."
-            raise Exception(msg)
-
         # Set up boundary conditions
         self.boundary_conditions = set_boundary_conditions(
             boundary_conditions, self.geometry.n_ghost_layers
         )
-
-        # initialize the state
-        self.state = self.initialization()
 
         # Initialize the key physics
         self.inviscid_flux = InviscidFlux(
@@ -137,6 +133,7 @@ class Combustor:
         # Set up time integrators
         integrators: list[TimeIntegrator] = []
         advection = SSPRK3(self.inviscid_flux)
+        chemistry: TimeIntegrator
         if reacting and self.physics.is_flamelet:
             integrators += [
                 HeunsMethod(
@@ -188,10 +185,13 @@ class Combustor:
                 integrators += [HeunsMethod(source_terms)]
 
         if self.injector is not None:
+            if not self.physics.is_flamelet:
+                msg = "JIC injector model requires FPVTable physics."
+                raise Exception(msg)
             integrators += [HeunsMethod(self.injector)]
 
         # Apply Lie splitting approach
-        self.time_integrator = LieSplitting(tuple(integrators))
+        self.time_integrator = LieSplitting(tuple(integrators), update_double_flux=True)
 
         self.F = np.ones(self.geometry.n_cells)  # thickening
 
@@ -253,7 +253,18 @@ class Combustor:
             inputs
                     tFinal=final time
         """
-        iters = 0
+        iters = self.iteration
+
+        # Initialize the fluid state
+        if not hasattr(self, "state"):
+            self.state = self.initialization()
+
+            if isinstance(self.initialization, InitializeRestart):
+                iters = int(self.initialization.groupname)
+            elif self.n_restart_interval > 0:
+                # Save the initial conditions to a file
+                self.state.save(groupname=str(iters))
+
         res_p = np.inf
         gamma_star: Array | None
         e0_star: Array | None
@@ -298,3 +309,12 @@ class Combustor:
                     self,
                     f"figures/anim/test_{iters // self.plot_state_interval:05d}.png",
                 )
+
+            # Periodically save the fluid state
+            if (self.n_restart_interval > 0) and (iters % self.n_restart_interval == 0):
+                self.state.save(groupname=str(iters))
+
+        # Save the final state
+        self.iteration = iters
+        if self.n_restart_interval > 0:
+            self.state.save(groupname="stop")
