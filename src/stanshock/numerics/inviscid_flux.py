@@ -274,7 +274,7 @@ def hllc_flux_vectorized(
 
 
 class InviscidFlux(RightHandSide):
-    PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = (
+    REQUIRED_PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = (
         "boundary_conditions",
         "face_extrapolator",
         "geometry",
