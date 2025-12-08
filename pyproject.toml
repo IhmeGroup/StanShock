@@ -46,6 +46,9 @@ dependencies = [
   # "types-tqdm",
   "h5py",
   "imageio",
+  # Conditional:
+  "cantera>=3.2.0; python_version>='3.14'",
+  "numba>=0.63.0rc1; python_version>='3.14'",
 ]
 
 [project.urls]
