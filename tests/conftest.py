@@ -10,10 +10,11 @@ import pytest
 from cantera import Solution
 
 from stanshock.components.combustor import Combustor
-from stanshock.numerics.boundary_conditions import FreezeCells, SpecifiedFace
+from stanshock.numerics.boundary_conditions import BCInput, FreezeCells, SpecifiedFace
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.fluid_base import FluidPhysics
 from stanshock.physics.thermotable import ThermoTable
+from stanshock.processing.initialize import InitializeIsentropic
 from stanshock.system.backend import Array
 from stanshock.system.geometry import (
     Geometry,
@@ -178,7 +179,7 @@ def isentropic_flow(
     # Reinitialize Solution object to inflow conditions
     nsp = gas.n_species
     gas.TPY = 3000.0, 30e6, np.ones((nsp,)) / nsp
-    bcs = {
+    bcs: BCInput = {
         "left": FreezeCells(location="left"),
         "right": FreezeCells(location="right"),
     }
@@ -187,11 +188,19 @@ def isentropic_flow(
     area = geometry.area(0.0, geometry.xf)
     throat_area: float = area[0] / choking_area_ratio
     subsonic_outflow = area.min() - throat_area > 1e-3
+    initialization = InitializeIsentropic(
+        geometry=geometry,
+        physics=fluid_physics,
+        inflow_state=gas,
+        throat_area=throat_area,
+        subsonic_inflow=True,
+        subsonic_outflow=subsonic_outflow,
+    )
 
     # Set up simulation object
     return Combustor(
         boundary_conditions=bcs,
         geometry=geometry,
-        initialization=("isentropic", gas, throat_area, True, subsonic_outflow),
+        initialization=initialization,
         physics=fluid_physics,
     )
