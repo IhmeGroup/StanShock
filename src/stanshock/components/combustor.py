@@ -4,7 +4,7 @@ import numpy as np
 
 from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer, SkinFriction
-from stanshock.models.jicf import JICModel
+from stanshock.models.jicf import JICFChemistrySource, JICModel
 from stanshock.numerics.boundary_conditions import (
     BCInput,
     BoundaryConditions,
@@ -137,12 +137,17 @@ class Combustor:
         advection = SSPRK3(self.inviscid_flux)
         chemistry: TimeIntegrator
         if reacting and self.physics.is_flamelet:
-            integrators += [
-                HeunsMethod(
+            if self.injector is not None:
+                chemistry = HeunsMethod(
+                    JICFChemistrySource(
+                        self.injector, geometry=self.geometry, physics=self.physics
+                    )
+                )
+            else:
+                chemistry = HeunsMethod(
                     ChemistrySource(geometry=self.geometry, physics=self.physics)
-                ),
-                advection,
-            ]
+                )
+            integrators += [advection, chemistry]
         elif reacting and self.physics.gas.n_reactions > 0:
             chemistry = ScipyIVP(
                 ConstantVolumeChemistry(geometry=self.geometry, physics=self.physics)
@@ -283,6 +288,13 @@ class Combustor:
         while self.t < tFinal and res_p > res_p_target:
             dt = min(tFinal - self.t, self.get_time_step())
             p_old = p_new + 0.0
+
+            # Update the injector
+            if self.injector is not None:
+                assert self.state.velocity is not None
+                self.injector.update_fluid_tip_positions(
+                    dt, self.t, self.state.velocity[self.geometry.idx_cells]
+                )
 
             # Update the system state
             self.t, state_array, gamma_star, e0_star = self.time_integrator.advance(
