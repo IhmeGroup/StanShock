@@ -9,9 +9,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.combustor import Combustor
-from stanshock.numerics.boundary_conditions import FreezeCells
+from stanshock.numerics.boundary_conditions import BCInput, FreezeCells
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.thermotable import ThermoTable
+from stanshock.system.geometry import initialize_geometry
 
 
 def main(
@@ -55,7 +56,10 @@ def main(
     flame_center = flame.grid[np.argmax(np.gradient(flame.T, flame.grid))]
     L = flame.grid[-1] - flame.grid[0]
     xUpper, xLower = flame_center + L * f, flame_center - L * f
-    boundary_conditions = {
+    xf = np.linspace(xLower, xUpper, nX + 1)
+    geometry = initialize_geometry(xf)
+
+    boundary_conditions: BCInput = {
         "left": FreezeCells(
             "left"
         ),  # (gasUnburned.density, uUnburned, None, gasUnburned.Y),
@@ -67,7 +71,7 @@ def main(
         physics = CanteraInterface(gas)
 
     ss = Combustor(
-        xf=np.linspace(xLower, xUpper, nX + 1),
+        geometry=geometry,
         initialization=("Riemann", unburnedState, burnedState, flame_center),
         physics=physics,
         boundary_conditions=boundary_conditions,

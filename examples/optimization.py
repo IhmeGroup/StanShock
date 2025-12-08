@@ -10,6 +10,7 @@ from matplotlib import pyplot as plt
 from scipy.optimize import newton
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import (
     smoothing_function,
@@ -80,6 +81,8 @@ def main(
     def dlnA_dx(time: float, x: Array) -> Array:
         return dA_dx(time, x) / A(time, x)
 
+    geometry = Cylinder(xf=xf, d_outer=d_outer, dlnA_dx=dlnA_dx)
+
     # compute the gas dynamics
     def res(Ms1):
         return p5 / p1 - ((2.0 * g1 * Ms1**2.0 - (g1 - 1.0)) / (g1 + 1.0)) * (
@@ -111,13 +114,13 @@ def main(
     gas4.TPX = T4, p4, "HE:1"
 
     # set up solver parameters
-    boundary_conditions = {"left": "reflecting", "right": "reflecting"}
+    boundary_conditions: BCInput = {"left": "reflecting", "right": "reflecting"}
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
 
     ss = ShockTube(
-        xf=xf,
+        geometry=geometry,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -125,8 +128,6 @@ def main(
         output_every=100,
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
-        d_outer=d_outer,
-        dlnA_dx=dlnA_dx,
     )
     ss.state.gamma = ss.physics.get_gamma(ss.state)
     assert isinstance(ss.geometry, Cylinder)
@@ -144,10 +145,13 @@ def main(
 
     # recalculate at higher resolution with the insert
     xf = np.linspace(xLower, xUpper, nXFine + 1)
+    geometry = Cylinder(
+        xf=xf, d_inner=ss.geometry.d_inner, d_outer=d_outer, dlnA_dx=ss.geometry.dlnA_dx
+    )
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
-        xf=xf,
+        geometry=geometry,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -155,9 +159,6 @@ def main(
         output_every=100,
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
-        d_outer=d_outer,
-        d_inner=ss.geometry.d_inner,
-        dlnA_dx=ss.geometry.dlnA_dx,
     )
 
     diagram_settings = [
@@ -186,10 +187,11 @@ def main(
     d_inner_insert = ss.geometry.d_inner(0.0, ss.geometry.xc)
 
     # recalculate at higher resolution without the insert
+    geometry = Cylinder(xf=xf, d_outer=d_outer, dlnA_dx=dlnA_dx)
     gas1.TPX = T1, p1, "AR:1"
     gas4.TPX = T4, p4, "HE:1"
     ss = ShockTube(
-        xf=xf,
+        geometry=geometry,
         physics=physics_model,
         initialization=("riemann", state4, state1, xShock),
         boundary_conditions=boundary_conditions,
@@ -197,8 +199,6 @@ def main(
         output_every=100,
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
-        d_outer=d_outer,
-        dlnA_dx=dlnA_dx,
     )
     if plot_results:
         ss.xt_diagrams += [
