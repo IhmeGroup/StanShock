@@ -73,9 +73,7 @@ def get_cp_compiled(T: Array, Y: Array, TTable: Array, a: Array, b: Array) -> Ar
         index = indices[iX]
         bbar = 0.0
         for iSp in range(nSp):
-            bbar += Y[iX, iSp] * (
-                a[index, iSp] / 2.0 * (T[iX] + TTable[index]) + b[index, iSp]
-            )
+            bbar += Y[iX, iSp] * (a[index, iSp] * T[iX] + b[index, iSp])
         cp[iX] = bbar
     return cp
 
