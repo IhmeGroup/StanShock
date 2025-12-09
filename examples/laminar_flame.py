@@ -12,7 +12,7 @@ from stanshock.components.combustor import Combustor
 from stanshock.numerics.boundary_conditions import BCInput, FreezeCells
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.thermotable import ThermoTable
-from stanshock.processing.initialize import InitializeRiemannProblem
+from stanshock.processing.initialize import InitializeCanteraArray
 from stanshock.system.geometry import initialize_geometry
 
 
@@ -21,7 +21,7 @@ def main(
     mech_filename: str = "ohn.yaml",
     plot_results: bool = True,
     show_results: bool = False,
-    results_location: str | None = ".",
+    results_location: Path | str | None = ".",
     physics_model: str = "ThermoTable",
 ) -> dict[str, np.ndarray]:
     # user parameters
@@ -34,8 +34,7 @@ def main(
 
     # find the initial state of the fluids
     gas = ct.Solution(mech_filename)
-    unburnedState = TU, p, "H2:2,O2:1,N2:3.76"
-    gas.TPX = unburnedState
+    gas.TPX = TU, p, {"H2": 2, "O2": 1, "N2": 3.76}
 
     # get the flame thickness
     _, flame = flameSpeed(gas, estFlameThickness, returnFlame=True)
@@ -43,14 +42,8 @@ def main(
     flameThickness = (TB - TU) / max(np.gradient(flame.T, flame.grid))
 
     # get flame parameters
-    gasUnburned = ct.Solution(mech_filename)
-    gasUnburned.TPY = flame.T[0], flame.P, flame.Y[:, 0]
     uUnburned = flame.velocity[0]
-    unburnedState = gasUnburned, uUnburned
-    gasBurned = ct.Solution(mech_filename)
-    gasBurned.TPY = flame.T[-1], flame.P, flame.Y[:, -1]
     uBurned = flame.velocity[-1]
-    burnedState = gasBurned, uBurned
 
     # set up grid
     nX = flame.grid.shape[0]
@@ -70,9 +63,8 @@ def main(
         physics = ThermoTable(gas)
     else:
         physics = CanteraInterface(gas)
-    initialization = InitializeRiemannProblem(
-        geometry, physics, unburnedState, burnedState, flame_center
-    )
+
+    initialization = InitializeCanteraArray(geometry, flame.to_array())
 
     ss = Combustor(
         geometry=geometry,
@@ -84,24 +76,11 @@ def main(
         include_diffusion=True,
         output_every=10,
     )
-    print(ss.boundary_conditions._boundary_conditions)
-
-    # interpolate flame solution
-    Y = ss.state.composition
-    for iSp in range(gas.n_species):
-        Y[:, iSp] = np.interp(ss.geometry.xc, flame.grid, flame.Y[iSp, :])
-
-    ss.state.density = np.interp(ss.geometry.xc, flame.grid, flame.density)
-    ss.state.velocity = np.interp(ss.geometry.xc, flame.grid, flame.velocity)
-    ss.state.pressure = flame.P * np.ones(ss.geometry.n_cells)
-    ss.state.composition = Y
-
-    T = ss.state.temperature = ss.physics.get_temperature(ss.state)
-    ss.state.gamma = ss.physics.get_gamma(ss.state)
 
     # calculate the final time if not specified
     if sim_time is None:
         sim_time = ntFlowThrough * (xUpper - xLower) / (uUnburned + uBurned) * 2.0
+    assert isinstance(sim_time, float)
 
     # Solve
     t0 = time.perf_counter()
@@ -110,13 +89,14 @@ def main(
     print("The process took ", t1 - t0)
 
     # plot setup
+    # idx = ss.geometry.idx_cells
+    idx = np.s_[:]
+    T = ss.physics.get_temperature(ss.state)[idx]
     if plot_results:
-        # idx = ss.geometry.idx_cells
-        idx = np.s_[:]
         x = (ss.geometry.xc[idx] - flame_center) / flameThickness
         x_ct = (flame.grid - flame_center) / flameThickness
-        T = ss.physics.get_temperature(ss.state)[idx]
         state = ss.physics.set_state(ss.state)
+        assert state.mass_fractions is not None
 
         plt.close("all")
         font = {"family": "serif", "serif": ["computer modern roman"]}

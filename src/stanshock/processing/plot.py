@@ -52,8 +52,6 @@ class XTDiagram:
         self.t: list[float] = []  # list of times
         self.mdot: list[float] = []  # list of mass flow rates
 
-        self.update(domain)
-
     def update(self, domain: Combustor) -> None:
         """
         This method updates the XT diagram.

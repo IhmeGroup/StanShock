@@ -133,7 +133,6 @@ def main(
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ss.state.gamma = ss.physics.get_gamma(ss.state)
     assert isinstance(ss.geometry, Cylinder)
 
     # Solve

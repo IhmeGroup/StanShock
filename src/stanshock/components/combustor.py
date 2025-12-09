@@ -265,6 +265,10 @@ class Combustor:
                 # Save the initial conditions to a file
                 self.state.save(groupname=str(iters))
 
+            # Update plots at initial condition
+            self.update_probes(iters)
+            self.update_XT_diagrams(iters)
+
         res_p = np.inf
         gamma_star: Array | None
         e0_star: Array | None

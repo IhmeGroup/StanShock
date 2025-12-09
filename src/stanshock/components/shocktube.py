@@ -79,6 +79,10 @@ class ShockTube(Combustor):
             msg = "Boundary layer terms have not been set."
             raise AttributeError(msg)
 
+        # Initialize the state
+        self.state = self.initialization()
+        self.state.gamma = self.physics.get_gamma(self.state)
+
         assert isinstance(self.geometry, Cylinder)
         geometry: Cylinder = self.geometry
         msg = None

@@ -494,6 +494,61 @@ class InitializeIsentropicTotal(Initialization):
         return state
 
 
+class InitializeInterpolate(Initialization):
+    def __init__(
+        self,
+        geometry: Geometry,
+        x_init: Array,
+        state_init: FluidState,
+    ) -> None:
+        """Interpolate properties onto a new mesh."""
+        self.geometry = geometry
+        self.x_init = x_init
+        self.state_init = state_init
+
+    def __call__(self) -> FluidState:
+        x_new = self.geometry.xc
+        shape = (len(x_new),)
+
+        # Straightforward to interpolate 1D data
+        interpolated_data = {
+            key: np.interp(x_new, self.x_init, val)
+            for key, val in self.state_init.__dict__.items()
+            if isinstance(val, np.ndarray) and val.ndim == 1
+        }
+
+        # Special treatment for 2D data
+        comp_init = self.state_init.composition
+        if comp_init is not None:
+            nsp = comp_init.shape[1]
+            composition = np.zeros((*shape, nsp))
+            for isp in range(nsp):
+                composition[:, isp] = np.interp(x_new, self.x_init, comp_init[:, isp])
+            interpolated_data["composition"] = composition
+
+        return FluidState(shape=shape, _cache_valid=False, **interpolated_data)
+
+
+class InitializeCanteraArray(InitializeInterpolate):
+    def __init__(
+        self,
+        geometry: Geometry,
+        sol: ct.SolutionArray,
+    ) -> None:
+        """Interpolate properties from a Cantera SolutionArray."""
+        self.geometry = geometry
+
+        self.x_init = sol.grid
+        self.state_init = FluidState(
+            shape=(len(self.x_init),),
+            density=sol.density_mass,
+            pressure=sol.P,
+            temperature=sol.T,
+            composition=sol.Y,
+            velocity=sol.velocity,
+        )
+
+
 class InitializeRestart(Initialization):
     def __init__(
         self,
