@@ -8,7 +8,7 @@ from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHand
 
 
 class ViscousFlux(RightHandSide):
-    PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = (
+    REQUIRED_PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = (
         "geometry",
         "physics",
         "boundary_conditions",

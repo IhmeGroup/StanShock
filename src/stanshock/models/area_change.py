@@ -8,7 +8,7 @@ from stanshock.system.base import FastSlowSource, PrecomputeSteps
 
 
 class AreaChange(FastSlowSource):
-    PRECOMPUTE_STEPS = ("geometry", "physics")
+    REQUIRED_PRECOMPUTE_STEPS = ("geometry", "physics")
 
     def __init__(self, **precompute_steps: Unpack[PrecomputeSteps]) -> None:
         super().__init__(**precompute_steps)

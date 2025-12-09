@@ -57,7 +57,7 @@ class SkinFriction:
 
 
 class BoundaryLayer(RightHandSide):
-    PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ("geometry", "physics")
+    REQUIRED_PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ("geometry", "physics")
 
     def __init__(
         self,
