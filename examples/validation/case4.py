@@ -11,14 +11,63 @@ from matplotlib import pyplot as plt
 
 from stanshock.components.shocktube import ShockTube
 from stanshock.numerics.boundary_conditions import BCInput
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.physics.thermotable import ThermoTable
+from stanshock.processing.initialize import InitializeRiemannProblem
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
-from stanshock.system.geometry import initialize_geometry
+from stanshock.system.geometry import Geometry, initialize_geometry
 
 
-# =============================================================================
+class InitializePartialFill(InitializeRiemannProblem):
+    def __init__(
+        self,
+        geometry: Geometry,
+        physics: FluidPhysics,
+        left_state: tuple[ct.Solution, float],
+        right_state: tuple[ct.Solution, float],
+        shock_location: float,
+    ) -> None:
+        """Custom initialization routine for partial filling strategy."""
+        super().__init__(geometry, physics, left_state, right_state, shock_location)
+        self.T, self.P = left_state[0].TP
+        self.XN2Lower = 0.80  # assume smearing during fill
+        self.XN2Upper = 1.5 - self.XN2Lower
+        idx = self.geometry.idx_cells
+        xc = self.geometry.xc[idx]
+        dV = self.geometry.volume(0.0, self.geometry.xf)
+        VDriver = np.sum(dV[xc < shock_location])
+        V = np.cumsum(dV)
+        V -= V[0] / 2.0  # center
+        self.VNorms = V / VDriver
+
+    def __call__(self) -> FluidState:
+        state = super().__call__()
+        assert state.density is not None
+        assert state.composition is not None
+        state.gamma = self.physics.get_gamma(state)
+
+        # get gas properties
+        gas = self.physics.gas
+        iHE, iN2 = gas.species_index("HE"), gas.species_index("N2")
+        mt = self.geometry.n_ghost_layers
+
+        for iX, VNorm in enumerate(self.VNorms):
+            if VNorm <= 1.0:
+                # nitrogen and helium
+                X = np.zeros(gas.n_species)
+                XN2 = self.XN2Lower + (self.XN2Upper - self.XN2Lower) * VNorm
+                XHE = 1.0 - XN2
+                X[[iHE, iN2]] = XHE, XN2
+                gas.TPX = self.T, self.P, X
+                state.density[iX + mt] = gas.density
+                state.composition[iX + mt, :] = gas.Y
+                state.gamma[iX + mt] = gas.cp / gas.cv
+
+        return state
+
+
 def get_pressure_data_from_image(fileName):
     """
     function getPressureData
@@ -155,18 +204,20 @@ def main(
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
+    initialization = InitializePartialFill(
+        geometry, physics_model, state4, state1, xShock
+    )
 
     ssbl = ShockTube(
         geometry=geometry,
         physics=physics_model,
-        initialization=("riemann", state4, state1, xShock),
+        initialization=initialization,
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssbl.state.gamma = ssbl.physics.get_gamma(ssbl.state)
     ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
     diagram_settings = [
         ("pressure", (p1 / 101325, p4 / 101325)),
@@ -176,31 +227,6 @@ def main(
         XTDiagram(ssbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
     ]
-
-    # adjust for partial filling strategy
-    XN2Lower = 0.80  # assume smearing during fill
-    XN2Upper = 1.5 - XN2Lower
-    idx = ssbl.geometry.idx_cells
-    xc = ssbl.geometry.xc[idx]
-    dV = ssbl.geometry.volume(0.0, ssbl.geometry.xf)
-    VDriver = np.sum(dV[xc < xShock])
-    V = np.cumsum(dV)
-    V -= V[0] / 2.0  # center
-    VNorms = V / VDriver
-    # get gas properties
-    iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
-    mt = ssbl.geometry.n_ghost_layers
-    for iX, VNorm in enumerate(VNorms):
-        if VNorm <= 1.0:
-            # nitrogen and helium
-            X = np.zeros(gas4.n_species)
-            XN2 = XN2Lower + (XN2Upper - XN2Lower) * VNorm
-            XHE = 1.0 - XN2
-            X[[iHE, iN2]] = XHE, XN2
-            gas4.TPX = T4, p4, X
-            ssbl.state.density[iX + mt] = gas4.density
-            ssbl.state.composition[iX + mt, :] = gas4.Y
-            ssbl.state.gamma[iX + mt] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()
@@ -219,44 +245,18 @@ def main(
     ssnbl = ShockTube(
         geometry=geometry,
         physics=physics_model,
-        initialization=("riemann", state4, state1, xShock),
+        initialization=initialization,
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
         include_boundary_layer=False,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssnbl.state.gamma = ssnbl.physics.get_gamma(ssnbl.state)
     ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xf)))  # end wall probe
     ssnbl.xt_diagrams += [
         XTDiagram(ssnbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
     ]
-
-    # adjust for partial filling strategy
-    XN2Lower = 0.80  # assume smearing during fill
-    XN2Upper = 1.5 - XN2Lower
-    idx = ssnbl.geometry.idx_cells
-    xc = ssnbl.geometry.xc[idx]
-    dV = ssnbl.geometry.volume(0.0, ssnbl.geometry.xf)
-    VDriver = np.sum(dV[xc < xShock])
-    V = np.cumsum(dV)
-    V -= V[0] / 2.0  # center
-    VNorms = V / VDriver
-    # get gas properties
-    iHE, iN2 = gas4.species_index("HE"), gas4.species_index("N2")
-    mt = ssnbl.geometry.n_ghost_layers
-    for iX, VNorm in enumerate(VNorms):
-        if VNorm <= 1.0:
-            # nitrogen and helium
-            X = np.zeros(gas4.n_species)
-            XN2 = XN2Lower + (XN2Upper - XN2Lower) * VNorm
-            XHE = 1.0 - XN2
-            X[[iHE, iN2]] = XHE, XN2
-            gas4.TPX = T4, p4, X
-            ssnbl.state.density[iX + mt] = gas4.density
-            ssnbl.state.composition[iX + mt, :] = gas4.Y
-            ssnbl.state.gamma[iX + mt] = gas4.cp / gas4.cv
 
     # Solve
     t0 = time.perf_counter()

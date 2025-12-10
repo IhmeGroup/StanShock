@@ -57,7 +57,7 @@ def test_hllc_predicts_constant_flux():
 def test_isentropic_flow_relations(isentropic_flow: Combustor) -> None:
     # Get initial state from given solution
     t = isentropic_flow.t
-    state = isentropic_flow.state
+    state = isentropic_flow.initialization()
     state_array = np.ravel(isentropic_flow.physics.primitive_to_conservative(state))
     gamma_star, e0_star = isentropic_flow.physics.get_double_flux_variables(state)
 

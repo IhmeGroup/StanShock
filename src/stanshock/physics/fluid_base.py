@@ -5,8 +5,9 @@ from dataclasses import dataclass
 
 import cantera as ct
 import numpy as np
+from h5py import File, Group
 
-from stanshock.system.backend import Array, Composition
+from stanshock.system.backend import Array, Composition, Index
 
 
 @dataclass
@@ -36,6 +37,53 @@ class FluidState:
     e0_star: Array | None = None
 
     _cache_valid: bool = False
+
+    def __getitem__(self, index: Index) -> FluidState:
+        # Enable slicing into a FluidState object like an array
+        if isinstance(index, int):
+            index = np.array([index])
+
+        sliced_data: dict[str, Array] = {
+            k: v[index] for k, v in self.__dict__.items() if isinstance(v, np.ndarray)
+        }
+        shape = (next(iter(sliced_data.values())).shape[0],)
+        return FluidState(shape=shape, _cache_valid=False, **sliced_data)
+
+    def save(
+        self, groupname: str | None = None, filename: str = "fluid_state.hdf5"
+    ) -> None:
+        """Dump the current fluid state to an HDF5-format file.
+
+        Data resides with a group with the given `groupname` or, if not
+        provided, in an incrementally-numbered group.
+        """
+        filehandle: File = File(name=filename, mode="a")
+        if groupname is None:
+            groupname = str(len(filehandle.keys()))
+
+        if groupname in filehandle:
+            # Overwrite any existing groupname
+            del filehandle[groupname]
+
+        group: Group = filehandle.create_group(name=groupname)
+        for key, val in self.__dict__.items():
+            if isinstance(val, np.ndarray):
+                group.create_dataset(name=key, data=val)
+
+    @classmethod
+    def restore(
+        cls, groupname: str | None = None, filename: str = "fluid_state.hdf5"
+    ) -> FluidState:
+        """Initiates a FluidState object from an HDF5-format file."""
+        filehandle: File = File(name=filename, mode="r")
+
+        if groupname is None:
+            groupname = next(iter(filehandle.keys()))
+        group: Group = filehandle.require_group(groupname)
+        loaded_data: dict[str, Array] = {k: v[:] for k, v in group.items()}
+
+        shape = (next(iter(loaded_data.values())).shape[0],)
+        return FluidState(shape=shape, _cache_valid=False, **loaded_data)
 
 
 class FluidPhysics(ABC):
