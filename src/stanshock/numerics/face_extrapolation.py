@@ -449,39 +449,46 @@ class FifthOrderWeno(FaceExtrapolator):
         assert state.velocity is not None
         assert state.pressure is not None
         assert state.composition is not None
-        assert state.gamma_star is not None
-        assert state.e0_star is not None
+
+        gamma_star: Array | None = None
+        e0_star: Array | None = None
+        if state.gamma_star is not None:
+            gamma: Array = state.gamma_star
+            gamma_star = np.stack(
+                (
+                    state.gamma_star[self.index_face_left],
+                    state.gamma_star[self.index_face_right],
+                ),
+                axis=0,
+            )
+            assert state.e0_star is not None
+            e0_star = np.stack(
+                (
+                    state.e0_star[self.index_face_left],
+                    state.e0_star[self.index_face_right],
+                ),
+                axis=0,
+            )
+        else:
+            assert state.gamma is not None
+            gamma = state.gamma
 
         face_states_array: Array = weno5(
             r=state.density,
             u=state.velocity,
             p=state.pressure,
             Y=state.composition,
-            gamma=state.gamma_star,
+            gamma=gamma,
             n_ghost_layers=self.n_ghost_layers,
             n_scalars_rho_sum=self.n_scalars_rho_sum,
         )
 
-        n_faces: int = state.shape[0]
-
         return FluidState(
-            shape=(2, n_faces),
+            shape=face_states_array.shape[:2],
             density=face_states_array[:, :, 0],
             velocity=face_states_array[:, :, 1],
             pressure=face_states_array[:, :, 2],
             composition=face_states_array[:, :, 3:],
-            gamma_star=np.stack(
-                (
-                    state.gamma_star[self.index_face_left],
-                    state.gamma_star[self.index_face_right],
-                ),
-                axis=0,
-            ),
-            e0_star=np.stack(
-                (
-                    state.e0_star[self.index_face_left],
-                    state.e0_star[self.index_face_right],
-                ),
-                axis=0,
-            ),
+            gamma_star=gamma_star,
+            e0_star=e0_star,
         )

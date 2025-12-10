@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import h5py
 import numpy as np
 from cantera import Solution
@@ -38,7 +40,7 @@ class FPVTable(FluidPhysics):
 
     def __init__(
         self,
-        filename: str,
+        filename: Path | str,
         gas: Solution,
         ox_def: Composition | None = None,
         fuel_def: Composition | None = None,
@@ -54,7 +56,7 @@ class FPVTable(FluidPhysics):
         self.n_scalars_rho_sum: int = 1
         self.scalar_names = ["density", "mixture fraction", "progress variable"]
         self.is_flamelet = True
-        self.filename: str = filename
+        self.filename: str = filename.name if isinstance(filename, Path) else filename
         self.p_correction: bool = p_correction
         self.T_correction: bool = T_correction
         with h5py.File(filename, "r") as f:
@@ -114,8 +116,8 @@ class FPVTable(FluidPhysics):
     def set_state(self, state: FluidState) -> FluidState:
         """Get the flamelet table coordinates from the composition."""
         assert state.composition is not None
-        Z = state.mixture_fraction = state.composition[:, 1]
-        C = state.progress_variable = state.composition[:, 2]
+        Z = state.mixture_fraction = state.composition[..., 1]
+        C = state.progress_variable = state.composition[..., 2]
         state.normalized_progress_variable = self.get_normalized_progress_variable(Z, C)
         return state
 

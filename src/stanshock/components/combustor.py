@@ -59,6 +59,7 @@ class Combustor:
         t: float = 0.0,  # time
         verbose: bool = True,  # console output switch
         output_every: int = 1,  # number of iterations of simulation advancement between logging updates
+        use_double_flux: bool = True,  # Toggle the double-flux approach on or off
         include_boundary_layer: bool = False,  # flag to include boundary layer terms
         wall_temperature: float | None = None,  # wall temperature (needed for BL)
         skin_friction_coefficient: SkinFriction | None = None,  # skin friction functor
@@ -88,6 +89,7 @@ class Combustor:
         self.t = t
         self.verbose = verbose
         self.output_every = output_every
+        self.use_double_flux = use_double_flux
         self.injector = injector
         self.optimization_iteration = optimization_iteration
         self.physics: FluidPhysics = physics
@@ -270,9 +272,10 @@ class Combustor:
             self.update_XT_diagrams(iters)
 
         res_p = np.inf
-        gamma_star: Array | None
-        e0_star: Array | None
-        gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
+        gamma_star: Array | None = None
+        e0_star: Array | None = None
+        if self.use_double_flux:
+            gamma_star, e0_star = self.physics.get_double_flux_variables(self.state)
         state_array = self.physics.primitive_to_conservative(self.state)
         self.shape_full: tuple[int, ...] = state_array.shape
         state_array = np.ravel(state_array)

@@ -22,8 +22,8 @@ def test_lax_friedrich_predicts_constant_flux():
         uLR=np.array([[u], [u]]),
         pLR=np.array([[p], [p]]),
         YLR=np.array([[[Y]], [[Y]]]),
-        gamma=np.array([gamma]),
-        e0=np.array([e0]),
+        gamma=np.array([[gamma], [gamma]]),
+        e0=np.array([[e0], [e0]]),
     )[0]
     H = gamma * p / (gamma - 1.0) + r * (e0 + 0.5 * u**2.0)
     expected_flux = np.array([r * u**2 + p, H * u, r * Y * u])
@@ -40,13 +40,14 @@ def test_hllc_predicts_constant_flux():
     num_faces = 10
     num_sides = 2
     num_species = 1
+    shape = (num_sides, num_faces)
     flux = hllc_flux(
-        rLR=r * np.ones((num_sides, num_faces)),
-        uLR=u * np.ones((num_sides, num_faces)),
-        pLR=p * np.ones((num_sides, num_faces)),
-        YLR=Y * np.ones((num_sides, num_faces, num_species)),
-        gamma=gamma * np.ones(num_faces),
-        e0=e0 * np.ones(num_faces),
+        rLR=np.full(shape, r),
+        uLR=np.full(shape, u),
+        pLR=np.full(shape, p),
+        YLR=np.full((num_sides, num_faces, num_species), Y),
+        gamma=np.full(shape, gamma),
+        e0=np.full(shape, e0),
     )
     H = gamma * p / (gamma - 1.0) + r * (e0 + 0.5 * u**2.0)
     expected_flux = np.array([r * u**2 + p, H * u, r * Y * u])[np.newaxis, ...]
