@@ -196,7 +196,11 @@ class RightHandSide:
         avg_face_states: FluidState | None = None
         if self.face_extrapolator is not None:
             assert state is not None
-            state.gamma_star, state.e0_star = gamma_star, e0_star
+            if gamma_star is not None:
+                state.gamma_star, state.e0_star = gamma_star, e0_star
+            else:
+                assert self.physics is not None
+                state.gamma = self.physics.get_gamma(state)
             face_states = self.face_extrapolator(state)
             if self.boundary_conditions is not None:
                 face_states = self.boundary_conditions.update_face_states(
@@ -342,7 +346,7 @@ class CombinedSource(RightHandSide):
         precompute_steps: PrecomputeSteps = {}
         for step in required_steps:
             for source in self.sources:
-                if step in dir(source):
+                if step in source.REQUIRED_PRECOMPUTE_STEPS:
                     precompute_steps[step] = getattr(source, step)
                     break
 

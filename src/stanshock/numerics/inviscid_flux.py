@@ -13,7 +13,6 @@ from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHand
 mn = 2  # number of 1D Euler equations
 
 # Type signatures for numba
-double1D = double[:]
 double2D = double[:, :]
 double3D = double[:, :, :]
 
@@ -21,7 +20,7 @@ double3D = double[:, :, :]
 RiemannSolver: TypeAlias = Callable[[Array, Array, Array, Array, Array, Array], Array]
 
 
-@njit(double2D(double2D, double2D, double2D, double3D, double1D, double1D))
+@njit(double2D(double2D, double2D, double2D, double3D, double2D, double2D))
 def lax_friedrichs_flux(
     rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array, e0: Array
 ) -> Array:
@@ -33,8 +32,8 @@ def lax_friedrichs_flux(
             pLR=array containing left and right pressure states [nLR,nFaces]
             YLR=array containing left and right scalar states
                 [nLR,nFaces,nSc]
-            gamma=array containing the specific heat [nFaces]
-            eo=array containing the reference internal energy [nFaces]
+            gamma=array containing the specific heat [nLR,nFaces]
+            e0=array containing the reference internal energy [nLR,nFaces]
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
@@ -45,8 +44,8 @@ def lax_friedrichs_flux(
     lambdaMax = 0.0
     for iFace in range(nFaces):
         a = max(
-            np.sqrt(gamma[iFace] * pLR[0, iFace] / rLR[0, iFace]),
-            np.sqrt(gamma[iFace] * pLR[1, iFace] / rLR[1, iFace]),
+            np.sqrt(gamma[0, iFace] * pLR[0, iFace] / rLR[0, iFace]),
+            np.sqrt(gamma[1, iFace] * pLR[1, iFace] / rLR[1, iFace]),
         )
         u = max(abs(uLR[0, iFace]), abs(uLR[1, iFace]))
         lambdaMax = max(lambdaMax, u + a)
@@ -57,8 +56,8 @@ def lax_friedrichs_flux(
         for iFace in range(nFaces):
             FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
             FLR[K, iFace, 1] = uLR[K, iFace] * (
-                gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace]
-                + rLR[K, iFace] * (e0[iFace] + 0.5 * uLR[K, iFace] ** 2.0)
+                gamma[K, iFace] / (gamma[K, iFace] - 1) * pLR[K, iFace]
+                + rLR[K, iFace] * (e0[K, iFace] + 0.5 * uLR[K, iFace] ** 2.0)
             )
             for kSc in range(nSc):
                 FLR[K, iFace, mn + kSc] = (
@@ -71,8 +70,8 @@ def lax_friedrichs_flux(
     for iFace in range(nFaces):
         for K in range(nLR):
             U[K, 0] = rLR[K, iFace] * uLR[K, iFace]
-            U[K, 1] = pLR[K, iFace] / (gamma[iFace] - 1.0) + rLR[K, iFace] * (
-                e0[iFace] + 0.5 * uLR[K, iFace] ** 2.0
+            U[K, 1] = pLR[K, iFace] / (gamma[K, iFace] - 1.0) + rLR[K, iFace] * (
+                e0[K, iFace] + 0.5 * uLR[K, iFace] ** 2.0
             )
             for kSc in range(nSc):
                 U[K, mn + kSc] = rLR[K, iFace] * YLR[K, iFace, kSc]
@@ -82,7 +81,7 @@ def lax_friedrichs_flux(
     return F
 
 
-@njit(double2D(double2D, double2D, double2D, double3D, double1D, double1D))
+@njit(double2D(double2D, double2D, double2D, double3D, double2D, double2D))
 def hllc_flux(
     rLR: Array, uLR: Array, pLR: Array, YLR: Array, gamma: Array, e0: Array
 ) -> Array:
@@ -94,8 +93,8 @@ def hllc_flux(
             pLR=array containing left and right pressure states [nLR,nFaces]
             YLR=array containing left and right scalar states
                 [nLR,nFaces,nSc]
-            gamma=array containing the specific heat [nFaces]
-            eo=array containing the reference internal energy [nFaces]
+            gamma=array containing the specific heat [nLR,nFaces]
+            e0=array containing the reference internal energy [nLR,nFaces]
         return:
             F=modeled Euler fluxes [nFaces,mn+nSc]
     """
@@ -108,8 +107,8 @@ def hllc_flux(
     SLR = np.empty((2, nFaces))
     SStar = np.empty(nFaces)
     for iFace in range(nFaces):
-        aLR[0, iFace] = np.sqrt(gamma[iFace] * pLR[0, iFace] / rLR[0, iFace])
-        aLR[1, iFace] = np.sqrt(gamma[iFace] * pLR[1, iFace] / rLR[1, iFace])
+        aLR[0, iFace] = np.sqrt(gamma[0, iFace] * pLR[0, iFace] / rLR[0, iFace])
+        aLR[1, iFace] = np.sqrt(gamma[1, iFace] * pLR[1, iFace] / rLR[1, iFace])
         aBar = 0.5 * (aLR[0, iFace] + aLR[1, iFace])
         pBar = 0.5 * (pLR[0, iFace] + pLR[1, iFace])
         rBar = 0.5 * (rLR[0, iFace] + rLR[1, iFace])
@@ -118,8 +117,8 @@ def hllc_flux(
         qLR[0, iFace] = (
             np.sqrt(
                 1.0
-                + (gamma[iFace] + 1.0)
-                / (2.0 * gamma[iFace])
+                + (gamma[0, iFace] + 1.0)
+                / (2.0 * gamma[0, iFace])
                 * (pStar / pLR[0, iFace] - 1.0)
             )
             if pStar > pLR[0, iFace]
@@ -128,8 +127,8 @@ def hllc_flux(
         qLR[1, iFace] = (
             np.sqrt(
                 1.0
-                + (gamma[iFace] + 1.0)
-                / (2.0 * gamma[iFace])
+                + (gamma[1, iFace] + 1.0)
+                / (2.0 * gamma[1, iFace])
                 * (pStar / pLR[1, iFace] - 1.0)
             )
             if pStar > pLR[1, iFace]
@@ -151,8 +150,8 @@ def hllc_flux(
         for iFace in range(nFaces):
             FLR[K, iFace, 0] = rLR[K, iFace] * uLR[K, iFace] ** 2.0 + pLR[K, iFace]
             FLR[K, iFace, 1] = uLR[K, iFace] * (
-                gamma[iFace] / (gamma[iFace] - 1) * pLR[K, iFace]
-                + rLR[K, iFace] * (e0[iFace] + 0.5 * uLR[K, iFace] ** 2.0)
+                gamma[K, iFace] / (gamma[K, iFace] - 1) * pLR[K, iFace]
+                + rLR[K, iFace] * (e0[K, iFace] + 0.5 * uLR[K, iFace] ** 2.0)
             )
             for kSc in range(nSc):
                 FLR[K, iFace, mn + kSc] = (
@@ -179,11 +178,11 @@ def hllc_flux(
             pFace = pLR[K, iFace]
             for kSc in range(nSc):
                 YFace[kSc] = YLR[K, iFace, kSc]
-            gammaFace = gamma[iFace]
+            gammaFace = gamma[K, iFace]
             SFace = SLR[K, iFace]
             # conservative variable vector
             U[0] = rFace * uFace
-            U[1] = pFace / (gammaFace - 1.0) + rFace * (e0[iFace] + 0.5 * uFace**2.0)
+            U[1] = pFace / (gammaFace - 1.0) + rFace * (e0[K, iFace] + 0.5 * uFace**2.0)
             for kSc in range(nSc):
                 U[mn + kSc] = rFace * YFace[kSc]
             # star conservative variable vector
@@ -208,8 +207,10 @@ def hllc_flux_vectorized(
     """Vectorized version of HLLC flux based on DoubleFlux-1D implementation."""
     nLR, nFaces = rLR.shape
 
-    aLR = np.sqrt(gamma[None, :] * pLR / rLR)
-    ELR = pLR / (gamma[None, :] - 1.0) + rLR * (e0[None, :] + 0.5 * uLR**2)
+    # aLR = np.sqrt(gamma[None, :] * pLR / rLR)
+    # ELR = pLR / (gamma[None, :] - 1.0) + rLR * (e0[None, :] + 0.5 * uLR**2)
+    aLR = np.sqrt(gamma * pLR / rLR)
+    ELR = pLR / (gamma - 1.0) + rLR * (e0 + 0.5 * uLR**2)
 
     FLR = np.concatenate(
         (
@@ -238,7 +239,9 @@ def hllc_flux_vectorized(
         idx = np.where(pStar > pLR[K])[0]
         qLR[K, idx] = np.sqrt(
             1.0
-            + (gamma[idx] + 1.0) / (2.0 * gamma[idx]) * (pStar[idx] / pLR[K, idx] - 1.0)
+            + (gamma[K, idx] + 1.0)
+            / (2.0 * gamma[K, idx])
+            * (pStar[idx] / pLR[K, idx] - 1.0)
         )
     sLR[0] = uLR[0] - aLR[0] * qLR[0]
     sLR[1] = uLR[1] + aLR[1] * qLR[1]
@@ -306,18 +309,43 @@ class InviscidFlux(RightHandSide):
         assert face_states.velocity is not None
         assert face_states.pressure is not None
         assert face_states.composition is not None
+
+        if face_states.gamma_star is None:
+            # Standard approach: One flux evaluation at each face.
+            assert self.physics is not None
+            gamma = self.physics.get_gamma(face_states)
+            e0 = self.physics.get_internal_energy(face_states)
+            e0_star = e0 - face_states.pressure / (face_states.density * (gamma - 1))
+
+            face_flux: Array = self.riemann_solver(
+                face_states.density,
+                face_states.velocity,
+                face_states.pressure,
+                face_states.composition,
+                gamma,
+                e0_star,
+            )
+
+            # Allow any SpecifiedFlux BCs to directly override face fluxes
+            if self.boundary_conditions is not None:
+                face_flux = self.boundary_conditions.update_face_flux(time, face_flux)
+
+            return np.ravel((face_flux[:-1, :] - face_flux[1:, :]) / self.dx)
+
+        # Double-flux approach: Separate flux evaluation for left and right sides.
         assert face_states.gamma_star is not None
         assert face_states.e0_star is not None
 
         # Flux from face on cell's left side, using double-flux variables
         # from cell on the face's right side
+        pad_width = ((0, 1), (0, 0))
         left_face_flux: Array = self.riemann_solver(
             face_states.density,
             face_states.velocity,
             face_states.pressure,
             face_states.composition,
-            face_states.gamma_star[1, :],
-            face_states.e0_star[1, :],
+            np.pad(face_states.gamma_star[[1], :], pad_width, "edge"),
+            np.pad(face_states.e0_star[[1], :], pad_width, "edge"),
         )
         # Flux from face on cell's right side, using double-flux variables
         # from cell on the face's left side
@@ -326,8 +354,8 @@ class InviscidFlux(RightHandSide):
             face_states.velocity,
             face_states.pressure,
             face_states.composition,
-            face_states.gamma_star[0, :],
-            face_states.e0_star[0, :],
+            np.pad(face_states.gamma_star[[0], :], pad_width, "edge"),
+            np.pad(face_states.e0_star[[0], :], pad_width, "edge"),
         )
 
         # Allow any SpecifiedFlux BCs to directly override face fluxes

@@ -38,7 +38,7 @@ class FluidState:
 
     _cache_valid: bool = False
 
-    def __getitem__(self, index: Index) -> FluidState:
+    def __getitem__(self, index: Index | int) -> FluidState:
         # Enable slicing into a FluidState object like an array
         if isinstance(index, int):
             index = np.array([index])
@@ -327,6 +327,10 @@ class FluidPhysics(ABC):
             # Compute pressure using double-flux method
             assert e0_star is not None
             state.pressure = (gamma_star - 1.0) * r * (e_int - e0_star)
+        else:
+            # Compute the temperature from the internal energy, then compute pressure
+            state.temperature = self.get_temperature(state)
+            state.pressure = self.get_pressure(state)
 
         return self.set_state(state)
 
