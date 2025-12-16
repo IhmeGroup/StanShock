@@ -5,7 +5,6 @@ from pathlib import Path
 
 import cantera as ct
 import imageio
-import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -113,9 +112,7 @@ def main(
     p4 = 82.0 * 6894.76 * 0.9
     tFinal = 60e-3
 
-    # plotting parameters
     plot_results = plot_results or show_results
-    fontsize = 12
 
     # provided geometry
     DDriven = 4.5 * 0.0254
@@ -218,7 +215,7 @@ def main(
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl.geometry, max(ssbl.geometry.xf)))  # end wall probe
     diagram_settings = [
         ("pressure", (p1 / 101325, p4 / 101325)),
         ("temperature", (T1, 800.0)),
@@ -252,7 +249,7 @@ def main(
         include_boundary_layer=False,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xf)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl.geometry, max(ssnbl.geometry.xf)))  # end wall probe
     ssnbl.xt_diagrams += [
         XTDiagram(ssnbl, variable=variable, limits=limits)
         for variable, limits in diagram_settings
@@ -277,8 +274,6 @@ def main(
 
         # make plots of probe and XT diagrams
         plt.close("all")
-        mpl.rcParams["font.size"] = fontsize
-        plt.rc("text", usetex=True)
         plt.figure(figsize=(4, 4))
         plt.plot(
             np.array(ssnbl.probes[0].t) * 1000.0,

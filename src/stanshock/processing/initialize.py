@@ -533,7 +533,7 @@ class InitializeCanteraArray(InitializeInterpolate):
     def __init__(
         self,
         geometry: Geometry,
-        sol: ct.SolutionArray,
+        sol: ct.SolutionArray[ct.Solution],
     ) -> None:
         """Interpolate properties from a Cantera SolutionArray."""
         self.geometry = geometry

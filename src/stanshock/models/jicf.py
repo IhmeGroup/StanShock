@@ -4,7 +4,6 @@ import functools
 import warnings
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 from joblib import Parallel, delayed
 from scipy import integrate, interpolate, optimize, special, stats
@@ -16,26 +15,6 @@ from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Unpack
 from stanshock.system.base import PrecomputeSteps, RightHandSide
 from stanshock.system.geometry import Box
-
-XSMALL_SIZE = 12
-SMALL_SIZE = 14
-MEDIUM_SIZE = 16
-BIGGER_SIZE = 18
-
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
-        "font.size": SMALL_SIZE,
-        "axes.titlesize": SMALL_SIZE,
-        "axes.labelsize": MEDIUM_SIZE,
-        "xtick.labelsize": SMALL_SIZE,
-        "ytick.labelsize": SMALL_SIZE,
-        "legend.fontsize": XSMALL_SIZE,
-        "figure.titlesize": BIGGER_SIZE,
-    }
-)
 
 datadir = Path("./data")
 

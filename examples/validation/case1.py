@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 
 import cantera as ct
-import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -34,9 +33,7 @@ def main(
     tFinal = 60e-3
     # delta = 0.5  # distance to smear the initial conditions; models incomplete initial formation of shock.
 
-    # plotting parameters
     plot_results = plot_results or show_results
-    fontsize = 12
 
     # provided geometry
     DDriven = 4.5 * 0.0254
@@ -117,7 +114,7 @@ def main(
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
+    ssbl.probes.append(Probe(ssbl.geometry, max(ssbl.geometry.xf)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()
@@ -139,7 +136,7 @@ def main(
         output_every=100,
         include_boundary_layer=False,
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xf)))  # end wall probe
+    ssnbl.probes.append(Probe(ssnbl.geometry, max(ssnbl.geometry.xf)))  # end wall probe
 
     # Solve
     t0 = time.perf_counter()
@@ -157,8 +154,6 @@ def main(
         # make plots of probe and XT diagrams
         tExp += timeDifference
         plt.close("all")
-        mpl.rcParams["font.size"] = fontsize
-        plt.rc("text", usetex=True)
         plt.figure(figsize=(4, 4))
         plt.plot(
             np.array(ssnbl.probes[0].t) * 1000.0,

@@ -242,8 +242,8 @@ class Combustor:
 
         # update probes
         for probe in self.probes:
-            if iters % (probe.skipSteps + 1) == 0:
-                probe.update(self)
+            if iters % (probe.skip_steps + 1) == 0:
+                probe.update(self.t, self.state)
 
     def update_XT_diagrams(self, iters: int) -> None:
         """

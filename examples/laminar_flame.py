@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 
 import cantera as ct
-import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -29,7 +28,6 @@ def main(
     p = 1e5
     estFlameThickness = 1e-2
     ntFlowThrough = 0.1
-    fontsize = 12
     f = 0.1  # factor to reduce Cantera domain
 
     # find the initial state of the fluids
@@ -99,10 +97,6 @@ def main(
         assert state.mass_fractions is not None
 
         plt.close("all")
-        font = {"family": "serif", "serif": ["computer modern roman"]}
-        plt.rc("font", **font)
-        mpl.rcParams["font.size"] = fontsize
-        plt.rc("text", usetex=True)
         # plot
         plt.plot(x_ct, flame.T / flame.T[-1], "r", label=r"$T/T_\mathrm{F}$")
         plt.plot(x, T / flame.T[-1], "r--s")
