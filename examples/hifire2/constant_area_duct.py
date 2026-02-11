@@ -75,7 +75,6 @@ u1 = M1 * gas1.sound_speed
 state1 = gas1, u1  # isolator inlet velocity, m/s
 
 p2 = p1 * 2.5
-limits = [T1, p1, gas1.density, [0,3], [0,6],[0,3],[0,0], [0,0.5]]
 # Mlims, plims, Tlims, ulims, rlims
 tFinal = 0.01
 
