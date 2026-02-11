@@ -3,8 +3,9 @@ from __future__ import annotations
 import numpy as np
 
 from stanshock.models.area_change import AreaChange
-from stanshock.models.boundary_layer import BoundaryLayer, SkinFriction
+from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.models.jicf import JICFChemistrySource, JICModel
+from stanshock.models.wall_models import HeatFlux, SkinFriction
 from stanshock.numerics.boundary_conditions import (
     BCInput,
     BoundaryConditions,
@@ -60,9 +61,8 @@ class Combustor:
         verbose: bool = True,  # console output switch
         output_every: int = 1,  # number of iterations of simulation advancement between logging updates
         use_double_flux: bool = True,  # Toggle the double-flux approach on or off
-        include_boundary_layer: bool = False,  # flag to include boundary layer terms
         wall_temperature: float | None = None,  # wall temperature (needed for BL)
-        skin_friction_coefficient: SkinFriction | None = None,  # skin friction functor
+        wall_models: tuple[SkinFriction, HeatFlux] | None = None,
         source_terms: RightHandSide
         | list[RightHandSide]
         | None = None,  # Catch-all source term(s)
@@ -175,11 +175,11 @@ class Combustor:
             self.area_change = AreaChange(geometry=self.geometry, physics=self.physics)
             integrators += [FastSlowIntegrator(self.area_change)]
 
-        if include_boundary_layer:
+        if wall_models is not None:
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
                 wall_temperature=wall_temperature,
-                skin_friction_coefficient=skin_friction_coefficient,
+                wall_models=wall_models,
                 geometry=self.geometry,
                 physics=self.physics,
             )

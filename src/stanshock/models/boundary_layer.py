@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import cast, Optional
 
 import numpy as np
 from scipy.optimize import root
 
 from stanshock.physics.fluid_base import FluidState
-from stanshock.models.wall_models import WallModel, WallState, get_wall_state, ShearStress_CompressibleReacting, HeatFlux_Compressible
+from stanshock.models.wall_models import SkinFriction, HeatFlux, WallState, get_wall_state
 from stanshock.system.backend import Array, Index, Unpack
 from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHandSide
 
@@ -17,22 +17,24 @@ class BoundaryLayer(RightHandSide):
     def __init__(
         self,
         wall_temperature: Array | float | None = None,
-        wall_model: WallModel | None = None,
+        wall_models: tuple[SkinFriction, Optional[HeatFlux]]| None = None,
         **precompute_steps: Unpack[PrecomputeSteps],
     ) -> None:
         super().__init__(**precompute_steps)
         self.wall_temperature = wall_temperature
 
-        if wall_model is None:
-            self.ShearStressModel = ShearStress_CompressibleReacting
-            self.HeatFluxModel = HeatFlux_Compressible
-        # else:
-        #     self.skin_friction_coefficient = skin_friction_coefficient
+        if wall_models is None:
+                raise ValueError("Must provide at least a SkinFriction model")
 
         # Provides momentum and energy source terms
+        self.SkinFriction, self.HeatFlux = wall_models
         self.idx_source: Index = np.array([0, 1])
         self.shape_output = (self.shape_output[0], 2)
 
+        if self.HeatFlux is None and wall_temperature is not None:
+            raise ValueError(
+                "Wall temperature provided but no HeatFlux model selected."
+            )
 
 
     def source_implementation(
@@ -72,10 +74,11 @@ class BoundaryLayer(RightHandSide):
             wall_temperature=self.wall_temperature,
         )
 
-        tau_wall = ShearStress_CompressibleReacting(wall)
+        Cf = self.SkinFriction(wall)
+        tau_wall = Cf * wall.q
+        q_wall = self.HeatFlux(wall)
         wall.Cf = tau_wall / wall.q
-        q_wall = HeatFlux_Compressible(wall)
-
+        q_wall = HeatFlux(wall)
 
         rhs[:, 0] = -4.0 / hydraulic_diameter * tau_wall
         rhs[:, 1] = -4.0 / hydraulic_diameter * q_wall

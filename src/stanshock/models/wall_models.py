@@ -59,18 +59,26 @@ def get_wall_state(
     )
 
 
-class WallModel(ABC):
+
+"""
+##### WALL HEAT FLUX MODELS #####
+"""
+
+class HeatFlux(ABC):
     @abstractmethod
     def __call__(self, wall: WallState) -> Array:
-        """
-        This method will always return the shear stress tau_w or heat flux q_w per unit wall area dAw.
-        """
         pass
+    def get_stanton_number(Re: Array, Pr: Array, cf: Array) -> Array:
+        """
+        Defines Stanton number for gas phase flow as func. of Re, Pr, Cf
+        Uses empirical correlations from Kays 
+        """
+        return ((cf / 2.0) / (1 + 13 * (Pr ** (2/3) - 1) * np.sqrt(cf / 2.0)))
 
-class HeatFlux_Compressible(WallModel):
+class HeatFlux_Compressible(HeatFlux):
     def __call__(self, wall: WallState) -> Array:
         T_r = self.recovery_temperature(wall.T, wall.M, wall.Pr, wall.gamma)
-        St = get_stanton_number(wall.Re, wall.Pr, wall.Cf)
+        St = self.get_stanton_number(wall.Re, wall.Pr, wall.Cf)
         h = St * wall.h_St
         return h * (T_r - wall.Tw)
 
@@ -78,13 +86,32 @@ class HeatFlux_Compressible(WallModel):
         return (T * (1.0 + (Pr ** (1.0 / 3.0)) * 0.5 * (gamma - 1.0) * M ** 2))
 
 
-class HeatFlux_Incompressible(WallModel):
+class HeatFlux_Incompressible(HeatFlux):
     def __call__(self, wall: WallState) -> Array:
-        St = get_stanton_number(wall.Re, wall.Pr, wall.Cf)
+        assert wall.Cf is not None
+        St = self.get_stanton_number(wall.Re, wall.Pr, wall.Cf)
         h = St * wall.h_St
         return h * (wall.T - wall.Tw)
     
-class ShearStress_CompressibleInert(WallModel):
+
+
+
+"""
+##### SKIN FRICTION MODELS #####
+"""
+
+class SkinFriction(ABC):
+    @abstractmethod
+    def __call__(self, wall: WallState) -> Array:
+        """
+        This method returns the skin friction coefficient Cf for fully developed
+        pipe flow. The existing models are the von Karman (for incompressible flow) and
+        DeChant model (for compressible model)
+        This method will always return the shear stress tau_w or heat flux q_w per unit wall area dAw.
+        """
+        pass
+
+class SkinFriction_CompressibleInert(SkinFriction):
     def __init__(self,
         Re_range = [1e3, 1e7],
         Mach_range = [0.01, 4.0],
@@ -127,7 +154,7 @@ class ShearStress_CompressibleInert(WallModel):
         cf = self.interp(pts)
         return wall.q * cf
 
-class ShearStress_IncompressibleInert(WallModel):
+class SkinFriction_IncompressibleInert(SkinFriction):
     def __init__(self, 
                  Re_range = [1e3, 1e7],
     ):
@@ -136,16 +163,14 @@ class ShearStress_IncompressibleInert(WallModel):
         self.ReTable = np.logspace(np.log10(min(self.Re_range)), np.log10(max(self.Re_range)), self.N_Re)
         self.cfTable = np.zeros(self.Re_range)
 
-
     def _build_table(self):
         self.cfTable = cf_karman_solve(self.ReTable)
 
     def __call__(self, wall: WallState) -> Array:
-        cf = np.interp(wall.Re, self.ReTable, self.cfTable)
-        return wall.q * cf
+        return np.interp(wall.Re, self.ReTable, self.cfTable)
     
 
-class ShearStress_CompressibleReacting(WallModel):
+class SkinFriction_CompressibleReacting(SkinFriction):
     requires = {"Re", "M", "T_Tw", "Pr", "gamma"}
     def __call__(self, wall: WallState) -> Array:
         recovery = wall.Pr ** (1.0 / 3.0)
@@ -156,15 +181,9 @@ class ShearStress_CompressibleReacting(WallModel):
             wall.gamma,
             recovery,
         )
-        cf = cf_dechant_solve(wall.Re, F, G)
-        return wall.q * cf
+        return cf_dechant_solve(wall.Re, F, G)
+        
     
-
-
-
-
-
-
 """
 DeChant Skin Friction Model Functions
 """
@@ -214,12 +233,7 @@ def cf_karman_solve(Re: Array | float) -> Array | float:
 """
 Wall Heat Flux Functions
 """
-def get_stanton_number(Re: Array, Pr: Array, cf: Array) -> Array:
-        """
-        Defines Stanton number for gas phase flow as func. of Re, Pr, Cf
-        Uses empirical correlations from Kays 
-        """
-        return ((cf / 2.0) / (1 + 13 * (Pr ** (2/3) - 1) * np.sqrt(cf / 2.0)))
+
 
 def recovery_temperature(T: Array | float, M: Array | float, Pr: Array | float, gamma: Array | float) -> Array | float:
     return (T * (1.0 + (Pr ** (1.0 / 3.0)) * 0.5 * (gamma - 1.0) * M ** 2))
