@@ -41,6 +41,7 @@ from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
 from stanshock.system.geometry import Geometry
+from stanshock.processing.csv_writer import CSVWriter
 
 
 class Combustor:
@@ -131,6 +132,9 @@ class Combustor:
             geometry=self.geometry,
             physics=self.physics,
         )
+
+        # Initialize CSV writers
+        self.csv_writers: list[CSVWriter] = []
 
         # Set up time integrators
         integrators: list[TimeIntegrator] = []
@@ -313,6 +317,7 @@ class Combustor:
             # perform other updates
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
+            self.update_csv_writers(iters)
             iters += 1
             res_p = float(np.linalg.norm(p_new - p_old))
             if self.verbose and iters % self.output_every == 0:
@@ -337,3 +342,8 @@ class Combustor:
         self.iteration = iters
         if self.n_restart_interval > 0:
             self.state.save(groupname="stop")
+
+    def update_csv_writers(self, iters: int) -> None:
+        """Update all CSV writers to the current value."""
+        for csv_writer in self.csv_writers:
+            csv_writer.update(iters)
