@@ -4,6 +4,7 @@ import numpy as np
 
 from stanshock.models.wall_models import HeatFlux, SkinFriction, get_wall_state
 from stanshock.physics.fluid_base import FluidState
+from stanshock.models.wall_models import SkinFriction, HeatFlux, WallState, get_wall_state
 from stanshock.system.backend import Array, Index, Unpack
 from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHandSide
 
