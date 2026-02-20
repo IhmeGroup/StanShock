@@ -3,7 +3,8 @@ from __future__ import annotations
 import numpy as np
 
 from stanshock.models.area_change import AreaChange
-from stanshock.models.boundary_layer import BoundaryLayer, SkinFriction
+from stanshock.models.boundary_layer import BoundaryLayer
+from stanshock.models.wall_models import SkinFriction, HeatFlux
 from stanshock.models.jicf import JICFChemistrySource, JICModel
 from stanshock.numerics.boundary_conditions import (
     BCInput,
@@ -61,9 +62,8 @@ class Combustor:
         verbose: bool = True,  # console output switch
         output_every: int = 1,  # number of iterations of simulation advancement between logging updates
         use_double_flux: bool = True,  # Toggle the double-flux approach on or off
-        include_boundary_layer: bool = False,  # flag to include boundary layer terms
         wall_temperature: float | None = None,  # wall temperature (needed for BL)
-        skin_friction_coefficient: SkinFriction | None = None,  # skin friction functor
+        wall_models: tuple[SkinFriction, HeatFlux] | None = None, 
         source_terms: RightHandSide
         | list[RightHandSide]
         | None = None,  # Catch-all source term(s)
@@ -100,6 +100,7 @@ class Combustor:
         self.plot_state_interval = plot_state_interval
         self.iteration = iteration
         self.n_restart_interval = n_restart_interval
+        self.reacting = reacting
 
         # Initialize values which are passed in as None
         self.probes: list[Probe] = [] if probes is None else probes
@@ -179,14 +180,15 @@ class Combustor:
             self.area_change = AreaChange(geometry=self.geometry, physics=self.physics)
             integrators += [FastSlowIntegrator(self.area_change)]
 
-        if include_boundary_layer:
+        if wall_models is not None:
             # Initialize the boundary layer source terms
             self.boundary_layer = BoundaryLayer(
                 wall_temperature=wall_temperature,
-                skin_friction_coefficient=skin_friction_coefficient,
+                wall_models=wall_models,
                 geometry=self.geometry,
                 physics=self.physics,
             )
+
             integrators += [ForwardEuler(self.boundary_layer)]
 
         if source_terms is not None:
@@ -331,7 +333,7 @@ class Combustor:
             ):
                 plot_state(
                     self,
-                    f"figures/anim/test_{iters // self.plot_state_interval:05d}.png",
+                    f"./examples/hifire2/figures/anim/test_{iters // self.plot_state_interval:05d}.png",
                 )
 
             # Periodically save the fluid state
