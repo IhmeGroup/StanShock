@@ -36,9 +36,9 @@ def get_wall_state(
     M = np.abs(U / a)
 
     if wall_temperature is None:
-        Tw = T.copy()
-    else:
-        Tw = wall_temperature
+        Tw = T.copy() # adiabatic
+    else:       
+        Tw = wall_temperature #isothermal
 
     if cp is not None and k is not None:
         Pr = cp * mu / k
@@ -68,7 +68,7 @@ class HeatFlux(ABC):
     @abstractmethod
     def __call__(self, wall: WallState) -> Array:
         pass
-    def get_stanton_number(Re: Array, Pr: Array, cf: Array) -> Array:
+    def get_stanton_number(self, Re: Array, Pr: Array, cf: Array) -> Array:
         """
         Defines Stanton number for gas phase flow as func. of Re, Pr, Cf
         Uses empirical correlations from Kays 
@@ -161,7 +161,7 @@ class SkinFriction_IncompressibleInert(SkinFriction):
         self.Re_range = Re_range
         self.N_Re = 100
         self.ReTable = np.logspace(np.log10(min(self.Re_range)), np.log10(max(self.Re_range)), self.N_Re)
-        self.cfTable = np.zeros(self.Re_range)
+        self.cfTable = np.zeros_like(self.ReTable)
 
     def _build_table(self):
         self.cfTable = cf_karman_solve(self.ReTable)
