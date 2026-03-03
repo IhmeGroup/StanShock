@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-from typing import cast, Optional
-
 import numpy as np
-from scipy.optimize import root
 
+from stanshock.models.wall_models import HeatFlux, SkinFriction, get_wall_state
 from stanshock.physics.fluid_base import FluidState
-from stanshock.models.wall_models import SkinFriction, HeatFlux, WallState, get_wall_state
 from stanshock.system.backend import Array, Index, Unpack
 from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHandSide
 
@@ -16,26 +13,21 @@ class BoundaryLayer(RightHandSide):
 
     def __init__(
         self,
+        wall_models: tuple[SkinFriction, HeatFlux | None],
         wall_temperature: Array | float | None = None,
-        wall_models: tuple[SkinFriction, Optional[HeatFlux]]| None = None,
         **precompute_steps: Unpack[PrecomputeSteps],
     ) -> None:
         super().__init__(**precompute_steps)
         self.wall_temperature = wall_temperature
 
         if wall_models is None:
-                raise ValueError("Must provide at least a SkinFriction model")
+            msg = "Must provide at least a SkinFriction model"
+            raise ValueError(msg)
 
         # Provides momentum and energy source terms
-        self.SkinFriction, self.HeatFlux = wall_models
+        self.skin_friction, self.heat_flux = wall_models
         self.idx_source: Index = np.array([0, 1])
         self.shape_output = (self.shape_output[0], 2)
-
-        if self.HeatFlux is None and wall_temperature is not None:
-            raise ValueError(
-                "Wall temperature provided but no HeatFlux model selected."
-            )
-
 
     def source_implementation(
         self,
@@ -49,6 +41,7 @@ class BoundaryLayer(RightHandSide):
         """Boundary layer contribution to RHS."""
         _ = time, state_array_local, face_states, avg_face_states, face_gradients
         assert self.physics is not None
+        assert self.geometry is not None
         assert state is not None
         assert state.density is not None
         assert state.velocity is not None
@@ -60,7 +53,6 @@ class BoundaryLayer(RightHandSide):
         # Compute gas properties
         T = state.temperature = self.physics.get_temperature(state)
 
-
         wall = get_wall_state(
             rho=state.density,
             U=state.velocity,
@@ -69,18 +61,17 @@ class BoundaryLayer(RightHandSide):
             cp=self.physics.get_cp(state),
             k=self.physics.get_thermal_conductivity(state),
             gamma=self.physics.get_gamma(state),
-            Dh=hydraulic_diameter,
+            Lc=characteristic_length,
             T=T,
             wall_temperature=self.wall_temperature,
         )
 
-        Cf = self.SkinFriction(wall)
-        tau_wall = Cf * wall.q
-        q_wall = self.HeatFlux(wall)
-        wall.Cf = tau_wall / wall.q
-        q_wall = HeatFlux(wall)
-
+        wall.Cf = self.skin_friction(wall)
+        tau_wall = wall.Cf * wall.q
         rhs[:, 0] = -4.0 / hydraulic_diameter * tau_wall
-        rhs[:, 1] = -4.0 / hydraulic_diameter * q_wall
+
+        if self.heat_flux is not None:
+            q_wall = self.heat_flux(wall)
+            rhs[:, 1] = -4.0 / hydraulic_diameter * q_wall
 
         return np.ravel(rhs)

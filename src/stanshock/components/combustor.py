@@ -62,7 +62,7 @@ class Combustor:
         output_every: int = 1,  # number of iterations of simulation advancement between logging updates
         use_double_flux: bool = True,  # Toggle the double-flux approach on or off
         wall_temperature: float | None = None,  # wall temperature (needed for BL)
-        wall_models: tuple[SkinFriction, HeatFlux] | None = None,
+        wall_models: tuple[SkinFriction, HeatFlux | None] | None = None,
         source_terms: RightHandSide
         | list[RightHandSide]
         | None = None,  # Catch-all source term(s)

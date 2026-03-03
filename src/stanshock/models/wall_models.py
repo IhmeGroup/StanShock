@@ -1,104 +1,100 @@
 from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-import numpy as np
+from typing import ClassVar
 
-from scipy.optimize import  newton
+import numpy as np
 from scipy.interpolate import RegularGridInterpolator
+from scipy.optimize import newton
+
 from stanshock.system.backend import Array
+
 
 @dataclass(slots=True)
 class WallState:
     Re: Array
-    M: Array | None
-    T: Array | None
-    Tw: Array | float | None
-    Pr: Array | None
-    gamma: Array | None
-    h_St: Array | None
-    q: Array | None
+    M: Array
+    T: Array
+    Tw: Array
+    Pr: Array
+    gamma: Array
+    h_St: Array
+    q: Array
     Cf: Array | None = None
+
 
 def get_wall_state(
     rho: Array,
     U: Array,
     mu: Array,
     a: Array,
-    cp: Array | None,
-    k: Array | None,
-    gamma: Array | None,
-    Dh: Array | float,
+    cp: Array,
+    k: Array,
+    gamma: Array,
+    Lc: Array | float,
     T: Array,
     wall_temperature: Array | float | None,
 ) -> WallState:
-    
-    Re = np.abs(rho * U * Dh / mu)
+    Re = np.abs(rho * U * Lc / mu)
     M = np.abs(U / a)
 
-    if wall_temperature is None:
-        Tw = T.copy() # adiabatic
-    else:       
-        Tw = wall_temperature #isothermal
-
-    if cp is not None and k is not None:
-        Pr = cp * mu / k
+    if wall_temperature is None:  # noqa: SIM108
+        Tw = T.copy()  # adiabatic
     else:
-        Pr = None
+        Tw = np.array((wall_temperature,))  # isothermal
 
+    Pr = cp * mu / k
     h_St = rho * U * cp
-    q = 0.5 * rho * U**2 * np.sign(U)
-    return WallState(
-        Re=Re,
-        M=M,
-        T=T,
-        Tw=Tw,
-        Pr=Pr,
-        gamma=gamma,
-        h_St=h_St,
-        q=q,
-    )
 
+    q = 0.5 * rho * U**2 * np.sign(U)
+    return WallState(Re=Re, M=M, T=T, Tw=Tw, Pr=Pr, gamma=gamma, h_St=h_St, q=q)
 
 
 """
 ##### WALL HEAT FLUX MODELS #####
 """
 
+
 class HeatFlux(ABC):
     @abstractmethod
     def __call__(self, wall: WallState) -> Array:
         pass
-    def get_stanton_number(self, Re: Array, Pr: Array, cf: Array) -> Array:
-        """
-        Defines Stanton number for gas phase flow as func. of Re, Pr, Cf
-        Uses empirical correlations from Kays 
-        """
-        return ((cf / 2.0) / (1 + 13 * (Pr ** (2/3) - 1) * np.sqrt(cf / 2.0)))
 
-class HeatFlux_Compressible(HeatFlux):
+    def get_stanton_number(self, Pr: Array, cf: Array) -> Array:
+        """
+        Defines Stanton number for gas phase flow as func. of Pr and Cf
+        Uses empirical correlations from Kayes
+        """
+        return (cf / 2.0) / (1 + 13 * (Pr ** (2 / 3) - 1) * np.sqrt(cf / 2.0))
+
+
+class CompressibleHeatFlux(HeatFlux):
     def __call__(self, wall: WallState) -> Array:
+        assert wall.Cf is not None
         T_r = self.recovery_temperature(wall.T, wall.M, wall.Pr, wall.gamma)
-        St = self.get_stanton_number(wall.Re, wall.Pr, wall.Cf)
+        St = self.get_stanton_number(wall.Pr, wall.Cf)
         h = St * wall.h_St
         return h * (T_r - wall.Tw)
 
-    def recovery_temperature(self, T: Array | float, M: Array | float, Pr: Array | float, gamma: Array | float) -> Array | float:
-        return (T * (1.0 + (Pr ** (1.0 / 3.0)) * 0.5 * (gamma - 1.0) * M ** 2))
+    def recovery_temperature(
+        self, T: Array, M: Array, Pr: Array, gamma: Array
+    ) -> Array:
+        return T * (1.0 + (Pr ** (1.0 / 3.0)) * 0.5 * (gamma - 1.0) * M**2)
 
 
-class HeatFlux_Incompressible(HeatFlux):
+class IncompressibleHeatFlux(HeatFlux):
     def __call__(self, wall: WallState) -> Array:
         assert wall.Cf is not None
-        St = self.get_stanton_number(wall.Re, wall.Pr, wall.Cf)
+        St = self.get_stanton_number(wall.Pr, wall.Cf)
         h = St * wall.h_St
         return h * (wall.T - wall.Tw)
-    
-
 
 
 """
 ##### SKIN FRICTION MODELS #####
 """
+
 
 class SkinFriction(ABC):
     @abstractmethod
@@ -109,20 +105,17 @@ class SkinFriction(ABC):
         DeChant model (for compressible model)
         This method will always return the shear stress tau_w or heat flux q_w per unit wall area dAw.
         """
-        pass
 
-class SkinFriction_CompressibleInert(SkinFriction):
-    def __init__(self,
-        Re_range = [1e3, 1e7],
-        Mach_range = [0.01, 4.0],
-        T_Tw_range = [0.10, 8.0],
-        gamma = 1.4,
-        recovery = 0.88,
-    ):
-        self.Re_range = Re_range
-        self.Mach_range = Mach_range
-        self.T_Tw_range = T_Tw_range
 
+class CompressibleInertSkinFriction(SkinFriction):
+    def __init__(
+        self,
+        Re_range: tuple[float, float] = (1e3, 1e7),
+        Mach_range: tuple[float, float] = (0.01, 4.0),
+        T_Tw_range: tuple[float, float] = (0.1, 8.0),
+        gamma: float = 1.4,
+        recovery: float = 0.88,
+    ) -> None:
         self.N_Re = 30
         self.N_Mach = 30
         self.N_T_Tw = 30
@@ -130,48 +123,58 @@ class SkinFriction_CompressibleInert(SkinFriction):
         self.gamma = gamma
         self.recovery = recovery
 
-        self.ReTable = np.logspace(np.log10(min(self.Re_range)), np.log10(max(self.Re_range)), self.N_Re)
-        self.MachTable = np.linspace(min(self.Mach_range), max(self.Mach_range), self.N_Mach)
-        self.T_TwTable = np.linspace(min(self.T_Tw_range), max(self.T_Tw_range), self.N_T_Tw)
+        self.ReTable = np.logspace(
+            np.log10(Re_range[0]), np.log10(Re_range[1]), self.N_Re
+        )
+        self.MachTable = np.linspace(*Mach_range, self.N_Mach)
+        self.T_TwTable = np.linspace(*T_Tw_range, self.N_T_Tw)
 
         self.Mach_grid, self.T_Tw_grid = np.meshgrid(
-                self.MachTable, self.T_TwTable, indexing="ij"
-            )
+            self.MachTable, self.T_TwTable, indexing="ij"
+        )
         self.cfTable = np.zeros((self.N_Re, self.N_Mach, self.N_T_Tw))
         self._build_table()
-        self.interp = RegularGridInterpolator((self.ReTable, self.MachTable, self.T_TwTable), self.cfTable,
-                                              method="linear", bounds_error=False,fill_value=None,)
-        
-    
-    def _build_table(self):
-        F_jk, G_jk = get_dechant_constants(self.Mach_grid, self.T_Tw_grid, self.gamma, self.recovery)
+        self.interp = RegularGridInterpolator(
+            (self.ReTable, self.MachTable, self.T_TwTable),
+            self.cfTable,
+            method="linear",
+            bounds_error=False,
+            fill_value=None,
+        )
+
+    def _build_table(self) -> None:
+        F_jk, G_jk = get_dechant_constants(
+            self.Mach_grid, self.T_Tw_grid, self.gamma, self.recovery
+        )
         for i, Re in enumerate(self.ReTable):
             self.cfTable[i, :, :] = cf_dechant_solve(Re, F_jk, G_jk)
-        
+
     def __call__(self, wall: WallState) -> Array:
         T_Tw = wall.T / wall.Tw
         pts = np.column_stack((wall.Re, wall.M, T_Tw))
         cf = self.interp(pts)
         return wall.q * cf
 
-class SkinFriction_IncompressibleInert(SkinFriction):
-    def __init__(self, 
-                 Re_range = [1e3, 1e7],
-    ):
+
+class IncompressibleInertSkinFriction(SkinFriction):
+    def __init__(self, Re_range: tuple[float, float] = (1e3, 1e7)) -> None:
         self.Re_range = Re_range
         self.N_Re = 100
-        self.ReTable = np.logspace(np.log10(min(self.Re_range)), np.log10(max(self.Re_range)), self.N_Re)
-        self.cfTable = np.zeros_like(self.ReTable)
+        self.ReTable = np.logspace(
+            np.log10(min(self.Re_range)), np.log10(max(self.Re_range)), self.N_Re
+        )
+        self._build_table()
 
-    def _build_table(self):
+    def _build_table(self) -> None:
         self.cfTable = cf_karman_solve(self.ReTable)
 
     def __call__(self, wall: WallState) -> Array:
         return np.interp(wall.Re, self.ReTable, self.cfTable)
-    
 
-class SkinFriction_CompressibleReacting(SkinFriction):
-    requires = {"Re", "M", "T_Tw", "Pr", "gamma"}
+
+class CompressibleReactingSkinFriction(SkinFriction):
+    requires: ClassVar[set[str]] = {"Re", "M", "T_Tw", "Pr", "gamma"}
+
     def __call__(self, wall: WallState) -> Array:
         recovery = wall.Pr ** (1.0 / 3.0)
         T_Tw = wall.T / wall.Tw
@@ -182,13 +185,16 @@ class SkinFriction_CompressibleReacting(SkinFriction):
             recovery,
         )
         return cf_dechant_solve(wall.Re, F, G)
-        
-    
+
+
 """
 DeChant Skin Friction Model Functions
 """
 
-def get_dechant_constants(M: Array, T_Tw: Array, gamma: Array | float, recovery: Array | float):
+
+def get_dechant_constants(
+    M: Array, T_Tw: Array, gamma: Array | float, recovery: Array | float
+) -> tuple[Array, Array]:
     k = 0.5 * (gamma - 1.0) * M**2
     A = (T_Tw - 1.0) + k * T_Tw
     B = np.sqrt(k * T_Tw * recovery)
@@ -202,15 +208,25 @@ def get_dechant_constants(M: Array, T_Tw: Array, gamma: Array | float, recovery:
     G = 1.77 * np.log(E) - 0.6005
     return F, G
 
-def f_dechant(x: Array, Re: Array | float, F: Array | float, G: Array | float) -> Array | float:
-        return 1.77 * np.log(x * Re) - (F / x) + G
 
-def dfdx_dechant(x: Array | float, Re: Array | float, F: Array | float, G: Array | float) -> Array | float:
-        return (1.77 / x) + (F / x**2)
+def f_dechant(x: Array, Re: Array, F: Array, G: Array) -> Array:
+    return 1.77 * np.log(x * Re) - (F / x) + G
 
-def cf_dechant_solve(Re: Array | float, F: Array | float, G: Array | float) -> Array | float:
+
+def dfdx_dechant(x: Array, Re: Array, F: Array, G: Array) -> Array:
+    return (1.77 / x) + (F / x**2)
+
+
+def cf_dechant_solve(Re: Array, F: Array, G: Array) -> Array:
     x0 = np.sqrt(3e-3) * np.ones_like(F)
-    cf_sqrt = newton(func=f_dechant, fprime=dfdx_dechant, x0=x0, args=(Re, F, G,), tol=1e-10,maxiter=100)
+    cf_sqrt = newton(
+        func=f_dechant,
+        fprime=dfdx_dechant,
+        x0=x0,
+        args=(Re, F, G),
+        tol=1e-10,
+        maxiter=100,
+    )
     return cf_sqrt**2
 
 
@@ -218,13 +234,16 @@ def cf_dechant_solve(Re: Array | float, F: Array | float, G: Array | float) -> A
 Karman Nikuradse Skin Friction Model Functions
 """
 
-def f_karman(x: Array | float, Re: Array | float):
+
+def f_karman(x: Array, Re: Array) -> Array:
     return 2.46 * x * np.log(Re * x) + 0.3 * x - 1.0
 
-def dfdx_karman(x: Array | float, Re: Array | float):
+
+def dfdx_karman(x: Array, Re: Array) -> Array:
     return 2.46 * (np.log(Re * x) + 1.0) + 0.3
 
-def cf_karman_solve(Re: Array | float) -> Array | float:
+
+def cf_karman_solve(Re: Array) -> Array:
     x0 = np.sqrt(3e-3) * np.ones_like(Re)
     cf_sqrt2 = newton(func=f_karman, fprime=dfdx_karman, x0=x0, args=(Re,))
     return 2.0 * cf_sqrt2**2
@@ -235,8 +254,5 @@ Wall Heat Flux Functions
 """
 
 
-def recovery_temperature(T: Array | float, M: Array | float, Pr: Array | float, gamma: Array | float) -> Array | float:
-    return (T * (1.0 + (Pr ** (1.0 / 3.0)) * 0.5 * (gamma - 1.0) * M ** 2))
-
-
-
+def recovery_temperature(T: Array, M: Array, Pr: Array, gamma: Array) -> Array:
+    return T * (1.0 + (Pr ** (1.0 / 3.0)) * 0.5 * (gamma - 1.0) * M**2)
