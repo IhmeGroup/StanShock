@@ -85,8 +85,9 @@ class XTDiagram:
             msg = f"Invalid Variable Name: {variable}"
             raise Exception(msg)
         self.t.append(domain.t)
-        if domain.injector is not None:
-            self.mdot.append(domain.injector.mdot_f_interp(domain.t))
+        if domain.injectors is not None:
+
+            self.mdot.append(domain.injectors.mdot_f_interp(domain.t))
 
     def plot(self, figdir: Path | str = ".") -> None:
         """
@@ -176,11 +177,57 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
     t = domain.t
     x = geometry.xf
     h = geometry.h(t, x) if geometry.h is not None else geometry.d_outer(t, x)
-    ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
-    ax1.axhline(0, color="0.8", linestyle="--")
+    ax1.plot(x * scale, h * scale, color="0.5", linestyle="--",linewidth=1.0)
+    ax1.axhline(0, color="0.5", linestyle="--",linewidth=1.0)
     ax1.set_aspect("equal")
     ax1.set_ylabel("h [mm]")
+    if domain.injectors is not None:
+        for inj in domain.injectors:
+            h_inj = 0.0
+            ax1.annotate("", xy=(inj.x_inj * scale, h_inj * scale), xytext=(inj.x_inj * scale, h_inj * scale - 0.02),
+        arrowprops=dict(arrowstyle="-|>", color="0.5",lw=1))
+            # ax1.scatter(inj.x_inj * scale, h_inj * scale,
+            #             s=10,
+            #             c='k',
+            #             marker="^")
+
     return ax1
+
+
+def build_plot_registry():
+    return {
+        "rho": {
+            "label": r"$\rho$ [kg/m$^3$]",
+            "getter": lambda domain: domain.state.density,
+        },
+        "u": {
+            "label": r"$u$ [m/s]",
+            "getter": lambda domain: domain.state.velocity,
+        },
+        "p": {
+            "label": r"$p$ [Pa]",
+            "getter": lambda domain: domain.state.pressure,
+        },
+        "T": {
+            "label": r"$T$ [K]",
+            "getter": lambda domain: domain.physics.get_temperature(domain.state),
+        },
+        "M": {
+            "label": r"$M$ [-]",
+            "getter": lambda domain: (
+                np.abs(domain.state.velocity)
+                / domain.physics.get_sound_speed(domain.state)
+            ),
+        },
+        "Y": {
+            "label": r"$Y_k$ [-]",
+            "getter": lambda domain: domain.state.mass_fractions,
+        },
+        "mdot": {
+            "label": r"$\dot{m}_f$ [g/s]",
+            "getter": lambda domain: domain.injector.fluid_tips,
+        },
+    }
 
 
 def plot_state(domain: Combustor, filename: Path | str) -> None:
@@ -191,75 +238,100 @@ def plot_state(domain: Combustor, filename: Path | str) -> None:
     idx_cells = geometry.idx_cells
     x = xscale * geometry.xc[idx_cells]
     T = physics.get_temperature(state)
+    plot_vars = ["rho", "u", "p", "T", "M"]
+    if domain.reacting:
+        plot_vars.extend(["Y","mdot"])
+    fig, ax = plt.subplots(len(plot_vars), 1, sharex=True, figsize=(6, 9))
 
     fig: Figure
     ax: list[Axes]
-    fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
-    ax[0].plot(x, state.density[idx_cells])
-    ax[0].set_ymargin(0.1)
+    
+    plot_col = 'b'
+    
+    ax[0].plot(x, state.density[idx_cells],c='b')
     ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
+    ax[0].set_ylim([0, 0.80])
+
     if geometry.h is not None:
         add_h_plot(domain, ax[0], scale=xscale)
 
-    ax[1].plot(x, state.velocity[idx_cells])
-    ax[1].set_ymargin(0.1)
+    ax[1].plot(x, state.velocity[idx_cells],c='b')
     ax[1].set_ylabel(r"$u$ [m/s]")
     if geometry.h is not None:
         add_h_plot(domain, ax[1], scale=xscale)
 
-    ax[2].plot(x, state.pressure[idx_cells])
-    ax[2].set_ymargin(0.1)
-    ax[2].set_ylabel(r"$p$ [Pa]")
+    ax[2].plot(x, state.pressure[idx_cells]/1e3,c='b')
+    ax[2].set_ylabel(r"$p$ [kPa]")
+    ax[2].set_ylim([0, 500])
     if geometry.h is not None:
         add_h_plot(domain, ax[2], scale=xscale)
 
-    ax[3].plot(x, T[idx_cells])
-    ax[3].set_ymargin(0.1)
+    ax[3].plot(x, T[idx_cells],c='b')
     ax[3].set_ylabel(r"$T$ [K]")
+    ax[3].set_ylim([300, 3000])
     if geometry.h is not None:
         add_h_plot(domain, ax[3], scale=xscale)
 
     M = np.abs(state.velocity) / physics.get_sound_speed(state)
-    ax[4].plot(x, M[idx_cells])
+    ax[4].plot(x, M[idx_cells],c=plot_col)
     ax[4].axhline(1.0, color="r", linestyle="--")
-    ax[4].set_ymargin(0.1)
     ax[4].set_ylabel(r"$M$ [-]")
+    ax[4].set_ylim([0.0, 3.5])
     if geometry.h is not None:
         add_h_plot(domain, ax[4], scale=xscale)
+    fuel_vars = ["C2H4", "CH4"]
+    fuel_name = "JP-7"
+    prog_vars = ["H2O","CO2","CO"]
+    prog_labels= [r"$\mathrm{H}_2 \mathrm{O}$",
+             r"$\mathrm{CO}_2$",
+             r"$\mathrm{CO}$",
+    ]
+    if domain.reacting:
+        if physics.is_flamelet:
+            state = physics.set_state(state)
+            Y_fuel = np.zeros_like(x)
+            for i in fuel_vars:
+                Y_fuel+=physics.lookup(i,state)[idx_cells]
+            Y_prog = np.zeros((len(prog_vars), len(x)))
+            for j, var in enumerate(prog_vars):
+                Y_prog[j,:] = physics.lookup(var,state)[idx_cells]
+            # Y_H2O = physics.lookup("H2O", state)[idx_cells]
+            
+        else:
+            Y = state.mass_fractions[idx_cells]
+            fuel_inds = [physics.gas_species_index(i) for i in fuel_vars]
+            Y_fuel = np.sum(Y[fuel_inds])
+            Y_H2 = Y[:, physics.gas.species_index("H2")]
+            Y_OH = Y[:, physics.gas.species_index("OH")]
+            Y_H2O = Y[:, physics.gas.species_index("H2O")]
 
-    if physics.is_flamelet:
-        state = physics.set_state(state)
-        Y_H2 = physics.lookup("H2", state)[idx_cells]
-        Y_OH = physics.lookup("OH", state)[idx_cells]
-        Y_H2O = physics.lookup("H2O", state)[idx_cells]
+        ax[5].plot(x,Y_fuel,label=fuel_name)
+        for k in range(len(prog_vars)):
+            ax[5].plot(x, Y_prog[k,:], label=prog_labels[k])
+
+        if Y_fuel.max() < 1e-6:
+            ax[5].set_ylim(-1e-3, 1e-3)
+        else:
+            ax[5].set_ymargin(0.01)
+        ax[5].set_ylabel(r"$Y_k$ [-]")
+        ax[5].legend(loc="center left")
+        if geometry.h is not None:
+            add_h_plot(domain, ax[5], scale=xscale)
+        phi_tot = 0
+        for inj in domain.injectors:
+            ax[6].scatter(inj.fluid_tips[:,0] * xscale,
+                          inj.fluid_tips[:,1] * 1e3 * inj.n_inj,
+                          s=1)
+            phi_tot+=inj.phi_f_interp(domain.t)
+        ax[6].set_title(rf"$\phi={phi_tot:.2f}$")
+        ax[6].set_ymargin(0.1)
+        ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
+        if geometry.h is not None:
+            add_h_plot(domain, ax[6], scale=xscale)
+        ax[6].set_xlabel("x [mm]")
     else:
-        Y = state.mass_fractions[idx_cells]
-        Y_H2 = Y[:, physics.gas.species_index("H2")]
-        Y_OH = Y[:, physics.gas.species_index("OH")]
-        Y_H2O = Y[:, physics.gas.species_index("H2O")]
-    ax[5].plot(x, Y_H2, label=r"$\mathrm{H}_2$")
-    ax[5].plot(x, Y_OH, label=r"$\mathrm{OH}$")
-    ax[5].plot(x, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
-    if Y_H2.max() < 1e-6:
-        ax[5].set_ylim(-1e-3, 1e-3)
-    else:
-        ax[5].set_ymargin(0.1)
-    ax[5].set_ylabel(r"$Y_k$ [-]")
-    ax[5].legend(loc="upper right")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[5], scale=xscale)
-
-    ax[6].scatter(
-        domain.injector.fluid_tips[:, 0] * xscale,
-        domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
-        s=1,
-    )
-    ax[6].set_ymargin(0.1)
-    ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[6], scale=xscale)
-
-    ax[6].set_xlabel("x [mm]")
+        ax[4].set_xlabel("x [mm]")
+    
 
     fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
 
