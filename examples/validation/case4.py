@@ -13,7 +13,7 @@ from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import InitializeRiemannProblem
-from stanshock.processing.plot import XTDiagram
+from stanshock.processing.plot import XTDiagram, get_variable_info_map
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.geometry import Geometry, initialize_geometry
@@ -98,9 +98,12 @@ def get_pressure_data_from_image(fileName):
     return (t, p)
 
 
+data_dir = Path(__file__).resolve().parent / "../../data"
+
+
 def main(
-    data_filename: str = "data/validation/case4.png",
-    mech_filename: str = "data/mechanisms/N2O2HeAr.yaml",
+    data_filename: Path | str = data_dir / "validation/case4.png",
+    mech_filename: Path | str = data_dir / "mechanisms/N2O2HeAr.yaml",
     plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
@@ -204,6 +207,7 @@ def main(
     initialization = InitializePartialFill(
         geometry, physics_model, state4, state1, xShock
     )
+    variable_info_map = get_variable_info_map(physics_model)
 
     ssbl = ShockTube(
         geometry=geometry,
@@ -221,7 +225,9 @@ def main(
         ("temperature", (T1, 800.0)),
     ]
     ssbl.xt_diagrams += [
-        XTDiagram(ssbl, variable=variable, limits=limits)
+        XTDiagram(
+            ssbl, variable=variable, variable_info_map=variable_info_map, limits=limits
+        )
         for variable, limits in diagram_settings
     ]
 
@@ -251,7 +257,9 @@ def main(
     )
     ssnbl.probes.append(Probe(ssnbl.geometry, max(ssnbl.geometry.xf)))  # end wall probe
     ssnbl.xt_diagrams += [
-        XTDiagram(ssnbl, variable=variable, limits=limits)
+        XTDiagram(
+            ssnbl, variable=variable, variable_info_map=variable_info_map, limits=limits
+        )
         for variable, limits in diagram_settings
     ]
 

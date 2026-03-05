@@ -396,7 +396,7 @@ plot_variables = [
     "progress variable",
     "mach",
 ]
-ss.xt_diagrams = [XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables]
+ss.xt_diagrams = [XTDiagram(ss, variable, skip_steps=10) for variable in plot_variables]
 ss.advance_simulation(t_f[-1])
 for diagram in ss.xt_diagrams:
     diagram.plot(figdir=figdir)

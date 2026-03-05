@@ -251,7 +251,7 @@ class Combustor:
         """
         # update diagrams
         for diagram in self.xt_diagrams:
-            if iters % (diagram.skipSteps + 1) == 0:
+            if iters % (diagram.skip_steps + 1) == 0:
                 diagram.update(self)
 
     def advance_simulation(self, tFinal: float, res_p_target: float = -1.0) -> None:

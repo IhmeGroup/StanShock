@@ -70,12 +70,12 @@ class FPVTable(FluidPhysics):
             ]
             data_raw: Array = f["Data"][:]
             n_tot = self.Z.size * self.Q.size * self.L.size
-            self.variables: list[TableVariable] = []
+            self.variables: dict[str, TableVariable] = {}
             for i, var in enumerate(var_names):
                 data = data_raw[i * n_tot : (i + 1) * n_tot].reshape(
                     self.Z.size, self.Q.size, self.L.size, order="C"
                 )
-                self.variables.append(TableVariable(var, data, self.Z, self.Q, self.L))
+                self.variables[var] = TableVariable(var, data, self.Z, self.Q, self.L)
 
         self.ox_def: Composition | None = ox_def
         self.fuel_def: Composition | None = fuel_def
@@ -134,9 +134,7 @@ class FPVTable(FluidPhysics):
         """
         C_min: Array = np.zeros_like(Z)
         C_max: Array = np.ones_like(Z)
-        for v in self.variables:
-            if v.name == "PROG":
-                C_max = v.lookup(Z, 0, 1)
+        C_max = self.variables["PROG"].lookup(Z, 0, 1)
         L = (C - C_min) / (C_max - C_min)
         return np.clip(L, 0, 1)
 
@@ -161,12 +159,10 @@ class FPVTable(FluidPhysics):
         """
         Perform a lookup of the variable with the given name at the given Z, Q, and L values.
         """
-        for v in self.variables:
-            if v.name == var:
-                return v.lookup(Z, Q, L)
-
-        msg = f"Variable {var} not found in table {self.filename}."
-        raise ValueError(msg)
+        if var not in self.variables:
+            msg = f"Variable {var} not found in table {self.filename}."
+            raise ValueError(msg)
+        return self.variables[var].lookup(Z, Q, L)
 
     def lookup_all(self, state: FluidState) -> dict[str, Array]:
         """
@@ -181,7 +177,7 @@ class FPVTable(FluidPhysics):
         Q = np.zeros_like(Z)
         L = state.normalized_progress_variable
 
-        return {v.name: v.lookup(Z, Q, L) for v in self.variables}
+        return {var: v.lookup(Z, Q, L) for var, v in self.variables.items()}
 
     def get_gamma(self, state: FluidState) -> Array:
         """
