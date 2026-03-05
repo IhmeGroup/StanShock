@@ -371,6 +371,7 @@ def weno5(
             rLR = 0.0
             for kSc in range(n_scalars_rho_sum):
                 rLR += U[mn + kSc]
+            rLR = max(rLR, 1e-30)
             uLR = U[0] / rLR
             eLR = U[1] / rLR
             pLR = rLR * (gammaAverage - 1.0) * (eLR - 0.5 * uLR**2.0)

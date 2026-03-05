@@ -266,10 +266,11 @@ class FPVTable(FluidPhysics):
         return state.temperature
 
     def get_pressure(self, state: FluidState) -> Array:
-        assert state.density is not None
-        assert state.temperature is not None
-        R = self.get_specific_gas_constant(state)
-        state.pressure = state.temperature * R * state.density
+        if state.pressure is None:
+            assert state.density is not None
+            assert state.temperature is not None
+            R = self.get_specific_gas_constant(state)
+            state.pressure = state.temperature * R * state.density
         return state.pressure
 
     def get_internal_energy(self, state: FluidState) -> Array:

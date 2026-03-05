@@ -12,6 +12,7 @@ from stanshock.components.combustor import Combustor
 from stanshock.models.jicf import JICModel
 from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
+from stanshock.processing.initialize import InitializeConstant
 from stanshock.processing.plot import XTDiagram
 from stanshock.system.geometry import Box
 
@@ -61,8 +62,8 @@ figdir.mkdir(exist_ok=True)
 mech = "../../data/mechanisms/h2_boivin_9sp_12r_mod.yaml"
 table_file = "./h2_table/flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5"
 gas = ct.Solution(mech)
-X_ox = "O2:0.21,N2:0.79"
-X_f = "H2:1"
+X_ox = {"O2": 0.21, "N2": 0.79}
+X_f = {"H2": 1.0}
 
 # Specs from the HyShot II scramjet
 
@@ -188,24 +189,27 @@ def fuel_props_from_phi(phi_gl):
 
 
 eps_t = 1.0e-6
+# t_phi_gl_schedule = np.array(
+#     [
+#         [0.0, 0.0],
+#         [0.1 * tau, 0.0],
+#         [8.0 * tau, 0.35],
+#         [10.0 * tau, 0.35],
+#         [14.0 * tau, 0.45],
+#         [16.0 * tau, 0.45],
+#     ]
+# )
 t_phi_gl_schedule = np.array(
     [
         [0.0, 0.0],
-        [0.1 * tau, 0.0],
+        [0.1 * tau - eps_t, 0.0],
+        [0.1 * tau, 0.35],
+        [3.0 * tau, 0.35],
         [8.0 * tau, 0.35],
-        [10.0 * tau, 0.35],
-        [14.0 * tau, 0.45],
-        [16.0 * tau, 0.45],
+        [13.0 * tau, 0.6],
+        [15.0 * tau, 0.6],
     ]
 )
-# t_phi_gl_schedule = np.array(
-#     [[ 0.0,           0.0 ],
-#      [ 0.1*tau-eps_t, 0.0 ],
-#      [ 0.1*tau,       0.35],
-#      [ 3.0*tau,       0.35],
-#      [ 8.0*tau,       0.35],
-#      [13.0*tau,       0.6 ],
-#      [15.0*tau,       0.6 ]])
 
 t_f = np.zeros(t_phi_gl_schedule.shape[0])
 rho_f = np.zeros(t_phi_gl_schedule.shape[0])
@@ -225,7 +229,7 @@ xc = 0.5 * (xf[1:] + xf[:-1])
 h = np.zeros_like(xf)
 h[xf < L_const] = h_const
 h[xf >= L_const] = h_const + (xf[xf >= L_const] - L_const) * np.tan(theta_exhaust)
-geometry = Box(xf=xf, h=h, w=w)
+geometry = Box(xf=xf, h=h, w=w, n_ghost_layers=3)
 
 
 # PDF sampling parameters
@@ -235,7 +239,7 @@ n_bins_Z_pdf = int(np.ceil(1.0 / dZ_pdf))
 
 # Initialize the state
 gas_init = ct.Solution(mech)
-gas_init.TPX = T_in, P_in, "O2:1,N2:3.76"
+gas_init.TPX = T_in, P_in, X_ox
 
 # Define the boundary conditions
 BC_inlet = SpecifiedFace(
@@ -260,11 +264,8 @@ fpv_table = FPVTable(
 # Build the injector model
 jic = JICModel(
     fuel="H2",
-    x=xc,
     x_inj=x_inj,
     x_noz=L_const,
-    w=w,
-    h=h[0],
     n_inj=N_f,
     d_inj=2 * r_f,
     t_inj=t_f,
@@ -275,11 +276,12 @@ jic = JICModel(
     u=U_in,
     T=T_in,
     alpha=1e6,
-    fpv_table=fpv_table,
     load_Z_3D=(datadir / "Z_3D.npy").exists(),
     load_Z_avg_var_profiles=(datadir / "Z_var_profile.npy").exists(),
     load_chemical_sources=(datadir / "omega_C_int.npy").exists(),
     load_MIB_profile=(datadir / "C_profile_MIB.npy").exists(),
+    geometry=geometry,
+    physics=fpv_table,
 )
 
 ###################################################################
@@ -408,7 +410,7 @@ ss = Combustor(
     geometry=geometry,
     wall_temperature=300.0,
     include_boundary_layer=True,
-    initialization=("constant", gas_init, U_in),
+    initialization=InitializeConstant(geometry, fpv_table, gas_init, U_in),
     boundary_conditions=BCs,
     source_terms=None,
     injector=jic,
@@ -418,6 +420,7 @@ ss = Combustor(
     include_diffusion=False,
     output_every=100,
     plot_state_interval=100,
+    use_double_flux=False,
 )
 
 plot_variables = [
