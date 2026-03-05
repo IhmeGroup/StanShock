@@ -353,9 +353,9 @@ class CombinedSource(RightHandSide):
         super().__init__(**precompute_steps)
 
         # Don't modify the shapes, as the sources will handle that internally
-        self.shape_full = max(source.shape_full for source in self.sources)
-        self.shape_input = self.shape_output = self.shape_full
-        self.idx_input = self.idx_output = np.s_[:]
+        # self.shape_full = max(source.shape_full for source in self.sources)
+        # self.shape_input = self.shape_output = self.shape_full
+        # self.idx_input = self.idx_output = np.s_[:]
 
     def source(
         self,
