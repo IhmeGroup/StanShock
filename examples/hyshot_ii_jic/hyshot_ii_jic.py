@@ -11,10 +11,10 @@ from stanshock.components.combustor import Combustor
 from stanshock.models.jicf import JICModel
 from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
+from stanshock.processing.csv_writer import CSVWriter
 from stanshock.processing.initialize import InitializeConstant
 from stanshock.processing.plot import XTDiagram
 from stanshock.system.geometry import Box
-from stanshock.processing.csv_writer import CSVWriter
 
 # Data
 datadir = Path("./data")
