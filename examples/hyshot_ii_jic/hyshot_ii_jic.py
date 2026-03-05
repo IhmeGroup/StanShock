@@ -9,6 +9,10 @@ from scipy import optimize
 
 from stanshock.components.combustor import Combustor
 from stanshock.models.jicf import JICModel
+from stanshock.models.wall_models import (
+    CompressibleHeatFlux,
+    CompressibleReactingSkinFriction,
+)
 from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
 from stanshock.processing.csv_writer import CSVWriter
@@ -176,7 +180,8 @@ t_phi_gl_schedule = np.array(
     ]
 )
 
-t_f = np.zeros(t_phi_gl_schedule.shape[0])
+t_f = t_phi_gl_schedule[:, 0]
+phi_f = t_phi_gl_schedule[:, 1]
 rho_f = np.zeros(t_phi_gl_schedule.shape[0])
 U_f = np.zeros(t_phi_gl_schedule.shape[0])
 T_f = np.zeros(t_phi_gl_schedule.shape[0])
@@ -184,8 +189,6 @@ for i in range(t_phi_gl_schedule.shape[0]):
     t_f[i] = t_phi_gl_schedule[i, 0]
     rho_f[i], U_f[i], T_f[i] = fuel_props_from_phi(t_phi_gl_schedule[i, 1])
 # NOTE: Assuming perfect gas & isentropic choked flow, only rho_f changes with phi/mdot
-U_f = U_f[-1]
-T_f = T_f[-1]
 
 # Define the grid
 N_x = 200
@@ -228,12 +231,12 @@ fpv_table = FPVTable(
 
 # Build the injector model
 jic = JICModel(
-    fuel="H2",
     x_inj=x_inj,
     x_noz=L_const,
     n_inj=N_f,
     d_inj=2 * r_f,
     t_inj=t_f,
+    phi_inj=phi_f,
     rho_inj=rho_f,
     u_inj=U_f,
     T_inj=T_f,
@@ -253,7 +256,7 @@ jic = JICModel(
 ss = Combustor(
     geometry=geometry,
     wall_temperature=300.0,
-    include_boundary_layer=True,
+    wall_models=(CompressibleReactingSkinFriction(), CompressibleHeatFlux()),
     initialization=InitializeConstant(geometry, fpv_table, gas_init, U_in),
     boundary_conditions=BCs,
     source_terms=None,
@@ -272,7 +275,6 @@ csv_writer = CSVWriter(
     combustor=ss,
     filename=figdir / "data.csv",  # Will become test_00000.csv, test_00001.csv, etc.
     interval=100,  # Same as plot_state_interval=100
-    wall_temperature=300.0,
 )
 ss.csv_writers = [csv_writer]
 

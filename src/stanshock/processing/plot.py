@@ -229,9 +229,11 @@ class XTDiagram:
 
         self.variable.append(value)
         self.t.append(domain.t)
-
-        if domain.injector is not None:
-            self.mdot.append(float(domain.injector.mdot_f_interp(domain.t)))
+        if domain.injectors is not None:
+            mdot_f = 0.0
+            for inj in domain.injectors:
+                mdot_f += float(inj.mdot_f_interp(domain.t))
+            self.mdot.append(mdot_f)
 
     def plot(self, figdir: Path | str = ".") -> None:
         """
@@ -322,6 +324,20 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
         ax1.plot(x * scale, upper * scale, color="0.8", linestyle="--")
         ax1.plot(x * scale, lower * scale, color="0.8", linestyle="--")
 
+    if domain.injectors is not None:
+        for inj in domain.injectors:
+            h_inj = 0.0
+            ax1.annotate(
+                "",
+                xy=(inj.x_inj * scale, h_inj * scale),
+                xytext=(inj.x_inj * scale, h_inj * scale - 0.02),
+                arrowprops={"arrowstyle": "-|>", "color": "0.5", "lw": 1},
+            )
+            # ax1.scatter(inj.x_inj * scale, h_inj * scale,
+            #             s=10,
+            #             c='k',
+            #             marker="^")
+
     ax1.set_xlim(x.min() * scale, x.max() * scale)
     ax1.set_aspect("equal")
     ax1.set_ylabel(f"{yname} [mm]")
@@ -353,7 +369,7 @@ def plot_state(
             plot_variables += [sp_plot]
 
     nrows: int = len(plot_variables)
-    if domain.injector is not None:
+    if domain.injectors is not None:
         nrows += 1
 
     fig: Figure
@@ -397,12 +413,16 @@ def plot_state(
         ax.set_ylabel(plot_label)
 
     ax = axs[-1]
-    if domain.injector is not None:
-        ax.scatter(
-            domain.injector.fluid_tips[:, 0] * xscale,
-            domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
-            s=1,
-        )
+    if domain.injectors is not None:
+        phi_tot = 0.0
+        for inj in domain.injectors:
+            ax.scatter(
+                inj.fluid_tips[:, 0] * xscale,
+                inj.fluid_tips[:, 1] * 1e3 * inj.n_inj,
+                s=1,
+            )
+            phi_tot += inj.phi_f_interp(domain.t)
+        ax.set_title(rf"$\phi={phi_tot:.2f}$")
         ax.set_ymargin(0.1)
         ax.set_ylabel(r"$\dot{m}_f$ [g/s]")
     ax.set_xlabel("x [mm]")

@@ -16,8 +16,6 @@ from stanshock.system.backend import Array, Unpack
 from stanshock.system.base import PrecomputeSteps, RightHandSide
 from stanshock.system.geometry import Box
 
-datadir = Path("./data")
-
 
 class JICModel(RightHandSide):
     """
@@ -26,12 +24,12 @@ class JICModel(RightHandSide):
 
     def __init__(
         self,
-        fuel: str,
         x_inj: float,
         x_noz: float,
         n_inj: float,
         d_inj: float,
         t_inj: Array,
+        phi_inj: Array,
         rho_inj: Array,
         u_inj: Array,
         T_inj: Array,
@@ -39,6 +37,8 @@ class JICModel(RightHandSide):
         u: float,
         T: float,
         alpha: float,
+        datadir: Path | str = "./data",
+        theta_inj: float | None = None,
         load_Z_3D: bool = False,
         load_Z_avg_var_profiles: bool = False,
         load_chemical_sources: bool = False,
@@ -48,8 +48,6 @@ class JICModel(RightHandSide):
         """
         This method initializes the Jet-in-Crossflow model with the following
         parameters:
-        fuel: str
-            The fuel species
         x_inj: float
             The x-coordinate of the injection point
         x_noz: float
@@ -58,8 +56,12 @@ class JICModel(RightHandSide):
             The number of injected jets
         d_inj: float
             The diameter of the injected jet
+        theta_inj: float
+            The angle of the jet relative to the x axis (rads)
         t_inj: np.ndarray
             Time array for the injection profile
+        phi_inj: np.ndarray
+            Scheduled equivalence ratio of injected jet
         rho_inj: np.ndarray
             The density of the injected jet, as a function of time
         u_inj: np.ndarray
@@ -74,6 +76,8 @@ class JICModel(RightHandSide):
             The temperature of the crossflow
         alpha: float
             The relaxation parameter (used here only for storage)
+        datadir: str
+            Where to access or store tables written for this injector
         load_Z_3D: bool
             Whether to load the 3D Z table
         load_Z_avg_var_profiles: bool
@@ -92,8 +96,12 @@ class JICModel(RightHandSide):
         assert isinstance(self.physics, FPVTable)
         self.fpv_table: FPVTable = self.physics
 
+        assert self.physics.fuel_def is not None
+        self.fuel_def = self.physics.fuel_def
+        assert self.physics.ox_def is not None
+        self.ox_def = self.physics.ox_def
+
         gas = self.physics.gas
-        self.fuel = fuel
 
         # Extract some information about the geometry
         self.xc = self.geometry.xc[self.idx_input]
@@ -107,15 +115,16 @@ class JICModel(RightHandSide):
         self.h = float(self.geometry.h(0.0, np.array(self.x_inj)))
         self.n_inj = n_inj
         self.d_inj = d_inj
+        self.theta_inj = theta_inj if theta_inj is not None else 0.0
 
         self.rho_inj = rho_inj
         self.u_inj = u_inj
         self.T_inj = T_inj
-        self.rho = rho
-        self.u = u
-        self.T = T
 
-        self.alpha = alpha
+        self.rho = rho
+
+        self.alpha = alpha if alpha is not None else 1e6
+        self.datadir = Path(datadir)
 
         # Geometry parameters
         self.L = self.xc[-1] - self.xc[0]
@@ -123,25 +132,34 @@ class JICModel(RightHandSide):
         self.A_inj = np.pi * (self.d_inj / 2.0) ** 2
 
         # Free stream properties
-        gas.TDX = self.T, self.rho, "O2:0.21,N2:0.79"
+        self.u = u
+        self.T = T
+        gas.TDX = self.T, self.rho, self.ox_def
         self.p = gas.P
         self.W = gas.mean_molecular_weight
         self.gamma = gas.cp / gas.cv
         self.c = gas.sound_speed
         self.M = self.u / self.c
+        self.Y_ox = gas.Y
 
         # Properties of the injected fluid
         self.t_inj = t_inj
+        self.phi_inj = phi_inj
         self.p_inj = np.zeros_like(self.t_inj)
+        self.c_inj = np.zeros_like(self.t_inj)
+
         for i in range(len(self.t_inj)):
             if np.isnan(self.rho_inj[i]):
                 continue
-            gas.TDX = self.T_inj, self.rho_inj[i], f"{self.fuel}:1"
+            gas.TDX = self.T_inj[i], self.rho_inj[i], self.fuel_def
             self.p_inj[i] = gas.P
+            self.c_inj[i] = gas.sound_speed
+        self.Y_fuel = gas.Y
+
         self.E_inj = gas.int_energy_mass + 0.5 * self.u_inj**2
         self.W_inj = gas.mean_molecular_weight
         self.gamma_inj = gas.cp / gas.cv
-        self.c_inj = gas.sound_speed
+
         self.M_inj = 1.0
         self.mdot_inj = self.n_inj * self.rho_inj * self.u_inj * self.A_inj
         self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
@@ -151,20 +169,20 @@ class JICModel(RightHandSide):
         self.mdot_inj_unique_idx = self.mdot_inj_unique_idx[
             np.argsort(self.mdot_inj_unique)
         ]
+
         self.mdot_inj_unique = self.mdot_inj[self.mdot_inj_unique_idx]
         self.rho_inj_unique = self.rho_inj[self.mdot_inj_unique_idx]
+        self.u_inj_unique = self.u_inj[self.mdot_inj_unique_idx]
         self.p_inj_unique = self.p_inj[self.mdot_inj_unique_idx]
 
         # Position of the first injected fluid particle
         self.fluid_tips = np.array([[self.x_inj, self.mdot_inj[0]]])
 
-        # Properties behind the bow shock (assuming normal shock)
-        # self.rho_2 = self.rho * (self.gamma + 1) * self.M**2 / ((self.gamma - 1) * self.M**2 + 2)
-        # self.u_2 = self.u * self.rho / self.rho_2
-
         # Integral of Z across centerline normal plane
         A_inj = np.pi * (self.d_inj / 2.0) ** 2
-        self.Z_cl_int = self.rho_inj_unique * self.u_inj * A_inj / (self.rho * self.u)
+        self.Z_cl_int = (
+            self.rho_inj_unique * self.u_inj_unique * A_inj / (self.rho * self.u)
+        )
         self.d_eff = np.sqrt(self.Z_cl_int / (2 * np.pi))
 
         # Stoichiometry
@@ -174,17 +192,15 @@ class JICModel(RightHandSide):
         self.phi_gl_unique = np.zeros_like(self.mdot_inj_unique)
         self.Z_gl_unique = np.zeros_like(self.mdot_inj_unique)
         for i_m in range(len(self.mdot_inj_unique)):
-            gas.TDY = (
-                self.T,
-                self.rho,
-                f"O2:{0.233 * mdot_a},N2:{0.767 * mdot_a},{self.fuel}:{mdot_f_unique[i_m]}",
-            )
-            self.phi_gl_unique[i_m] = gas.equivalence_ratio(
-                self.fuel, "O2:0.21,N2:0.79"
-            )
-            self.Z_gl_unique[i_m] = gas.mixture_fraction(self.fuel, "O2:0.21,N2:0.79")
+            Y_ox = mdot_a / (mdot_a + mdot_f_unique[i_m])
+            gas.TDY = self.T, self.rho, Y_ox * self.Y_ox + (1.0 - Y_ox) * self.Y_fuel
+            self.phi_gl_unique[i_m] = gas.equivalence_ratio(self.fuel_def, self.ox_def)
+            self.Z_gl_unique[i_m] = gas.mixture_fraction(self.fuel_def, self.ox_def)
         self.mdot_f_interp = interpolate.interp1d(
             self.t_inj, mdot_f, bounds_error=False, fill_value=0.0
+        )
+        self.phi_f_interp = interpolate.interp1d(
+            self.t_inj, self.phi_inj, bounds_error=False, fill_value=0.0
         )
 
         # Compute the non-dimensional parameters
@@ -204,10 +220,10 @@ class JICModel(RightHandSide):
 
         # Precompute a 3D array of the mixture fraction and generate an interpolator
         if load_Z_3D:
-            self.x_3D_data = np.load(datadir / "Z_3D_x.npy")
-            self.y_3D_data = np.load(datadir / "Z_3D_y.npy")
-            self.z_3D_data = np.load(datadir / "Z_3D_z.npy")
-            self.Z_3D_data = np.load(datadir / "Z_3D.npy")
+            self.x_3D_data = np.load(self.datadir / "Z_3D_x.npy")
+            self.y_3D_data = np.load(self.datadir / "Z_3D_y.npy")
+            self.z_3D_data = np.load(self.datadir / "Z_3D_z.npy")
+            self.Z_3D_data = np.load(self.datadir / "Z_3D.npy")
             self.Z_3D_interp = []
             for i_m in range(len(self.mdot_inj_unique)):
                 interp = interpolate.RegularGridInterpolator(
@@ -221,8 +237,8 @@ class JICModel(RightHandSide):
 
         # Precompute the axial mean and variance profiles of Z
         if load_Z_avg_var_profiles:
-            self.Z_avg_profile = np.load(datadir / "Z_avg_profile.npy")
-            self.Z_var_profile = np.load(datadir / "Z_var_profile.npy")
+            self.Z_avg_profile = np.load(self.datadir / "Z_avg_profile.npy")
+            self.Z_var_profile = np.load(self.datadir / "Z_var_profile.npy")
         else:
             self.calc_Z_avg_var_profiles(write=True)
 
@@ -236,10 +252,10 @@ class JICModel(RightHandSide):
 
         # Precompute and tabulate chemical source terms
         if load_chemical_sources:
-            self.Zbar_vec = np.load(datadir / "Zbar_vec.npy")
-            self.Lbar_vec = np.load(datadir / "Lbar_vec.npy")
-            self.logsigma2_vec = np.load(datadir / "logsigma2_vec.npy")
-            self.omega_C_int = np.load(datadir / "omega_C_int.npy")
+            self.Zbar_vec = np.load(self.datadir / "Zbar_vec.npy")
+            self.Lbar_vec = np.load(self.datadir / "Lbar_vec.npy")
+            self.logsigma2_vec = np.load(self.datadir / "logsigma2_vec.npy")
+            self.omega_C_int = np.load(self.datadir / "omega_C_int.npy")
             self.omega_C_int_interp = interpolate.RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
@@ -249,8 +265,8 @@ class JICModel(RightHandSide):
         # Calculate the progress variable and chemical energy profiles for the
         # mixed is burned (MIB) model
         if load_MIB_profile:
-            self.C_profile = np.load(datadir / "C_profile_MIB.npy")
-            self.E_CHEM_profile = np.load(datadir / "E_CHEM_profile_MIB.npy")
+            self.C_profile = np.load(self.datadir / "C_profile_MIB.npy")
+            self.E_CHEM_profile = np.load(self.datadir / "E_CHEM_profile_MIB.npy")
         else:
             self.calc_MIB_profile(write=True)
 
@@ -367,18 +383,6 @@ class JICModel(RightHandSide):
         return self.__nearest_on_cl_single(x, y, dz)
 
     def Z_cl(self, x_cl):
-        # if isinstance(x_cl, np.ndarray):
-        #     rho_inj_unique = self.rho_inj_unique[:, np.newaxis]
-        #     r_u_unique = self.r_u_unique[:, np.newaxis]
-        # else:
-        #     rho_inj_unique = self.rho_inj_unique
-        #     r_u_unique = self.r_u_unique
-
-        # Following Torrez 2011
-        # xi = 0.85 * ((self.rho_inj_unique / self.rho) * (self.u / self.u_inj) * (self.d_inj / x_cl)**2)**(1.0/3.0)
-        # Z = xi * self.r_W / (1 + (self.r_W - 1) * xi)
-
-        # Taking Z directly
         Z = (
             0.85
             * (1 / self.r_u_unique)
@@ -475,7 +479,10 @@ class JICModel(RightHandSide):
         """
         Z = 0.0
         for z_inj in self.z_inj:
-            Z += self.Z_3D_single_inj(x, y, z, z_inj)
+            Z_temp = self.Z_3D_single_inj(x, y, z, z_inj)
+            if isinstance(Z_temp, np.ndarray):
+                Z_temp = Z_temp[0]
+            Z += Z_temp
         return Z
 
     def grad_Z_3D(self, x, y, z):
@@ -554,25 +561,10 @@ class JICModel(RightHandSide):
                 x_arr, y_arr, z_arr - z_inj, i_m
             )
 
-        # If we haven't passed the edge of the injector, assume it's still a perfect cylinder
-        # if x_cl < self.d_inj / 2:
-        #     if n2 < (self.d_inj / 2)**2:
-        #         return 1.0
-        #     else:
-        #         return 0.0
-
-        # Compute the centerline fuel mass fraction
         Z_cl = self.Z_cl(x_cl)
 
-        # Spreading based on scalar conservation
-        # (Assume gaussian, rho_inj * u_inj * Z_inj * A_inj = rho * u * int(Z * dA))
-        # where int(Z * dA) = 2 * pi * sigma^2 * Z_cl
         sigma2 = self.Z_cl_int / (Z_cl * 2 * np.pi)
-        Z = Z_cl * np.exp(-n2 / (2 * sigma2))
-
-        if np.isscalar(x):
-            return Z[0]
-        return Z
+        return Z_cl * np.exp(-n2 / (2 * sigma2))
 
     def grad_Z_3D_single_inj(self, x, y, z, z_inj):
         """
@@ -635,10 +627,10 @@ class JICModel(RightHandSide):
         self.Z_3D_data[np.isnan(self.rho_inj_unique)] = 0.0
 
         if write:
-            np.save(datadir / "Z_3D_x.npy", self.x_3D_data)
-            np.save(datadir / "Z_3D_y.npy", self.y_3D_data)
-            np.save(datadir / "Z_3D_z.npy", self.z_3D_data)
-            np.save(datadir / "Z_3D.npy", self.Z_3D_data)
+            np.save(self.datadir / "Z_3D_x.npy", self.x_3D_data)
+            np.save(self.datadir / "Z_3D_y.npy", self.y_3D_data)
+            np.save(self.datadir / "Z_3D_z.npy", self.z_3D_data)
+            np.save(self.datadir / "Z_3D.npy", self.Z_3D_data)
 
         self.Z_3D_interp = []
         for i_m in range(len(self.mdot_inj_unique)):
@@ -736,8 +728,8 @@ class JICModel(RightHandSide):
                 )
 
         if write:
-            np.save(datadir / "Z_avg_profile.npy", self.Z_avg_profile)
-            np.save(datadir / "Z_var_profile.npy", self.Z_var_profile)
+            np.save(self.datadir / "Z_avg_profile.npy", self.Z_avg_profile)
+            np.save(self.datadir / "Z_var_profile.npy", self.Z_var_profile)
 
     def C_E_CHEM_avg_MIB(self, x):
         C_avg = np.zeros_like(self.mdot_inj_unique)
@@ -813,8 +805,8 @@ class JICModel(RightHandSide):
         #         self.C_profile[:,i], self.E_CHEM_profile[:, i] = self.C_E_CHEM_avg_MIB(self.x[i])
 
         if write:
-            np.save(datadir / "C_profile_MIB.npy", self.C_profile)
-            np.save(datadir / "E_CHEM_profile_MIB.npy", self.E_CHEM_profile)
+            np.save(self.datadir / "C_profile_MIB.npy", self.C_profile)
+            np.save(self.datadir / "E_CHEM_profile_MIB.npy", self.E_CHEM_profile)
 
     def estimate_p_Z(self, x, Z):
         """
@@ -870,23 +862,9 @@ class JICModel(RightHandSide):
         state_array_local = np.reshape(state_array_local, self.shape_input)
         rhs = np.zeros_like(state_array_local)
 
-        # rho = state_array_local[:, 2]
-        # rhoZ = state_array_local[:, 3]
-
-        # Z = rhoZ / rho
-        # mdot_inj = np.interp(
-        #     self.xc,
-        #     np.flip(self.fluid_tips, axis=0)[:, 0],
-        #     np.flip(self.fluid_tips, axis=0)[:, 1],
-        # )
-        # Z_target = self.Z_avg_profile_interp((mdot_inj, self.xc))
-        # mdot = rho * self.alpha * (Z_target - Z)
-
-        # # Treat small (pre-injector) values
-        # mdot[Z_target < 1e-6] = 0.0
-
         mdot = np.interp(time, self.t_inj, self.mdot_inj)
-
+        u_inj = np.interp(time, self.t_inj, self.u_inj)
+        E_inj = np.interp(time, self.t_inj, self.E_inj)
         L_src = 3e-2
         xf = self.geometry.xf
         idx = (
@@ -899,8 +877,8 @@ class JICModel(RightHandSide):
         mdot *= dx / L_src
 
         # Compute the source term
-        rhs[idx, 0] = mdot * self.u_inj  # momentum
-        rhs[idx, 1] = mdot * self.E_inj  # total energy
+        rhs[idx, 0] = mdot * u_inj * np.cos(self.theta_inj)  # momentum
+        rhs[idx, 1] = mdot * E_inj  # total energy
         rhs[idx, 2] = mdot  # density
         rhs[idx, 3] = mdot  # mixture fraction
         rhs[idx, 4] = 0.0  # progress variable
@@ -1015,10 +993,10 @@ class JICModel(RightHandSide):
         self.omega_C_int[np.isnan(self.omega_C_int)] = 0.0
 
         if write:
-            np.save(datadir / "Zbar_vec.npy", self.Zbar_vec)
-            np.save(datadir / "Lbar_vec.npy", self.Lbar_vec)
-            np.save(datadir / "logsigma2_vec.npy", self.logsigma2_vec)
-            np.save(datadir / "omega_C_int.npy", self.omega_C_int)
+            np.save(self.datadir / "Zbar_vec.npy", self.Zbar_vec)
+            np.save(self.datadir / "Lbar_vec.npy", self.Lbar_vec)
+            np.save(self.datadir / "logsigma2_vec.npy", self.logsigma2_vec)
+            np.save(self.datadir / "omega_C_int.npy", self.omega_C_int)
 
         # Build 3D table interpolator
         self.omega_C_int_interp = interpolate.RegularGridInterpolator(
