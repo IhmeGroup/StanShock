@@ -21,9 +21,11 @@ from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.geometry import Cylinder
 
+data_dir = Path(__file__).resolve().parent / "../data"
+
 
 def main(
-    mech_filename: str = "data/mechanisms/HeliumArgon.yaml",
+    mech_filename: Path | str = data_dir / "mechanisms/HeliumArgon.yaml",
     plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
@@ -170,7 +172,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss.geometry, max(ss.geometry.xf)))  # end wall probe
+    ss.probes.append(Probe(geometry, physics_model, max(geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
@@ -206,7 +208,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss.geometry, max(ss.geometry.xf)))  # end wall probe
+    ss.probes.append(Probe(geometry, physics_model, max(geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()

@@ -219,7 +219,9 @@ def main(
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssbl.probes.append(Probe(ssbl.geometry, max(ssbl.geometry.xf)))  # end wall probe
+    ssbl.probes.append(
+        Probe(geometry, physics_model, max(ssbl.geometry.xf))
+    )  # end wall probe
     diagram_settings = [
         ("pressure", (p1 / 101325, p4 / 101325)),
         ("temperature", (T1, 800.0)),
@@ -255,7 +257,9 @@ def main(
         include_boundary_layer=False,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssnbl.probes.append(Probe(ssnbl.geometry, max(ssnbl.geometry.xf)))  # end wall probe
+    ssnbl.probes.append(
+        Probe(geometry, physics_model, max(geometry.xf))
+    )  # end wall probe
     ssnbl.xt_diagrams += [
         XTDiagram(
             ssnbl, variable=variable, variable_info_map=variable_info_map, limits=limits

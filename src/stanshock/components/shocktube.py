@@ -240,7 +240,11 @@ class ShockTube(Combustor):
             # delete previous probes and create an endwall probe
             self.probes = [
                 Probe(
-                    self.geometry, probe_location, skip_steps=0, name="endwall probe"
+                    self.geometry,
+                    self.physics,
+                    probe_location,
+                    skip_steps=0,
+                    name="endwall probe",
                 ),
             ]
             # solve

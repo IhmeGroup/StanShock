@@ -4,7 +4,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -29,10 +29,13 @@ class VariableInfo:
     scale: float = 1.0
 
 
-def get_variable_info_map(physics: FluidPhysics) -> dict[str, VariableInfo]:
+VariableInfoMap: TypeAlias = dict[str, VariableInfo]
+
+
+def get_variable_info_map(physics: FluidPhysics) -> VariableInfoMap:
     """Create mapping between strings and variable information."""
     # Common variables available to all FluidPhysics:
-    plot_variables: dict[str, VariableInfo] = {
+    plot_variables: VariableInfoMap = {
         "density": VariableInfo(
             short_name="r",
             plot_label=r"$\rho~[\mathrm{kg/m^3}]$",
@@ -48,7 +51,7 @@ def get_variable_info_map(physics: FluidPhysics) -> dict[str, VariableInfo]:
             scale=1e-5,
         ),
         "temperature": VariableInfo(
-            short_name="t", plot_label=r"$T~[\mathrm{K}]$", fun=physics.get_temperature
+            short_name="T", plot_label=r"$T~[\mathrm{K}]$", fun=physics.get_temperature
         ),
         "gamma": VariableInfo(
             short_name="g", plot_label=r"$\gamma~[\mathrm{-}]$", fun=physics.get_gamma
@@ -178,7 +181,7 @@ class XTDiagram:
         self,
         domain: Combustor,
         variable: str,
-        variable_info_map: dict[str, VariableInfo] | None = None,
+        variable_info_map: VariableInfoMap | None = None,
         skip_steps: int = 0,  # number of timesteps to skip
         x: Array | None = None,  # mesh to interpolate solution onto
         limits: tuple[float, float] | None = None,  # colormap range
@@ -338,7 +341,7 @@ def plot_state(
 
     # Set default variables to plot
     if plot_variables is None:
-        plot_variables = ["r", "u", "p", "t", "m"]
+        plot_variables = ["r", "u", "p", "T", "m"]
 
         sp_plot = ["Y_H2", "Y_OH", "Y_H2O"]
         if all(sp in variable_info_map for sp in sp_plot):
@@ -381,6 +384,9 @@ def plot_state(
             variable_info = variable_info_map[vnames]
             ax.plot(x, variable_info.fun(state) * variable_info.scale)
             plot_label = variable_info.plot_label
+
+            if variable_info.short_name == "m":
+                ax.axhline(1.0, color="r", linestyle="--")
 
         ax.set_ymargin(0.1)
         ax.set_ylabel(plot_label)
