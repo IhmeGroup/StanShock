@@ -4,7 +4,6 @@ import code
 from pathlib import Path
 
 import cantera as ct
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy import optimize
 
@@ -15,41 +14,6 @@ from stanshock.physics.flamelet import FPVTable
 from stanshock.processing.initialize import InitializeConstant
 from stanshock.processing.plot import XTDiagram
 from stanshock.system.geometry import Box
-
-XSMALL_SIZE = 12
-SMALL_SIZE = 14
-MEDIUM_SIZE = 16
-BIGGER_SIZE = 18
-
-plt.rcParams.update(
-    {
-        "text.usetex": False,
-        # "font.family": "serif",
-        # "font.serif": ["Computer Modern Roman"],
-        "axes.xmargin": 0,
-        "axes.ymargin": 0,
-        "font.size": SMALL_SIZE,
-        "axes.titlesize": SMALL_SIZE,
-        "axes.labelsize": MEDIUM_SIZE,
-        "xtick.labelsize": SMALL_SIZE,
-        "ytick.labelsize": SMALL_SIZE,
-        "legend.fontsize": XSMALL_SIZE,
-        "figure.titlesize": BIGGER_SIZE,
-    }
-)
-
-# Plotting utilities
-scale = 1e3
-
-
-def add_h_plot(ax):
-    ax1 = ax.twinx()
-    ax1.plot(xf * scale, h * scale, "k", linestyle="--")
-    ax1.axhline(0, color="k", linestyle="--")
-    ax1.set_aspect("equal")
-    ax1.set_ylabel("h [mm]")
-    return ax1
-
 
 # Data
 datadir = Path("./data")
@@ -432,7 +396,7 @@ plot_variables = [
     "progress variable",
     "mach",
 ]
-ss.xt_diagrams = [XTDiagram(ss, variable, skipSteps=10) for variable in plot_variables]
+ss.xt_diagrams = [XTDiagram(ss, variable, skip_steps=10) for variable in plot_variables]
 ss.advance_simulation(t_f[-1])
 for diagram in ss.xt_diagrams:
     diagram.plot(figdir=figdir)

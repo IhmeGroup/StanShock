@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Unpack
 
 import cantera as ct
-import matplotlib.pyplot as plt
 import numpy as np
 
 from stanshock.components.combustor import Combustor
@@ -11,45 +10,10 @@ from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.fluid_base import FluidState
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import InitializeConstant
+from stanshock.processing.plot import plot_state
 from stanshock.system.backend import Array
 from stanshock.system.base import PrecomputeSteps, RightHandSide
 from stanshock.system.geometry import Box
-
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
-    }
-)
-plt.rcParams["axes.xmargin"] = 0
-plt.rcParams["axes.ymargin"] = 0
-
-XSMALL_SIZE = 12
-SMALL_SIZE = 14
-MEDIUM_SIZE = 16
-BIGGER_SIZE = 18
-
-plt.rc("font", size=SMALL_SIZE)  # controls default text sizes
-plt.rc("axes", titlesize=SMALL_SIZE)  # fontsize of the axes title
-plt.rc("axes", labelsize=MEDIUM_SIZE)  # fontsize of the x and y labels
-plt.rc("xtick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("ytick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("legend", fontsize=XSMALL_SIZE)  # legend fontsize
-plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
-
-# Plotting utilities
-scale = 1e3
-
-
-def add_h_plot(ax):
-    ax1 = ax.twinx()
-    ax1.plot(xf * scale, h * scale, "k", linestyle="--")
-    ax1.axhline(0, color="k", linestyle="--")
-    ax1.set_aspect("equal")
-    ax1.set_ylabel("h [mm]")
-    return ax1
-
 
 # Chemistry
 mech = "../data/mechanisms/h2_boivin_9sp_12r_mod.yaml"
@@ -204,74 +168,4 @@ ss.advance_simulation(t_end)
 
 
 # Plot the results
-def plot_sim(ss: Combustor) -> None:
-    assert ss.state.density is not None
-    assert ss.state.velocity is not None
-    assert ss.state.pressure is not None
-    assert ss.state.composition is not None
-    idx = ss.geometry.idx_cells
-    xc = ss.geometry.xc[idx] * scale
-    area = ss.geometry.area(ss.t, ss.geometry.xc[idx])
-    rho = ss.state.density[idx]
-    u = ss.state.velocity[idx]
-    p = ss.state.pressure[idx]
-    Y = ss.state.composition[idx]
-    T = ss.physics.get_temperature(ss.state)[idx]
-    c = ss.physics.get_sound_speed(ss.state)[idx]
-    M = u / c
-    mdot = rho * u * area
-    mdot_f = 4.4e-3  # kg/s
-    Y_f = mdot_f / (mdot_f + mdot_a)
-
-    fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 8))
-    # ax[0].plot(xc, rho)
-    # ax[0].set_ymargin(0.1)
-    # ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
-    # add_h_plot(ax[0])
-
-    ax[0].plot(xc[[0, -1]], mdot[[0, 0]], "g:")
-    ax[0].plot(xc[[0, -1]], mdot[[0, 0]] + mdot_f, "g:")
-    ax[0].plot(xc, mdot)
-    ax[0].set_ymargin(0.1)
-    ax[0].set_ylabel(r"$\dot{m}$ [kg/s]")
-    add_h_plot(ax[0])
-
-    ax[1].plot(xc, u)
-    ax[1].set_ymargin(0.1)
-    ax[1].set_ylabel(r"$u$ [m/s]")
-    add_h_plot(ax[1])
-
-    ax[2].plot(xc, p)
-    ax[2].set_ymargin(0.1)
-    ax[2].set_ylabel(r"$p$ [Pa]")
-    add_h_plot(ax[2])
-
-    ax[3].plot(xc, T)
-    ax[3].set_ymargin(0.1)
-    ax[3].set_ylabel(r"$T$ [K]")
-    add_h_plot(ax[3])
-
-    ax[4].plot(xc, M)
-    ax[4].set_ymargin(0.1)
-    ax[4].set_ylabel(r"$M$ [-]")
-    add_h_plot(ax[4])
-
-    ax[5].plot(xc[[0, -1]], [0.0, 0.0], "g:")
-    ax[5].plot(xc[[0, -1]], [Y_f, Y_f], "g:")
-    ax[5].plot(xc, Y[:, gas.species_index("H2")])
-    ax[5].set_ymargin(0.1)
-    ax[5].set_ylabel(r"$Y_{\mathrm{H}_2}$ [-]")
-    add_h_plot(ax[5])
-
-    ax[6].plot(xc, Y[:, gas.species_index("H2O")])
-    ax[6].set_ymargin(0.1)
-    ax[6].set_ylabel(r"$Y_{\mathrm{H}_2\mathrm{O}}$ [-]")
-    add_h_plot(ax[6])
-
-    ax[6].set_xlabel("x [mm]")
-
-    fig.tight_layout()
-    fig.savefig("hyshot_ii.png", bbox_inches="tight", dpi=300)
-
-
-plot_sim(ss)
+plot_state(ss, "hyshot_ii.png")

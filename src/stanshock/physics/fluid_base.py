@@ -97,9 +97,7 @@ class FluidPhysics(ABC):
         self.gas: ct.Solution = gas
         self.n_scalars: int = self.gas.n_species
         self.n_scalars_rho_sum: int = self.n_scalars
-        self.scalar_names: list[str] = [
-            species.lower() for species in self.gas.species_names
-        ]
+        self.scalar_names: list[str] = self.gas.species_names
 
         self.is_flamelet: bool = False
 
@@ -170,6 +168,14 @@ class FluidPhysics(ABC):
     def get_sound_speed(self, state: FluidState) -> Array:
         """Compute speed of sound of the gas."""
 
+    def get_density(self, state: FluidState) -> Array:
+        assert state.density is not None
+        return state.density
+
+    def get_velocity(self, state: FluidState) -> Array:
+        assert state.velocity is not None
+        return state.velocity
+
     def get_thermal_diffusivity(self, state: FluidState) -> Array:
         """Compute thermal diffusivity, alpha = kappa / (rho * cp)."""
         kappa = self.get_thermal_conductivity(state)
@@ -224,8 +230,8 @@ class FluidPhysics(ABC):
 
     def get_bilger_mixture_fraction(self, Y: Array) -> Array:
         """Compute the Bilger mixture fraction from given mass fractions."""
-        assert self.Z_weights is not None
-        assert self.Z_offset is not None
+        assert self.ox_def is not None
+        assert self.fuel_def is not None
         tmp = np.dot(Y, self.Z_weights)
         assert isinstance(tmp, np.ndarray)
         return np.clip(tmp + self.Z_offset, 0.0, 1.0)
@@ -261,6 +267,11 @@ class FluidPhysics(ABC):
     def get_composition(self, Y: Array) -> Array:
         """Converts mass fractions to set of transported scalars."""
         return Y
+
+    def get_mass_fractions(self, state: FluidState) -> Array:
+        """Returns mass fractions, computing from transported scalars if needed."""
+        assert state.composition is not None
+        return state.composition
 
     def get_normalized_progress_variable(self, Z: Array, C: Array) -> Array:
         _ = Z, C

@@ -5,7 +5,6 @@ from pathlib import Path
 
 import cantera as ct
 import imageio
-import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 
@@ -14,7 +13,7 @@ from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import InitializeRiemannProblem
-from stanshock.processing.plot import XTDiagram
+from stanshock.processing.plot import XTDiagram, get_variable_info_map
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.geometry import Geometry, initialize_geometry
@@ -99,9 +98,12 @@ def get_pressure_data_from_image(fileName):
     return (t, p)
 
 
+data_dir = Path(__file__).resolve().parent / "../../data"
+
+
 def main(
-    data_filename: str = "data/validation/case4.png",
-    mech_filename: str = "data/mechanisms/N2O2HeAr.yaml",
+    data_filename: Path | str = data_dir / "validation/case4.png",
+    mech_filename: Path | str = data_dir / "mechanisms/N2O2HeAr.yaml",
     plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
@@ -113,9 +115,7 @@ def main(
     p4 = 82.0 * 6894.76 * 0.9
     tFinal = 60e-3
 
-    # plotting parameters
     plot_results = plot_results or show_results
-    fontsize = 12
 
     # provided geometry
     DDriven = 4.5 * 0.0254
@@ -207,6 +207,7 @@ def main(
     initialization = InitializePartialFill(
         geometry, physics_model, state4, state1, xShock
     )
+    variable_info_map = get_variable_info_map(physics_model)
 
     ssbl = ShockTube(
         geometry=geometry,
@@ -218,13 +219,17 @@ def main(
         include_boundary_layer=True,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssbl.probes.append(Probe(ssbl, max(ssbl.geometry.xf)))  # end wall probe
+    ssbl.probes.append(
+        Probe(geometry, physics_model, max(ssbl.geometry.xf))
+    )  # end wall probe
     diagram_settings = [
         ("pressure", (p1 / 101325, p4 / 101325)),
         ("temperature", (T1, 800.0)),
     ]
     ssbl.xt_diagrams += [
-        XTDiagram(ssbl, variable=variable, limits=limits)
+        XTDiagram(
+            ssbl, variable=variable, variable_info_map=variable_info_map, limits=limits
+        )
         for variable, limits in diagram_settings
     ]
 
@@ -252,9 +257,13 @@ def main(
         include_boundary_layer=False,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
-    ssnbl.probes.append(Probe(ssnbl, max(ssnbl.geometry.xf)))  # end wall probe
+    ssnbl.probes.append(
+        Probe(geometry, physics_model, max(geometry.xf))
+    )  # end wall probe
     ssnbl.xt_diagrams += [
-        XTDiagram(ssnbl, variable=variable, limits=limits)
+        XTDiagram(
+            ssnbl, variable=variable, variable_info_map=variable_info_map, limits=limits
+        )
         for variable, limits in diagram_settings
     ]
 
@@ -277,8 +286,6 @@ def main(
 
         # make plots of probe and XT diagrams
         plt.close("all")
-        mpl.rcParams["font.size"] = fontsize
-        plt.rc("text", usetex=True)
         plt.figure(figsize=(4, 4))
         plt.plot(
             np.array(ssnbl.probes[0].t) * 1000.0,

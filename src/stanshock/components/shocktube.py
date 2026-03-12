@@ -145,7 +145,7 @@ class ShockTube(Combustor):
         xShock = geometry.xf[
             np.argmax(dpAbs) + 1
         ]  # maximum pressure gradient corresponds to shock
-        (xMin, xMax, probeLocation) = (geometry.xf[0], xShock, geometry.xf[-1])
+        (xMin, xMax, probe_location) = (geometry.xf[0], xShock, geometry.xf[-1])
         LMax = xMax - xMin  # maximum length of constrained optimization
         DMax = min(
             geometry.d_outer(0.0, np.linspace(xMin, xMax))
@@ -239,7 +239,13 @@ class ShockTube(Combustor):
             )
             # delete previous probes and create an endwall probe
             self.probes = [
-                Probe(self, probeLocation, skipSteps=0, probeName="endwall probe"),
+                Probe(
+                    self.geometry,
+                    self.physics,
+                    probe_location,
+                    skip_steps=0,
+                    name="endwall probe",
+                ),
             ]
             # solve
             if self.verbose:

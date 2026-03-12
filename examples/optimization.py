@@ -4,7 +4,6 @@ import time
 from pathlib import Path
 
 import cantera as ct
-import matplotlib as mpl
 import numpy as np
 from matplotlib import pyplot as plt
 from scipy.optimize import newton
@@ -22,15 +21,16 @@ from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.geometry import Cylinder
 
+data_dir = Path(__file__).resolve().parent / "../data"
+
 
 def main(
-    mech_filename: str = "data/mechanisms/HeliumArgon.yaml",
+    mech_filename: Path | str = data_dir / "mechanisms/HeliumArgon.yaml",
     plot_results: bool = True,
     show_results: bool = False,
     results_location: str | None = ".",
 ) -> dict[str, Array]:
     # parameters
-    fontsize = 12
     tFinal = 7.5e-3
     p5, p1 = 18 * ct.one_atm, 0.48e5
     T5 = 1698.0
@@ -44,8 +44,6 @@ def main(
     plot_results = plot_results or show_results
     if plot_results:
         plt.close("all")
-        mpl.rcParams["font.size"] = fontsize
-        # plt.rc("text", usetex=True)
 
     # set up geometry
     xLower = -LDriver
@@ -174,7 +172,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.geometry.xf)))  # end wall probe
+    ss.probes.append(Probe(geometry, physics_model, max(geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()
@@ -210,7 +208,7 @@ def main(
             XTDiagram(ss, variable=variable, limits=limits)
             for variable, limits in diagram_settings
         ]
-    ss.probes.append(Probe(ss, max(ss.geometry.xf)))  # end wall probe
+    ss.probes.append(Probe(geometry, physics_model, max(geometry.xf)))  # end wall probe
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)
     t1 = time.perf_counter()

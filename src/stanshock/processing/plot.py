@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeAlias
 
 import matplotlib.pyplot as plt
 import numpy as np
+
+from stanshock.physics.flamelet import FPVTable
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.geometry import AsymmetricBox, Box, Cylinder
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
@@ -12,6 +19,149 @@ if TYPE_CHECKING:
 
     from stanshock.components.combustor import Combustor
     from stanshock.system.backend import Array
+
+
+@dataclass
+class VariableInfo:
+    short_name: str
+    plot_label: str
+    fun: Callable[[FluidState], Array]
+    scale: float = 1.0
+
+
+VariableInfoMap: TypeAlias = dict[str, VariableInfo]
+
+
+def get_variable_info_map(physics: FluidPhysics) -> VariableInfoMap:
+    """Create mapping between strings and variable information."""
+    # Common variables available to all FluidPhysics:
+    plot_variables: VariableInfoMap = {
+        "density": VariableInfo(
+            short_name="r",
+            plot_label=r"$\rho~[\mathrm{kg/m^3}]$",
+            fun=physics.get_density,
+        ),
+        "velocity": VariableInfo(
+            short_name="u", plot_label=r"$u~[\mathrm{m/s}]$", fun=physics.get_velocity
+        ),
+        "pressure": VariableInfo(
+            short_name="p",
+            plot_label=r"$p~[\mathrm{bar}]$",
+            fun=physics.get_pressure,
+            scale=1e-5,
+        ),
+        "temperature": VariableInfo(
+            short_name="T", plot_label=r"$T~[\mathrm{K}]$", fun=physics.get_temperature
+        ),
+        "gamma": VariableInfo(
+            short_name="g", plot_label=r"$\gamma~[\mathrm{-}]$", fun=physics.get_gamma
+        ),
+        "mach": VariableInfo(
+            short_name="m",
+            plot_label=r"$Ma~[\mathrm{-}]$",
+            fun=lambda x: np.abs(physics.get_velocity(x)) / physics.get_sound_speed(x),
+        ),
+    }
+
+    # All transported scalars
+    short_name_map = {"mixture fraction": "Z", "progress variable": "C"}
+    for iscalar, scalar in enumerate(physics.scalar_names):
+        if scalar == "density":
+            continue
+
+        def get_scalar(state: FluidState, idx: int = iscalar) -> Array:
+            assert state.composition is not None
+            return state.composition[:, idx]
+
+        # Check for species mass fractions
+        name = short_name_map.get(scalar, scalar)
+        fancy_name = name if scalar in short_name_map else rf"\mathrm{{{name}}}"
+        if scalar in physics.gas.species_names:
+            name = f"Y_{scalar}"
+
+            # Fancy formatting for species names
+            groups = re.split(r"(?<=[a-zA-Z])(?=\d)|(?<=\d)(?=\D)", scalar)
+            fancy_name = "".join(
+                [f"_{{{group}}}" if group.isnumeric() else group for group in groups]
+            )
+
+        plot_variables[scalar] = VariableInfo(
+            short_name=name,
+            plot_label=rf"${fancy_name}~[\mathrm{{-}}]$",
+            fun=get_scalar,
+        )
+
+    # Physics-specific variables
+    if isinstance(physics, FPVTable):
+        for var in physics.variables:
+
+            def get_lookup(state: FluidState, var: str = var) -> Array:
+                return physics.lookup(var, state)
+
+            # Check for species mass fractions
+            name = var
+            fancy_name = rf"$\mathrm{{{var}}}$"
+            if var in physics.gas.species_names:
+                name = f"Y_{var}"
+
+                # Fancy formatting for species names
+                groups = re.split(r"(?<=[a-zA-Z])(?=\d)|(?<=\d)(?=\D)", var)
+                fancy_name = "".join(
+                    [
+                        f"_{{{group}}}" if group.isnumeric() else group
+                        for group in groups
+                    ]
+                )
+                fancy_name = rf"${{{fancy_name}}}~[\mathrm{{-}}]$"
+
+            plot_variables[var] = VariableInfo(
+                short_name=name,
+                plot_label=fancy_name,
+                fun=get_lookup,
+            )
+
+            def get_L(state: FluidState) -> Array:
+                if state.normalized_progress_variable is None:
+                    state = physics.set_state(state)
+                assert state.normalized_progress_variable is not None
+                return state.normalized_progress_variable
+
+            plot_variables["normalized progress variable"] = VariableInfo(
+                short_name="L", plot_label=r"$L~[\mathrm{-}]$", fun=get_L
+            )
+
+    else:
+        if physics.ox_def is not None and physics.fuel_def is not None:
+
+            def get_Z(state: FluidState) -> Array:
+                Y = physics.get_mass_fractions(state)
+                return physics.get_bilger_mixture_fraction(Y)
+
+            plot_variables["mixture fraction"] = VariableInfo(
+                short_name="Z", plot_label=r"$Z~[\mathrm{-}]$", fun=get_Z
+            )
+
+        if physics.prog_def is not None:
+
+            def get_C(state: FluidState) -> Array:
+                Y = physics.get_mass_fractions(state)
+                return physics.get_progress_variable(Y)
+
+            plot_variables["progress variable"] = VariableInfo(
+                short_name="C", plot_label=r"$C~[\mathrm{-}]$", fun=get_C
+            )
+
+    # Common aliases:
+    plot_variables["rho"] = plot_variables["density"]
+    for vname in ["specific heat ratio", "heat capacity ratio"]:
+        plot_variables[vname] = plot_variables["gamma"]
+
+    keys = list(plot_variables.keys())
+    for key in keys:
+        var_info = plot_variables[key]
+        plot_variables[var_info.short_name] = var_info
+
+    return plot_variables
 
 
 class XTDiagram:
@@ -25,19 +175,24 @@ class XTDiagram:
             limits = tuple of maximum and minimum for the pcolor (vMin,vMax)
     """
 
+    interpolator: Callable[[Array], Array] | None
+
     def __init__(
         self,
         domain: Combustor,
         variable: str,
-        skipSteps: int = 0,
-        x: Array | None = None,
-        limits: tuple[float, float] | None = None,
+        variable_info_map: VariableInfoMap | None = None,
+        skip_steps: int = 0,  # number of timesteps to skip
+        x: Array | None = None,  # mesh to interpolate solution onto
+        limits: tuple[float, float] | None = None,  # colormap range
     ) -> None:
-        self.skipSteps = 0
+        self.name = variable.lower()
+        if variable_info_map is None:
+            variable_info_map = get_variable_info_map(domain.physics)
+        self.variable_info = variable_info_map[self.name]
+        self.skip_steps = skip_steps
         self.limits = limits
 
-        self.name = variable.lower()
-        self.skipSteps = skipSteps  # number of timesteps to skip
         # check interpolation grid
         geometry = domain.geometry
         if x is None:
@@ -47,6 +202,8 @@ class XTDiagram:
             raise Exception(msg)
         else:
             self.x = x
+
+        self.interpolator = lambda x: np.interp(self.x, geometry.xc, x)
 
         self.variable: list[Array] = []  # list of numpy arrays of the variable w.r.t x
         self.t: list[float] = []  # list of times
@@ -58,35 +215,17 @@ class XTDiagram:
             inputs:
                 XTDiagram: the XTDiagram object
         """
-        variable = self.name
         state = domain.state
-        geometry = domain.geometry
 
-        if variable in ["density", "r", "rho"]:
-            self.variable.append(np.interp(self.x, geometry.xc, state.density))
-        elif variable in ["velocity", "u"]:
-            self.variable.append(np.interp(self.x, geometry.xc, state.velocity))
-        elif variable in ["pressure", "p"]:
-            self.variable.append(np.interp(self.x, geometry.xc, state.pressure))
-        elif variable in ["temperature", "t"]:
-            T = domain.physics.get_temperature(state)
-            self.variable.append(np.interp(self.x, geometry.xc, T))
-        elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            self.variable.append(np.interp(self.x, geometry.xc, state.gamma))
-        elif variable in domain.physics.scalar_names:
-            scalarIndex = domain.physics.scalar_names.index(variable)
-            self.variable.append(
-                np.interp(self.x, geometry.xc, state.composition[:, scalarIndex])
-            )
-        elif variable in ["mach", "m"]:
-            M = np.abs(state.velocity) / domain.physics.get_sound_speed(state)
-            self.variable.append(np.interp(self.x, geometry.xc, M))
-        else:
-            msg = f"Invalid Variable Name: {variable}"
-            raise Exception(msg)
+        value = self.variable_info.fun(state) * self.variable_info.scale
+        if self.interpolator is not None:
+            value = self.interpolator(value)
+
+        self.variable.append(value)
         self.t.append(domain.t)
+
         if domain.injector is not None:
-            self.mdot.append(domain.injector.mdot_f_interp(domain.t))
+            self.mdot.append(float(domain.injector.mdot_f_interp(domain.t)))
 
     def plot(self, figdir: Path | str = ".") -> None:
         """
@@ -94,34 +233,20 @@ class XTDiagram:
             inputs:
                 figdir = directory in which to save the plot
         """
-        t = [t * 1000.0 for t in self.t]
-        mdot = [mdot * 1.0e3 for mdot in self.mdot]
+        t = 1e3 * np.array(self.t)
         X, T = np.meshgrid(self.x, t)
         variableMatrix = np.zeros(X.shape)
         for k, variablek in enumerate(self.variable):
             variableMatrix[k, :] = variablek
-        variable = self.name
-        if variable in ["density", "r", "rho"]:
-            title = r"$\rho~[\mathrm{kg/m^3}]$"
-        elif variable in ["velocity", "u"]:
-            title = r"$u~[\mathrm{m/s}]$"
-        elif variable in ["pressure", "p"]:
-            variableMatrix /= 1.0e5  # convert to bar
-            title = r"$p~[\mathrm{bar}]$"
-        elif variable in ["temperature", "t"]:
-            title = r"$T~[\mathrm{K}]$"
-        elif variable in ["gamma", "g", "specific heat ratio", "heat capacity ratio"]:
-            title = r"$\gamma~[\mathrm{-}]$"
-        elif variable in ["mixture fraction"]:
-            title = r"$Z~[\mathrm{-}]$"
-        elif variable in ["progress variable"]:
-            title = r"$C~[\mathrm{-}]$"
-        elif variable in ["mach", "m"]:
-            title = r"$M~[\mathrm{-}]$"
-        else:
-            title = r"$\mathrm{" + variable + "}$"
 
-        has_mdot = mdot and any(mdot)
+        title = self.variable_info.plot_label
+        short_name = self.variable_info.short_name
+
+        has_mdot = False
+        if self.mdot:
+            mdot = 1e3 * np.array(self.mdot)
+            has_mdot = np.any(mdot)
+
         figsize = (6, 4) if has_mdot else (6, 3)
 
         fig: Figure = plt.figure(figsize=figsize)
@@ -164,7 +289,7 @@ class XTDiagram:
             mdot_ax.grid(True, axis="x", linestyle="--", alpha=0.7)
 
         fig.tight_layout()
-        fig.savefig(Path(figdir) / f"{variable}.png", bbox_inches="tight", dpi=300)
+        fig.savefig(Path(figdir) / f"{short_name}.png", bbox_inches="tight", dpi=300)
 
 
 def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
@@ -175,91 +300,111 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
     geometry = domain.geometry
     t = domain.t
     x = geometry.xf
-    h = geometry.h(t, x) if geometry.h is not None else geometry.d_outer(t, x)
-    ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
-    ax1.axhline(0, color="0.8", linestyle="--")
+
+    yname = "h"
+    if isinstance(geometry, Cylinder):
+        d = geometry.d_outer(t, x)
+        ax1.plot(x * scale, d * scale, color="0.8", linestyle="--")
+        yname = r"$d_{outer}$"
+    elif isinstance(geometry, Box):
+        ax1.plot(x * scale, geometry.h(t, x) * scale, color="0.8", linestyle="--")
+        ax1.axhline(0, color="0.8", linestyle="--")
+    elif isinstance(geometry, AsymmetricBox):
+        ax1.plot(
+            x * scale, geometry.upper_wall(t, x) * scale, color="0.8", linestyle="--"
+        )
+        ax1.plot(
+            x * scale, geometry.lower_wall(t, x) * scale, color="0.8", linestyle="--"
+        )
+
+    ax1.set_xlim(x.min() * scale, x.max() * scale)
     ax1.set_aspect("equal")
-    ax1.set_ylabel("h [mm]")
+    ax1.set_ylabel(f"{yname} [mm]")
     return ax1
 
 
-def plot_state(domain: Combustor, filename: Path | str) -> None:
+def plot_state(
+    domain: Combustor,
+    filename: Path | str,
+    variable_info_map: dict[str, VariableInfo] | None = None,
+    plot_geometry: bool = True,
+    plot_variables: list[str | list[str]] | None = None,
+) -> None:
     xscale = 1.0e3
-    physics = domain.physics
-    state = domain.state
     geometry = domain.geometry
     idx_cells = geometry.idx_cells
     x = xscale * geometry.xc[idx_cells]
-    T = physics.get_temperature(state)
+    state = domain.state[idx_cells]
+
+    if variable_info_map is None:
+        variable_info_map = get_variable_info_map(domain.physics)
+
+    # Set default variables to plot
+    if plot_variables is None:
+        plot_variables = ["r", "u", "p", "T", "m"]
+
+        sp_plot = ["Y_H2", "Y_OH", "Y_H2O"]
+        if all(sp in variable_info_map for sp in sp_plot):
+            plot_variables += [sp_plot]
+
+    nrows: int = len(plot_variables)
+    if domain.injector is not None:
+        nrows += 1
 
     fig: Figure
-    ax: list[Axes]
-    fig, ax = plt.subplots(7, 1, sharex=True, figsize=(6, 9))
-    ax[0].plot(x, state.density[idx_cells])
-    ax[0].set_ymargin(0.1)
-    ax[0].set_ylabel(r"$\rho$ [kg/m$^3$]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[0], scale=xscale)
+    axs: list[Axes]
+    fig, axs = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
 
-    ax[1].plot(x, state.velocity[idx_cells])
-    ax[1].set_ymargin(0.1)
-    ax[1].set_ylabel(r"$u$ [m/s]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[1], scale=xscale)
+    for iax, vnames in enumerate(plot_variables):
+        ax = axs[iax]
 
-    ax[2].plot(x, state.pressure[idx_cells])
-    ax[2].set_ymargin(0.1)
-    ax[2].set_ylabel(r"$p$ [Pa]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[2], scale=xscale)
+        if isinstance(vnames, list):
+            vmax = 0.0
+            Y_labels = True
+            plot_labels = []
+            for vname in vnames:
+                variable_info = variable_info_map[vname]
+                value = variable_info.fun(state) * variable_info.scale
+                vmax = max(value.max(), vmax)
 
-    ax[3].plot(x, T[idx_cells])
-    ax[3].set_ymargin(0.1)
-    ax[3].set_ylabel(r"$T$ [K]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[3], scale=xscale)
+                legend_label = variable_info.plot_label.split("~")[0] + "$"
+                ax.plot(x, value, label=legend_label)
+                plot_labels += [variable_info.plot_label]
+                if variable_info.short_name[0] != "Y":
+                    Y_labels = False
 
-    M = np.abs(state.velocity) / physics.get_sound_speed(state)
-    ax[4].plot(x, M[idx_cells])
-    ax[4].axhline(1.0, color="r", linestyle="--")
-    ax[4].set_ymargin(0.1)
-    ax[4].set_ylabel(r"$M$ [-]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[4], scale=xscale)
+            ax.legend(loc="upper right")
+            if Y_labels:
+                plot_label = r"$Y_k~[\mathrm{-}]$"
+                if vmax < 1e-6:
+                    ax.set_ylim(-1e-3, 1e-3)
+            else:
+                plot_label = ", ".join(plot_labels)
+        else:
+            variable_info = variable_info_map[vnames]
+            ax.plot(x, variable_info.fun(state) * variable_info.scale)
+            plot_label = variable_info.plot_label
 
-    if physics.is_flamelet:
-        state = physics.set_state(state)
-        Y_H2 = physics.lookup("H2", state)[idx_cells]
-        Y_OH = physics.lookup("OH", state)[idx_cells]
-        Y_H2O = physics.lookup("H2O", state)[idx_cells]
-    else:
-        Y = state.mass_fractions[idx_cells]
-        Y_H2 = Y[:, physics.gas.species_index("H2")]
-        Y_OH = Y[:, physics.gas.species_index("OH")]
-        Y_H2O = Y[:, physics.gas.species_index("H2O")]
-    ax[5].plot(x, Y_H2, label=r"$\mathrm{H}_2$")
-    ax[5].plot(x, Y_OH, label=r"$\mathrm{OH}$")
-    ax[5].plot(x, Y_H2O, label=r"$\mathrm{H}_2\mathrm{O}$")
-    if Y_H2.max() < 1e-6:
-        ax[5].set_ylim(-1e-3, 1e-3)
-    else:
-        ax[5].set_ymargin(0.1)
-    ax[5].set_ylabel(r"$Y_k$ [-]")
-    ax[5].legend(loc="upper right")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[5], scale=xscale)
+            if variable_info.short_name == "m":
+                ax.axhline(1.0, color="r", linestyle="--")
 
-    ax[6].scatter(
-        domain.injector.fluid_tips[:, 0] * xscale,
-        domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
-        s=1,
-    )
-    ax[6].set_ymargin(0.1)
-    ax[6].set_ylabel(r"$\dot{m}_f$ [g/s]")
-    if geometry.h is not None:
-        add_h_plot(domain, ax[6], scale=xscale)
+        ax.set_ymargin(0.1)
+        ax.set_ylabel(plot_label)
 
-    ax[6].set_xlabel("x [mm]")
+    ax = axs[-1]
+    if domain.injector is not None:
+        ax.scatter(
+            domain.injector.fluid_tips[:, 0] * xscale,
+            domain.injector.fluid_tips[:, 1] * 1e3 * domain.injector.n_inj,
+            s=1,
+        )
+        ax.set_ymargin(0.1)
+        ax.set_ylabel(r"$\dot{m}_f$ [g/s]")
+    ax.set_xlabel("x [mm]")
+
+    if plot_geometry:
+        for ax in axs:
+            add_h_plot(domain, ax, scale=xscale)
 
     fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
 
