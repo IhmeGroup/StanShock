@@ -11,38 +11,12 @@ import numpy as np
 from stanshock.components.combustor import Combustor
 from stanshock.models.wall_models import (
     CompressibleHeatFlux,
-    CompressibleReactingSkinFriction,
+    CompressibleInertSkinFriction,
 )
 from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import InitializeConstant
 from stanshock.system.geometry import Box
-
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
-    }
-)
-plt.rcParams["axes.xmargin"] = 0
-plt.rcParams["axes.ymargin"] = 0
-
-XSMALL_SIZE = 12
-SMALL_SIZE = 14
-MEDIUM_SIZE = 16
-BIGGER_SIZE = 18
-
-plt.rc("font", size=SMALL_SIZE)  # controls default text sizes
-plt.rc("axes", titlesize=SMALL_SIZE)  # fontsize of the axes title
-plt.rc("axes", labelsize=MEDIUM_SIZE)  # fontsize of the x and y labels
-plt.rc("xtick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("ytick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("legend", fontsize=XSMALL_SIZE)  # legend fontsize
-plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
-
-# Plotting utilities
-scale = 1e3
 
 # Data
 figdir = Path("./figures")
@@ -81,7 +55,7 @@ BC_inlet = SpecifiedFace(
 BC_outlet = SpecifiedFace(location="right", reference_state=(None, None, p2, None))
 BCs: BCInput = {"left": BC_inlet, "right": BC_outlet}
 init = InitializeConstant(geometry, physics_model, gas1, u1)
-wall_models = (CompressibleReactingSkinFriction(), CompressibleHeatFlux())
+wall_models = (CompressibleInertSkinFriction(), CompressibleHeatFlux())
 
 ss = Combustor(
     geometry=geometry,

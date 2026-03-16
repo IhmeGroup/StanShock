@@ -8,6 +8,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.models.wall_models import (
+    CompressibleHeatFlux,
+    CompressibleInertSkinFriction,
+)
 from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import InitializeRiemannProblem
@@ -113,7 +117,7 @@ def main(
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
-        include_boundary_layer=True,
+        wall_models=(CompressibleInertSkinFriction(), CompressibleHeatFlux()),
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
     ssbl.probes.append(
@@ -138,7 +142,6 @@ def main(
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
-        include_boundary_layer=False,
     )
     ssnbl.probes.append(
         Probe(geometry, physics_model, max(geometry.xf))
