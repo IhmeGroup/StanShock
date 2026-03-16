@@ -5,6 +5,7 @@ import numpy as np
 from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.models.jicf import JICFChemistrySource, JICModel
+from stanshock.models.pseudoshock import Pseudoshock
 from stanshock.models.wall_models import HeatFlux, SkinFriction
 from stanshock.numerics.boundary_conditions import (
     BCInput,
@@ -64,6 +65,7 @@ class Combustor:
         use_double_flux: bool = True,  # Toggle the double-flux approach on or off
         wall_temperature: float | None = None,  # wall temperature (needed for BL)
         wall_models: tuple[SkinFriction, HeatFlux | None] | None = None,
+        include_pseudoshock: bool = False,  # exclude pseudoshock in isolator
         source_terms: RightHandSide
         | list[RightHandSide]
         | None = None,  # Catch-all source term(s)
@@ -103,6 +105,7 @@ class Combustor:
         self.physics: FluidPhysics = physics
         self.initialization: Initialization = initialization
         self.include_diffusion = include_diffusion
+        self.include_pseudoshock = include_pseudoshock
         self.thickening = thickening
         self.plot_state_interval = plot_state_interval
         self.plot_state_variables = plot_state_variables
@@ -204,7 +207,15 @@ class Combustor:
                 physics=self.physics,
             )
 
-            integrators += [ForwardEuler(self.boundary_layer)]
+            if self.include_pseudoshock:
+                self.pseudoshock = Pseudoshock(
+                    geometry=self.geometry,
+                    boundary_layer=self.boundary_layer,
+                )
+                integrators += [ForwardEuler(self.pseudoshock)]
+
+            else:
+                integrators += [ForwardEuler(self.boundary_layer)]
 
         if source_terms is not None:
             if isinstance(source_terms, list):
