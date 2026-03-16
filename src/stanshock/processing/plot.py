@@ -344,13 +344,68 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
     return ax1
 
 
+def get_state_plot_bounds(
+    domain,
+) -> tuple[float, float, float, dict[str, tuple[float, float]]]:
+    rlims = [0, 0]
+    ulims = [0, 0]
+    plims = [0, 0]
+
+    g = 1.4
+
+    for ibc in [0, 1]:
+        if type(domain.boundary_conditions[ibc]) is not str:
+            if domain.boundary_conditions[ibc][0] is not None:
+                rlims[ibc] = domain.boundary_conditions[ibc][0]
+            if domain.boundary_conditions[ibc][1] is not None:
+                ulims[ibc] = domain.boundary_conditions[ibc][1]
+            if domain.boundary_conditions[ibc][2] is not None:
+                plims[ibc] = domain.boundary_conditions[ibc][2]
+
+    a = domain.physics.get_sound_speed(domain.state)
+    T = domain.physics.get_temperature(domain.state)
+    cp = domain.physics.get_cp(domain.state)
+    cp_max = max([cp[0], cp[-1]])
+
+    Mlims = [ulims[0] / a[0], ulims[-1] / a[-1]]
+
+    p1 = plims[0]
+    r1 = rlims[0]
+    T1 = T[0]
+
+    rlims = np.max(rlims)
+    ulims = np.max(ulims)
+    plims = np.max(plims)
+    Mlims = np.max(Mlims)
+
+    p_rat = 1 + ((2 * g) / (g + 1)) * Mlims**2 - 1
+    r_rat = (1 + ((g + 1) / (g - 1)) * p_rat) / (((g + 1) / (g - 1)) + p_rat)
+    T_rat = p_rat / r_rat
+
+    u2 = np.sqrt(2 * cp_max * T1 * T_rat)
+    k = 2.0
+    plot_limits = {
+        "r": (0, r_rat * k),
+        "u": (0, np.ceil(u2)),
+        "p": (0, np.ceil(p_rat)),
+        "T": (0, np.ceil(T_rat)),
+        "m": (0, 5),
+    }
+    return T1, p1, r1, plot_limits
+
+
 def plot_state(
     domain: Combustor,
     filename: Path | str,
     variable_info_map: dict[str, VariableInfo] | None = None,
     plot_geometry: bool = True,
     plot_variables: list[str | list[str]] | None = None,
+    limits: dict[str, tuple[float, float]] | None = None,
 ) -> None:
+    T1, p1, r1 = None, None, None
+    if limits is None:
+        T1, p1, r1, limits = get_state_plot_bounds(domain)
+
     xscale = 1.0e3
     geometry = domain.geometry
     idx_cells = geometry.idx_cells
@@ -376,6 +431,7 @@ def plot_state(
     axs: list[Axes]
     fig, axs = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
 
+    subtitle_str = []
     for iax, vnames in enumerate(plot_variables):
         ax = axs[iax]
 
@@ -406,8 +462,16 @@ def plot_state(
             ax.plot(x, variable_info.fun(state) * variable_info.scale)
             plot_label = variable_info.plot_label
 
+            # Special treatments:
             if variable_info.short_name == "m":
                 ax.axhline(1.0, color="r", linestyle="--")
+
+            if variable_info.short_name == "p" and p1 is not None:
+                subtitle_str.append(f"$P_1 = {p1:.0f}$ Pa")
+            if variable_info.short_name == "T" and T1 is not None:
+                subtitle_str.append(f"$T_1 = {T1:.0f}$ K")
+            if variable_info.short_name == "r" and r1 is not None:
+                subtitle_str.append(f"$\\rho_1 = {r1:.2f}$ [kg/m$^3$]")
 
         ax.set_ymargin(0.1)
         ax.set_ylabel(plot_label)
@@ -431,7 +495,10 @@ def plot_state(
         for ax in axs:
             add_h_plot(domain, ax, scale=xscale)
 
-    fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
+    full_title = rf"$t = {domain.t * 1.0e3:.4f}$ ms"
+    if subtitle_str:
+        full_title += rf"\n\footnotesize{{{', '.join(subtitle_str)}}}"
+    fig.suptitle(full_title)
 
     output_path = Path(filename)
     output_path.parent.mkdir(parents=True, exist_ok=True)
