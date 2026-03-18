@@ -9,6 +9,8 @@ from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array
 from stanshock.system.geometry import AsymmetricBox
 from stanshock.utils.isentropic import compute_ratios_across_oblique_shock
+
+
 class InletDiffuser(SpecifiedFlux):
     """Model of a supersonic inlet."""
 
@@ -28,7 +30,12 @@ class InletDiffuser(SpecifiedFlux):
         self.past_M1 = past_M1
         self.past_M2 = past_M2
         self.past_M3 = past_M3
-        self.fluid_state_regions = [self.freestream,self.past_M1,self.past_M2,self.past_M3]
+        self.fluid_state_regions = [
+            self.freestream,
+            self.past_M1,
+            self.past_M2,
+            self.past_M3,
+        ]
         self.geometry = geometry
         self.physics = physics
 
@@ -66,29 +73,33 @@ class InletDiffuser(SpecifiedFlux):
 
         return target
 
-    def compute_combustor_inlet_properties(self,n_shocks,flow_deflection_angles):
+    def compute_combustor_inlet_properties(self, n_shocks, flow_deflection_angles):
         for i in range(n_shocks):
-            if i==0:
-                mach = self.fluid_state_regions[i].velocity / self.physics.get_sound_speed(self.freestream)
-                print(f'Mach_Freestream: {mach}')
+            if i == 0:
+                mach = self.fluid_state_regions[
+                    i
+                ].velocity / self.physics.get_sound_speed(self.freestream)
+                print(f"Mach_Freestream: {mach}")
             rho = self.fluid_state_regions[i].density[0]
             pressure = self.fluid_state_regions[i].pressure[0]
             temp = self.fluid_state_regions[i].temperature[0]
-            u = self.fluid_state_regions[i].velocity[0]
-            Y = self.fluid_state_regions[i].composition[0]
             gamma = self.physics.get_gamma(self.fluid_state_regions[i])
-            new_mach, density_ratio,pressure_ratio,temperature_ratio = compute_ratios_across_oblique_shock(mach=mach,gamma=gamma,theta=flow_deflection_angles[i])
+            new_mach, density_ratio, pressure_ratio, temperature_ratio = (
+                compute_ratios_across_oblique_shock(
+                    mach=mach, gamma=gamma, theta=flow_deflection_angles[i]
+                )
+            )
             mach = new_mach
-            print(f'Mach_{i+1}: {mach}')
-            temp = temp*temperature_ratio
-            pressure = pressure*pressure_ratio
-            rho = rho*density_ratio
-            self.fluid_state_regions[i+1].temperature = temp
-            self.fluid_state_regions[i+1].pressure = pressure
-            self.fluid_state_regions[i+1].density = rho
-            self.fluid_state_regions[i+1].velocity = mach*self.physics.get_sound_speed(self.fluid_state_regions[i])
-            
-            combustor_inlet_properties = 1 #dummy placeholder
-        return combustor_inlet_properties
-    
+            print(f"Mach_{i + 1}: {mach}")
+            temp = temp * temperature_ratio
+            pressure = pressure * pressure_ratio
+            rho = rho * density_ratio
+            self.fluid_state_regions[i + 1].temperature = temp
+            self.fluid_state_regions[i + 1].pressure = pressure
+            self.fluid_state_regions[i + 1].density = rho
+            self.fluid_state_regions[i + 1].velocity = (
+                mach * self.physics.get_sound_speed(self.fluid_state_regions[i])
+            )
 
+            combustor_inlet_properties = 1  # dummy placeholder
+        return combustor_inlet_properties
