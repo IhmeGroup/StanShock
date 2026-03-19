@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import ClassVar
 
 import numpy as np
 from scipy.interpolate import RegularGridInterpolator
@@ -64,12 +63,16 @@ class HeatFlux(ABC):
     def get_stanton_number(self, Pr: Array, cf: Array) -> Array:
         """
         Defines Stanton number for gas phase flow as func. of Pr and Cf
-        Uses empirical correlations from Kayes
+        Uses empirical correlations from "Convective Heat and Mass Transfer", Kays 1993
         """
         return (cf / 2.0) / (1 + 13 * (Pr ** (2 / 3) - 1) * np.sqrt(cf / 2.0))
 
 
 class CompressibleHeatFlux(HeatFlux):
+    """
+    Implements recovery temperature model from Van Driest (1956)
+    """
+
     def __call__(self, wall: WallState) -> Array:
         assert wall.Cf is not None
         T_r = self.recovery_temperature(wall.T, wall.M, wall.Pr, wall.gamma)
@@ -86,7 +89,10 @@ class CompressibleHeatFlux(HeatFlux):
 class IncompressibleHeatFlux(HeatFlux):
     def __call__(self, wall: WallState) -> Array:
         assert wall.Cf is not None
+        laminar = wall.Re < 1e3
         St = self.get_stanton_number(wall.Pr, wall.Cf)
+        # Analytical soln for low Re flows.
+        St[laminar] = 3.657 / (wall.Re[laminar] / wall.Pr[laminar])
         h = St * wall.h_St
         return h * (wall.T - wall.Tw)
 
@@ -100,14 +106,17 @@ class SkinFriction(ABC):
     @abstractmethod
     def __call__(self, wall: WallState) -> Array:
         """
-        This method returns the skin friction coefficient Cf for fully developed
-        pipe flow. The existing models are the von Karman (for incompressible flow) and
-        DeChant model (for compressible model)
-        This method will always return the shear stress tau_w or heat flux q_w per unit wall area dAw.
+        Returns the skin friction coefficient Cf for fully developed
+        pipe flow based on wall state.
         """
 
 
 class CompressibleInertSkinFriction(SkinFriction):
+    """
+    Tabulated implementation of DeChant & Tattar's model (1998).
+    Valid for air; in low Re limit, reduces to Prandtl's law.
+    """
+
     def __init__(
         self,
         Re_range: tuple[float, float] = (1e3, 1e7),
@@ -152,28 +161,14 @@ class CompressibleInertSkinFriction(SkinFriction):
     def __call__(self, wall: WallState) -> Array:
         T_Tw = wall.T / wall.Tw
         pts = np.column_stack((wall.Re, wall.M, T_Tw))
-        cf = self.interp(pts)
-        return wall.q * cf
-
-
-class IncompressibleInertSkinFriction(SkinFriction):
-    def __init__(self, Re_range: tuple[float, float] = (1e3, 1e7)) -> None:
-        self.Re_range = Re_range
-        self.N_Re = 100
-        self.ReTable = np.logspace(
-            np.log10(min(self.Re_range)), np.log10(max(self.Re_range)), self.N_Re
-        )
-        self._build_table()
-
-    def _build_table(self) -> None:
-        self.cfTable = cf_karman_solve(self.ReTable)
-
-    def __call__(self, wall: WallState) -> Array:
-        return np.interp(wall.Re, self.ReTable, self.cfTable)
+        return self.interp(pts)
 
 
 class CompressibleReactingSkinFriction(SkinFriction):
-    requires: ClassVar[set[str]] = {"Re", "M", "T_Tw", "Pr", "gamma"}
+    """
+    Extension of the DeChant & Tattar model for variable
+    gamma and Prandtl number.
+    """
 
     def __call__(self, wall: WallState) -> Array:
         recovery = wall.Pr ** (1.0 / 3.0)
@@ -185,6 +180,32 @@ class CompressibleReactingSkinFriction(SkinFriction):
             recovery,
         )
         return cf_dechant_solve(wall.Re, F, G)
+
+
+class IncompressibleInertSkinFriction(SkinFriction):
+    """
+    Karman-Nikuradse (1933) skin friction model for Re > 1000
+    Analytical turbulent pipe-flow solution for Re < 1000
+    """
+
+    def __init__(self, Re_range: tuple[float, float] = (1e3, 1e7)) -> None:
+        self.Re_range = Re_range
+        self.N_Re = 100
+        self.ReTable = np.logspace(
+            np.log10(min(self.Re_range)), np.log10(max(self.Re_range)), self.N_Re
+        )
+
+        self._build_table()
+
+    def _build_table(self) -> None:
+        self.cfTable = cf_karman_solve(self.ReTable)
+
+    def __call__(self, wall: WallState) -> Array:
+        cf = np.zeros_like(wall.Re)
+        laminar = wall.Re < self.Re_range[0]
+        cf[laminar] = 16.0 / wall.Re[laminar]
+        cf[~laminar] = np.interp(wall.Re[~laminar], self.ReTable, self.cfTable)
+        return cf
 
 
 """
@@ -227,7 +248,7 @@ def cf_dechant_solve(Re: Array, F: Array, G: Array) -> Array:
         tol=1e-10,
         maxiter=100,
     )
-    return cf_sqrt**2
+    return cf_sqrt * cf_sqrt
 
 
 """
@@ -247,12 +268,3 @@ def cf_karman_solve(Re: Array) -> Array:
     x0 = np.sqrt(3e-3) * np.ones_like(Re)
     cf_sqrt2 = newton(func=f_karman, fprime=dfdx_karman, x0=x0, args=(Re,))
     return 2.0 * cf_sqrt2**2
-
-
-"""
-Wall Heat Flux Functions
-"""
-
-
-def recovery_temperature(T: Array, M: Array, Pr: Array, gamma: Array) -> Array:
-    return T * (1.0 + (Pr ** (1.0 / 3.0)) * 0.5 * (gamma - 1.0) * M**2)

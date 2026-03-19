@@ -5,7 +5,6 @@ import traceback
 from pathlib import Path
 
 import cantera as ct
-import matplotlib.pyplot as plt
 import numpy as np
 
 from stanshock.components.combustor import Combustor
@@ -17,6 +16,13 @@ from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import InitializeConstant
 from stanshock.system.geometry import Box
+
+"""
+Benchmark case for future implementation of pseudoshock model.
+Inflow, outflow, and geometry based on UMDCI facility.
+Data-Driven One Dimensional Modeling of Pseudoshocks
+"""
+
 
 # Data
 figdir = Path("./figures")
@@ -44,11 +50,9 @@ gas1.TP = T1, p1  # inlet solution/flow initialization
 u1 = M1 * gas1.sound_speed  # inlet velocity, m/s
 
 p2 = p1 * 2.5
-# Mlims, plims, Tlims, ulims, rlims
 tFinal = 0.01
 
 physics_model = ThermoTable(gas1)
-# physics_model = CanteraInterface(gas1)
 BC_inlet = SpecifiedFace(
     location="left", reference_state=(gas1.density, u1, gas1.P, (1.0,))
 )
@@ -65,7 +69,7 @@ ss = Combustor(
     boundary_conditions=BCs,
     physics=physics_model,
     cfl=1.0,
-    # include_diffusion=True,
+    include_diffusion=False,
     output_every=100,
     plot_state_interval=100,
     use_double_flux=False,
@@ -80,29 +84,5 @@ except Exception as e:
     print("Full traceback:")
     traceback.print_exc()
 finally:
-    # ind_s = np.array(ss.pseudoshock.sf_array).flatten()
-
-    # if len(ind_s) != 0:
-    #     t_ps = np.array(ss.pseudoshock.t_ps).flatten()
-    #     u_s = np.array(ss.pseudoshock.us).flatten()
-    #     x_s = x[ind_s]
-    #     sigma = np.array(ss.pseudoshock.sigma_ss).flatten()
-    #     t_ps_ms = t_ps * 1000
-
-    #     plt.figure()
-    #     plt.plot(x_s, t_ps_ms,c='r')
-    #     plt.xlabel('x [m]')
-    #     plt.ylabel('t [ms]')
-    #     plt.xlim([x[0],x[-1]])
-    #     plt.tight_layout()
-    #     plt.show()
-
-    #     plt.figure()
-    #     plt.plot(t_ps_ms, sigma,c='r')
-    #     plt.ylabel(r"$\sigma  [(P_2 / P_1)_{SS} / (P_2 / P_1)_{NS}]$")
-    #     plt.ylim([0, 1.01])
-    #     plt.xlabel(r"$t$ $[\mathrm{ms}]$")
-    #     plt.show()
-
     for diagram in ss.xt_diagrams:
         diagram.plot(figdir=figdir)
