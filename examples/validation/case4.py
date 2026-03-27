@@ -9,6 +9,10 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.models.wall_models import (
+    CompressibleHeatFlux,
+    CompressibleInertSkinFriction,
+)
 from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.physics.thermotable import ThermoTable
@@ -216,7 +220,7 @@ def main(
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
-        include_boundary_layer=True,
+        wall_models=(CompressibleInertSkinFriction(), CompressibleHeatFlux()),
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
     ssbl.probes.append(
@@ -254,7 +258,6 @@ def main(
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
-        include_boundary_layer=False,
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
     ssnbl.probes.append(

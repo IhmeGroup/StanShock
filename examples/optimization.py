@@ -9,6 +9,10 @@ from matplotlib import pyplot as plt
 from scipy.optimize import newton
 
 from stanshock.components.shocktube import ShockTube
+from stanshock.models.wall_models import (
+    CompressibleHeatFlux,
+    CompressibleInertSkinFriction,
+)
 from stanshock.numerics.boundary_conditions import BCInput
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import (
@@ -128,7 +132,7 @@ def main(
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
-        include_boundary_layer=True,
+        wall_models=(CompressibleInertSkinFriction(), CompressibleHeatFlux()),
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
     assert isinstance(ss.geometry, Cylinder)
@@ -159,7 +163,7 @@ def main(
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
-        include_boundary_layer=True,
+        wall_models=(CompressibleInertSkinFriction(), CompressibleHeatFlux()),
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
 
@@ -200,7 +204,7 @@ def main(
         boundary_conditions=boundary_conditions,
         cfl=0.9,
         output_every=100,
-        include_boundary_layer=True,
+        wall_models=(CompressibleInertSkinFriction(), CompressibleHeatFlux()),
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
     )
     if plot_results:

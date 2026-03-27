@@ -303,19 +303,18 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
 
     yname = "h"
     if isinstance(geometry, Cylinder):
-        d = geometry.d_outer(t, x)
+        d = np.broadcast_to(geometry.d_outer(t, x), x.shape)
         ax1.plot(x * scale, d * scale, color="0.8", linestyle="--")
         yname = r"$d_{outer}$"
     elif isinstance(geometry, Box):
-        ax1.plot(x * scale, geometry.h(t, x) * scale, color="0.8", linestyle="--")
+        h = np.broadcast_to(geometry.h(t, x), x.shape)
+        ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
         ax1.axhline(0, color="0.8", linestyle="--")
     elif isinstance(geometry, AsymmetricBox):
-        ax1.plot(
-            x * scale, geometry.upper_wall(t, x) * scale, color="0.8", linestyle="--"
-        )
-        ax1.plot(
-            x * scale, geometry.lower_wall(t, x) * scale, color="0.8", linestyle="--"
-        )
+        upper = np.broadcast_to(geometry.upper_wall(t, x), x.shape)
+        lower = np.broadcast_to(geometry.lower_wall(t, x), x.shape)
+        ax1.plot(x * scale, upper * scale, color="0.8", linestyle="--")
+        ax1.plot(x * scale, lower * scale, color="0.8", linestyle="--")
 
     ax1.set_xlim(x.min() * scale, x.max() * scale)
     ax1.set_aspect("equal")
