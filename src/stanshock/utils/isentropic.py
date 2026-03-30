@@ -58,24 +58,26 @@ def property_ratios(
     return temperature_ratio, pressure_ratio, density_ratio
 
 
-def compute_ratios_across_oblique_shock(mach, gamma, theta):
-    def f_beta(beta):
+def compute_ratios_across_oblique_shock(
+    mach: float, gamma: float, theta: float
+) -> tuple[float, float, float, float]:
+    def f_beta(beta: Array) -> Array:
         return (
-            (2 / np.tan(np.deg2rad(beta)))
+            (2 / np.tan(beta))
             * (
-                (mach**2 * np.sin(np.deg2rad(beta)) ** 2 - 1)
-                / (mach**2 * (gamma + np.cos(np.deg2rad(2 * beta))) + 2)
+                (mach**2 * np.sin(beta) ** 2 - 1)
+                / (mach**2 * (gamma + np.cos(2 * beta)) + 2)
             )
-        ) - np.tan(np.deg2rad(theta))
+        ) - np.tan(theta)
 
-    beta_sol = fsolve(f_beta, x0=30)[0]
+    beta_sol = fsolve(f_beta, x0=np.pi / 6.0)[0]
 
-    Mn0 = mach * np.sin(np.deg2rad(beta_sol))
+    Mn0 = mach * np.sin(beta_sol)
 
     Mn1 = np.sqrt(
         (1 + ((gamma - 1) / 2) * Mn0**2) / ((gamma * Mn0**2) - ((gamma - 1) / 2))
     )
-    M1 = Mn1 / (np.sin(np.deg2rad(beta_sol - theta)))
+    M1 = Mn1 / (np.sin(beta_sol - theta))
 
     density_ratio = ((gamma + 1) * Mn0**2) / (2 + (gamma - 1) * Mn0**2)
 

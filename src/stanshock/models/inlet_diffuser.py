@@ -7,7 +7,7 @@ import numpy as np
 from stanshock.numerics.boundary_conditions import SpecifiedFlux
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array
-from stanshock.system.geometry import AsymmetricBox
+from stanshock.system.geometry import AsymmetricBox, LinearInterpolator
 from stanshock.utils.isentropic import compute_ratios_across_oblique_shock
 
 
@@ -18,29 +18,24 @@ class InletDiffuser(SpecifiedFlux):
         self,
         angle_of_attack: float,
         freestream: FluidState,
-        past_M1: FluidState,
-        past_M2: FluidState,
-        past_M3: FluidState,
         geometry: AsymmetricBox,
         physics: FluidPhysics,
         location: Literal["left", "right"] = "left",
     ) -> None:
-        self.angle_of_attack = angle_of_attack
-        self.freestream = freestream
-        self.past_M1 = past_M1
-        self.past_M2 = past_M2
-        self.past_M3 = past_M3
-        self.fluid_state_regions = [
-            self.freestream,
-            self.past_M1,
-            self.past_M2,
-            self.past_M3,
-        ]
         self.geometry = geometry
         self.physics = physics
 
+        # Compute the (geometry-fixed) turn angles for the flow
+        self.turn_angles = self.compute_turn_angles()
+        self._angle_of_attack: float = 0.0
+        self.angle_of_attack = angle_of_attack
+
+        # Set the freestream properties, which updates the post-shock properties
+        self.fluid_state_regions: list[FluidState] = []
+        self.inflow_known: bool = False  # Whether inflow properties have been computed
+        self.freestream = freestream
         self.reference_flux: Array = np.zeros((self.physics.n_scalars + 2,))
-        self.reference_flux = self.compute_flux(time=0.0)
+        self.reference_flux: Array = self.compute_flux(time=0.0)
 
         super().__init__(self.reference_flux, location)
         if self.location == "left":
@@ -48,16 +43,78 @@ class InletDiffuser(SpecifiedFlux):
         else:
             self.idx_boundary_face = -1
 
+    @property
+    def angle_of_attack(self) -> float:
+        return self._angle_of_attack
+
+    @angle_of_attack.setter
+    def angle_of_attack(self, angle_of_attack: float) -> None:
+        if angle_of_attack != self._angle_of_attack:
+            self._angle_of_attack = angle_of_attack
+            self.inflow_known = False  # Invalidate old inflow values
+
+    def compute_turn_angles(self) -> Array:
+        """Enumerate the turn angles of the flow for zero angle of attack.
+
+        Assumes only strong shocks at sharp angles, and that each flow region of
+        interest remains parallel to the wall.
+
+        Currently assumes fixed geometry, but could be updated for time-varying upper
+        and lower walls.
+        """
+        # Extract the inlet geometry
+        assert isinstance(self.geometry.lower_wall, LinearInterpolator)
+        x_lower = self.geometry.lower_wall.xp
+        y_lower = self.geometry.lower_wall.fp
+        theta_lower = np.arctan2(np.diff(y_lower), np.diff(x_lower))
+
+        assert isinstance(self.geometry.upper_wall, LinearInterpolator)
+        x_upper = self.geometry.upper_wall.xp
+        y_upper = self.geometry.upper_wall.fp
+        theta_upper = np.arctan2(np.diff(y_upper), np.diff(x_upper))
+
+        # Sort angles in x-direction and locate physical turns
+        x = np.concatenate((x_lower[:-1], x_upper[:-1]))
+        theta = np.concatenate((theta_lower, theta_upper))
+        idx_sort = np.argsort(x)
+        x = x[idx_sort]
+        theta = theta[idx_sort]
+
+        x_inlet = self.geometry.xf[0]
+        turns: list[float] = []
+        theta_current = 0.0
+        for i in range(len(x)):
+            if x[i] >= x_inlet:
+                break
+
+            if theta[i] != theta_current:
+                turns += [theta[i]]
+                theta_current = theta[i]
+
+        return np.array(turns)
+
+    @property
+    def freestream(self) -> FluidState:
+        return self._freestream
+
+    @freestream.setter
+    def freestream(self, freestream: FluidState) -> None:
+        self._freestream = freestream
+        self.inflow_known = False  # Invalidate old inflow values
+
     def compute_flux(self, time: float) -> Array:
         _ = time
-        rho = self.freestream.density[0]
-        u = self.freestream.velocity[0]
-        Y = self.freestream.composition[0]
-        assert rho is not None
-        assert u is not None
+        if self.inflow_known:
+            # Reference flux doesn't need to be updated
+            return self.reference_flux
+
+        inflow_state = self.compute_combustor_inlet_properties()
+        rho = self.physics.get_density(inflow_state)
+        u = self.physics.get_velocity(inflow_state)
+        p = self.physics.get_pressure(inflow_state)
+        e_int = self.physics.get_internal_energy(inflow_state)
+        Y = inflow_state.composition
         assert Y is not None
-        p = self.physics.get_pressure(self.freestream)[0]
-        e_int = self.physics.get_internal_energy(self.freestream)[0]
 
         # Momentum flux
         self.reference_flux[0] = rho * u**2 + p
@@ -66,6 +123,9 @@ class InletDiffuser(SpecifiedFlux):
         # Species fluxes
         self.reference_flux[2:] = rho * u * Y
 
+        # Set flag so the state and flux don't need to be recalculated
+        self.inflow_known = True
+
         return self.reference_flux
 
     def update(self, time: float, target: Array) -> Array:
@@ -73,33 +133,49 @@ class InletDiffuser(SpecifiedFlux):
 
         return target
 
-    def compute_combustor_inlet_properties(self, n_shocks, flow_deflection_angles):
+    def compute_combustor_inlet_properties(self) -> FluidState:
+        n_shocks = len(self.turn_angles)
+
+        # Start with freestream properties
+        freestream = self.freestream
+        self.fluid_state_regions = [freestream]
+        rho = self.physics.get_density(freestream)
+        T = self.physics.get_temperature(freestream)
+        p = self.physics.get_pressure(freestream)
+        gamma = float(self.physics.get_gamma(freestream)[0])
+        u = self.physics.get_velocity(freestream)
+        mach = float((u / self.physics.get_sound_speed(freestream))[0])
+        # print(f"Freestream Mach: {mach[0]}, Angle of Attack: {np.rad2deg(self.angle_of_attack)}")
+
+        # Freeze composition:
+        composition = freestream.composition
+        assert composition is not None
+
+        # March across each shock
+        flow_angle = -self.angle_of_attack
         for i in range(n_shocks):
-            if i == 0:
-                mach = self.fluid_state_regions[
-                    i
-                ].velocity / self.physics.get_sound_speed(self.freestream)
-                print(f"Mach_Freestream: {mach}")
-            rho = self.fluid_state_regions[i].density[0]
-            pressure = self.fluid_state_regions[i].pressure[0]
-            temp = self.fluid_state_regions[i].temperature[0]
-            gamma = self.physics.get_gamma(self.fluid_state_regions[i])
-            new_mach, density_ratio, pressure_ratio, temperature_ratio = (
+            turn_angle = np.abs(self.turn_angles[i] - flow_angle)
+            flow_angle = self.turn_angles[i]
+
+            mach, density_ratio, pressure_ratio, temperature_ratio = (
                 compute_ratios_across_oblique_shock(
-                    mach=mach, gamma=gamma, theta=flow_deflection_angles[i]
+                    mach=mach, gamma=gamma, theta=turn_angle
                 )
             )
-            mach = new_mach
-            print(f"Mach_{i + 1}: {mach}")
-            temp = temp * temperature_ratio
-            pressure = pressure * pressure_ratio
+            # print(f"Mach_{i + 1}: {mach[0]}, Turn angle: {np.rad2deg(turn_angle)}")
+            T = T * temperature_ratio
+            p = p * pressure_ratio
             rho = rho * density_ratio
-            self.fluid_state_regions[i + 1].temperature = temp
-            self.fluid_state_regions[i + 1].pressure = pressure
-            self.fluid_state_regions[i + 1].density = rho
-            self.fluid_state_regions[i + 1].velocity = (
-                mach * self.physics.get_sound_speed(self.fluid_state_regions[i])
+            new_state = FluidState(
+                shape=(1,),
+                temperature=T,
+                pressure=p,
+                density=rho,
+                composition=composition,
             )
+            new_state.velocity = mach * self.physics.get_sound_speed(new_state)
+            gamma = float(self.physics.get_gamma(new_state)[0])
 
-            combustor_inlet_properties = 1  # dummy placeholder
-        return combustor_inlet_properties
+            self.fluid_state_regions.append(new_state)
+
+        return self.fluid_state_regions[-1]
