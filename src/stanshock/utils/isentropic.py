@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import overload
 
 import numpy as np
-from scipy.optimize import minimize_scalar
+from scipy.optimize import fsolve, minimize_scalar
 from scipy.optimize.elementwise import find_root
 
 from stanshock.system.backend import Array
@@ -56,3 +56,33 @@ def property_ratios(
     density_ratio = temperature_ratio ** (1 / (g - 1))
 
     return temperature_ratio, pressure_ratio, density_ratio
+
+
+def compute_ratios_across_oblique_shock(
+    mach: float, gamma: float, theta: float
+) -> tuple[float, float, float, float]:
+    def f_beta(beta: Array) -> Array:
+        return (
+            (2 / np.tan(beta))
+            * (
+                (mach**2 * np.sin(beta) ** 2 - 1)
+                / (mach**2 * (gamma + np.cos(2 * beta)) + 2)
+            )
+        ) - np.tan(theta)
+
+    beta_sol = fsolve(f_beta, x0=np.pi / 6.0)[0]
+
+    Mn0 = mach * np.sin(beta_sol)
+
+    Mn1 = np.sqrt(
+        (1 + ((gamma - 1) / 2) * Mn0**2) / ((gamma * Mn0**2) - ((gamma - 1) / 2))
+    )
+    M1 = Mn1 / (np.sin(beta_sol - theta))
+
+    density_ratio = ((gamma + 1) * Mn0**2) / (2 + (gamma - 1) * Mn0**2)
+
+    pressure_ratio = 1 + ((2 * gamma) / (gamma + 1)) * (Mn0**2 - 1)
+
+    temperature_ratio = pressure_ratio * (1 / density_ratio)
+
+    return M1, density_ratio, pressure_ratio, temperature_ratio
