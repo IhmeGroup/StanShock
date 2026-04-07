@@ -4,6 +4,7 @@ import functools
 import warnings
 from pathlib import Path
 
+import cantera as ct
 import numpy as np
 from joblib import Parallel, delayed
 from scipy import integrate, interpolate, optimize, special, stats
@@ -145,21 +146,14 @@ class JICModel(RightHandSide):
         # Properties of the injected fluid
         self.t_inj = t_inj
         self.phi_inj = phi_inj
-        self.p_inj = np.zeros_like(self.t_inj)
-        self.c_inj = np.zeros_like(self.t_inj)
-
-        for i in range(len(self.t_inj)):
-            if np.isnan(self.rho_inj[i]):
-                continue
-            gas.TDX = self.T_inj[i], self.rho_inj[i], self.fuel_def
-            self.p_inj[i] = gas.P
-            self.c_inj[i] = gas.sound_speed
-        self.Y_fuel = gas.Y
-
-        self.E_inj = gas.int_energy_mass + 0.5 * self.u_inj**2
-        self.W_inj = gas.mean_molecular_weight
-        self.gamma_inj = gas.cp / gas.cv
-
+        sol = ct.SolutionArray(gas, shape=self.t_inj.shape)
+        sol.TDX = self.T_inj, self.rho_inj, self.fuel_def
+        self.p_inj = sol.P
+        self.E_inj = sol.int_energy_mass + 0.5 * self.u_inj**2
+        self.W_inj = sol.mean_molecular_weight
+        self.gamma_inj = sol.cp / sol.cv
+        self.c_inj = sol.sound_speed
+        self.Y_fuel = sol.Y[0]
         self.M_inj = 1.0
         self.mdot_inj = self.n_inj * self.rho_inj * self.u_inj * self.A_inj
         self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
@@ -174,6 +168,7 @@ class JICModel(RightHandSide):
         self.rho_inj_unique = self.rho_inj[self.mdot_inj_unique_idx]
         self.u_inj_unique = self.u_inj[self.mdot_inj_unique_idx]
         self.p_inj_unique = self.p_inj[self.mdot_inj_unique_idx]
+        self.u_inj_unique = self.u_inj[self.mdot_inj_unique_idx]
 
         # Position of the first injected fluid particle
         self.fluid_tips = np.array([[self.x_inj, self.mdot_inj[0]]])
@@ -395,7 +390,7 @@ class JICModel(RightHandSide):
         print("Computing adjustment factor...")
         self.adjustment_factor_interp = []
         for i_m in tqdm(range(len(self.mdot_inj_unique))):
-            if np.isnan(self.rho_inj_unique[i_m]):
+            if self.u_inj_unique[i_m] == 0.0:
                 self.adjustment_factor_interp.append(lambda x: np.ones_like(x))
                 continue
 
@@ -851,14 +846,13 @@ class JICModel(RightHandSide):
     def source(
         self,
         time: float,
-        state_array_local: Array | None,
+        state_array_local: Array,
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
         """Compute a fuel injector source term to target the desired mixture fraction profile."""
         _ = gamma_star, e0_star
         assert self.geometry is not None
-        assert state_array_local is not None
         state_array_local = np.reshape(state_array_local, self.shape_input)
         rhs = np.zeros_like(state_array_local)
 
@@ -874,7 +868,9 @@ class JICModel(RightHandSide):
         dx = self.geometry.dx
         if isinstance(dx, np.ndarray):
             dx = dx[idx]
-        mdot *= dx / L_src
+            mdot *= dx / np.sum(dx)
+        else:
+            mdot *= 1.0 / len(idx)
 
         # Compute the source term
         rhs[idx, 0] = mdot * u_inj * np.cos(self.theta_inj)  # momentum
