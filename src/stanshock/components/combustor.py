@@ -67,7 +67,7 @@ class Combustor:
         source_terms: RightHandSide
         | list[RightHandSide]
         | None = None,  # Catch-all source term(s)
-        injector: JICModel | None = None,  # injector model
+        injector: list[JICModel] | JICModel | None = None,  # injector model
         flux_function: RiemannSolver = hllc_flux_vectorized,
         inviscid_face_extrapolator: type[FaceExtrapolator] = FifthOrderWeno,
         viscous_face_extrapolator: type[FaceExtrapolator] = FirstOrder,

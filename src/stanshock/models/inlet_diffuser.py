@@ -113,7 +113,7 @@ class InletDiffuser(SpecifiedFlux):
         u = self.physics.get_velocity(inflow_state)
         p = self.physics.get_pressure(inflow_state)
         e_int = self.physics.get_internal_energy(inflow_state)
-        Y = inflow_state.composition
+        Y = self.physics.get_composition(inflow_state)
         assert Y is not None
 
         # Momentum flux
@@ -148,8 +148,7 @@ class InletDiffuser(SpecifiedFlux):
         # print(f"Freestream Mach: {mach[0]}, Angle of Attack: {np.rad2deg(self.angle_of_attack)}")
 
         # Freeze composition:
-        composition = freestream.composition
-        assert composition is not None
+        composition = self.physics.get_composition(freestream)
 
         # March across each shock
         flow_angle = -self.angle_of_attack
