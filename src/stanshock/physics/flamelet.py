@@ -121,12 +121,31 @@ class FPVTable(FluidPhysics):
         state.normalized_progress_variable = self.get_normalized_progress_variable(Z, C)
         return state
 
-    def get_composition(self, Y: Array) -> Array:
+    def get_composition_from_mass_fractions(self, Y: Array) -> Array:
         """Converts mass fractions to mixture fraction and progress variable."""
         Z = self.get_bilger_mixture_fraction(Y)
         C = self.get_progress_variable(Y)
 
         return np.stack([np.ones_like(Z), Z, C], axis=1)
+
+    def get_mass_fractions(self, state: FluidState) -> Array:
+        """Returns mass fractions from transported scalars."""
+        if state.normalized_progress_variable is None:
+            state = self.set_state(state)
+        assert state.mixture_fraction is not None
+        assert state.normalized_progress_variable is not None
+
+        Z = state.mixture_fraction
+        Q = np.zeros_like(Z)
+        L = state.normalized_progress_variable
+
+        nsp = self.gas.n_species
+        Y = np.zeros((*state.shape, nsp))
+        for isp in range(nsp):
+            sp = self.gas.species_names[isp]
+            Y[..., isp] = self.lookup_direct(sp, Z, Q, L)
+
+        return Y
 
     def get_normalized_progress_variable(self, Z: Array, C: Array) -> Array:
         """
@@ -249,6 +268,9 @@ class FPVTable(FluidPhysics):
         StanShock transports the total non-chemical energy.
         """
         R = self.get_specific_gas_constant(state)
+        if state.temperature is not None:
+            return state.temperature
+
         if state.pressure is not None:
             assert state.density is not None
             state.temperature = state.pressure / (state.density * R)
@@ -270,6 +292,14 @@ class FPVTable(FluidPhysics):
             R = self.get_specific_gas_constant(state)
             state.pressure = state.temperature * R * state.density
         return state.pressure
+
+    def get_density(self, state: FluidState) -> Array:
+        if state.density is None:
+            assert state.pressure is not None
+            assert state.temperature is not None
+            R = self.get_specific_gas_constant(state)
+            state.density = state.pressure / (state.temperature * R)
+        return state.density
 
     def get_internal_energy(self, state: FluidState) -> Array:
         if state.e0_star is not None:
@@ -308,7 +338,8 @@ class FPVTable(FluidPhysics):
         return np.zeros(state.shape)
 
     def get_sound_speed(self, state: FluidState) -> Array:
-        assert state.density is not None
+        if state.density is None:
+            state.density = self.get_density(state)
         if state.gamma is None:
             state.gamma = self.get_gamma(state)
         if state.pressure is None:
