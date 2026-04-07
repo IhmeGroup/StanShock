@@ -269,7 +269,12 @@ class FluidPhysics(ABC):
         state._cache_valid = True
         return state
 
-    def get_composition(self, Y: Array) -> Array:
+    def get_composition(self, state: FluidState) -> Array:
+        """Returns transported scalars."""
+        assert state.composition is not None
+        return state.composition
+
+    def get_composition_from_mass_fractions(self, Y: Array) -> Array:
         """Converts mass fractions to set of transported scalars."""
         return Y
 
