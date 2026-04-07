@@ -352,6 +352,11 @@ class Combustor:
             p_new = self.physics.get_pressure(self.state)
             self.state.gamma = self.physics.get_gamma(self.state)
 
+            # Check for unphysical solution
+            if np.any(np.isnan(p_new)):
+                msg = "NaN detected!"
+                raise ValueError(msg)
+
             # perform other updates
             self.update_indices(self.time_integrator)
             self.update_probes(iters)
