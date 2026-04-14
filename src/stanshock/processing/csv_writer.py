@@ -4,6 +4,8 @@ from pathlib import Path
 
 import numpy as np
 
+from stanshock.processing.plot import VariableInfo, get_variable_info_map
+
 
 class CSVWriter:
     """
@@ -16,6 +18,8 @@ class CSVWriter:
         combustor,
         filename: str | Path,
         interval: int = 100,
+        variables: list[str] | None = None,
+        variable_info_map: dict[str, VariableInfo] | None = None,
     ) -> None:
         """
         Initialize CSV writer.
@@ -33,18 +37,16 @@ class CSVWriter:
         self.output_counter = 0
         self.idx = combustor.geometry.idx_cells
         self.x = combustor.geometry.xc[combustor.geometry.idx_cells]
-        self.headers = ["x", "rho", "u", "p", "a", "T"]
+        if variables is None:
+            variables = ["x", "rho", "u", "p", "a", "T"]
+        self.headers = variables
+        if variable_info_map is None:
+            variable_info_map = get_variable_info_map(combustor.physics)
+        self.variable_info_map = variable_info_map
         self.parent = self.base_filename.parent
         self.stem = self.base_filename.stem
         self.suffix = self.base_filename.suffix
-        self.fmt = [
-            "%.4e",  # x
-            "%.4e",  # rho
-            "%.4e",  # u
-            "%.3e",  # p
-            "%.3e",  # a
-            "%.3e",  # T
-        ]
+        self.fmt = ["%.4e"] + [variable_info_map[x].fmt for x in self.headers[1:]]
 
     def update(self, iteration: int) -> None:
         """Update CSV with current state if iteration matches interval."""
@@ -60,25 +62,10 @@ class CSVWriter:
         """Write current state to a new numbered CSV file."""
 
         combustor = self.combustor
-        state = combustor.state
-        physics = combustor.physics
-
-        rho = state.density[self.idx]
-        u = state.velocity[self.idx]
-        p = state.pressure[self.idx]
-
-        T = physics.get_temperature(state)[self.idx]
-        a = physics.get_sound_speed(state)[self.idx]
+        state = combustor.state[self.idx]
 
         state_matrix = np.column_stack(
-            (
-                self.x,
-                rho,
-                u,
-                p,
-                a,
-                T,
-            )
+            (self.x, *[self.variable_info_map[v].fun(state) for v in self.headers[1:]])
         )
 
         filename = self.parent / f"{self.stem}_{self.output_counter:05d}{self.suffix}"

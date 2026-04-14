@@ -27,6 +27,7 @@ class VariableInfo:
     plot_label: str
     fun: Callable[[FluidState], Array]
     scale: float = 1.0
+    fmt: str = "%.4e"
 
 
 VariableInfoMap: TypeAlias = dict[str, VariableInfo]
@@ -55,6 +56,11 @@ def get_variable_info_map(physics: FluidPhysics) -> VariableInfoMap:
         ),
         "gamma": VariableInfo(
             short_name="g", plot_label=r"$\gamma~[\mathrm{-}]$", fun=physics.get_gamma
+        ),
+        "sound speed": VariableInfo(
+            short_name="a",
+            plot_label=r"$a~[\mathrm{m/s}]$",
+            fun=physics.get_sound_speed,
         ),
         "mach": VariableInfo(
             short_name="m",
