@@ -7,6 +7,7 @@ experiments and scramjet engines.
 
 from __future__ import annotations
 
-from ._version import version as __version__
+__all__ = ["__version__", "config"]
 
-__all__ = ["__version__"]
+from ._config import config
+from ._version import version as __version__

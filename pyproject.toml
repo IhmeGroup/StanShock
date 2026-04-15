@@ -35,10 +35,9 @@ dynamic = ["version"]
 dependencies = [
   "numpy",
   "scipy",
-  # "scipy-stubs",
+  "scipy-stubs",
   "scikit-learn",
   "matplotlib",
-  "numba",
   "cantera",
   "joblib",
   "tqdm",
@@ -48,7 +47,10 @@ dependencies = [
   "imageio",
   # Conditional:
   "cantera>=3.2.0; python_version>='3.14'",
-  "numba>=0.63.0rc1; python_version>='3.14'",
+  # "array-api-typing@git+https://github.com/data-apis/array-api-typing.git",
+  "numtype[numpy]",
+  "array-api-compat@git+https://github.com/data-apis/array-api-compat.git",
+  "array-api-extra@git+https://github.com/data-apis/array-api-extra.git",
 ]
 
 [project.urls]
@@ -78,23 +80,27 @@ docs = [
 [tool.hatch]
 version.source = "vcs"
 build.hooks.vcs.version-file = "src/stanshock/_version.py"
+metadata.allow-direct-references = true
 
 [tool.hatch.envs.default]
 # duplicate for now since hatch doesn't support groups yet
 dependencies = [
   "numpy",
   "scipy",
-  # "scipy-stubs",
+  "scipy-stubs",
   "scikit-learn",
   "matplotlib",
-  "numba",
   "cantera",
   "joblib",
   "tqdm",
   "tqdm_joblib",
   # "types-tqdm",
   "h5py",
+  "h5py-stubs",
   "imageio",
+  "numtype[numpy]@git+https://github.com/numpy/numtype.git",
+  "array-api-compat@git+https://github.com/data-apis/array-api-compat.git",
+  "array-api-extra@git+https://github.com/data-apis/array-api-extra.git",
 ]
 scripts.test = "pytest {args}"
 
@@ -136,8 +142,8 @@ disallow_untyped_defs = true
 disallow_incomplete_defs = true
 
 [[tool.mypy.overrides]]
-module = ["numba.*", "h5py.*"]
-ignore_missing_imports = true
+module = ["array_api_extra.*"]
+follow_untyped_imports = true
 
 
 [tool.basedpyright]
