@@ -4,14 +4,12 @@ from abc import abstractmethod
 from collections.abc import Callable
 from typing import Literal, TypedDict
 
-import numpy as np
-
 from stanshock.numerics.boundary_conditions import BoundaryConditions
 from stanshock.numerics.face_average import FaceAverage
 from stanshock.numerics.face_extrapolation import FaceExtrapolator
 from stanshock.numerics.gradient import Gradient
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.backend import Array, Index, TypeAlias, Unpack
+from stanshock.system.backend import Array, Index, Int, TypeAlias, Unpack, at, xp
 from stanshock.system.geometry import Geometry
 
 # Define the optional precomputation steps to be called before a given source term
@@ -64,21 +62,21 @@ class RightHandSide:
         n_vars = self.physics.n_scalars + 2 if self.physics is not None else 1
 
         # Default to updating everything
-        self.idx_input = np.s_[:]
-        self.idx_output = np.s_[:]
-        self.idx_source = np.s_[:]
+        self.idx_input = xp.s_[:]
+        self.idx_output = xp.s_[:]
+        self.idx_source = xp.s_[:]
 
         if self.geometry is not None:
             if self.face_extrapolator is not None:
                 # Generally we want to include ghost layers when using face extrapolation
                 n_cells_input = self.geometry.n_cells
-                self.idx_input = np.s_[:]
+                self.idx_input = xp.s_[:]
                 self.idx_output = self.geometry.idx_cells
             else:
                 # Otherwise we can drop the ghost cells
                 n_cells_input = self.geometry.n_cells_interior
                 self.idx_input = self.geometry.idx_cells
-                self.idx_output = np.s_[:]
+                self.idx_output = xp.s_[:]
 
             # Don't update the ghost cells either way
             n_cells_output = self.geometry.n_cells_interior
@@ -110,7 +108,7 @@ class RightHandSide:
         May include optional forward transforms.
         """
         _ = time
-        state_array_local = np.reshape(state_array, self.shape_full)[self.idx_input]
+        state_array_local = xp.reshape(state_array, self.shape_full)[self.idx_input]
 
         gamma_star_local: Array | None = None
         e0_star_local: Array | None = None
@@ -119,7 +117,7 @@ class RightHandSide:
         if e0_star is not None:
             e0_star_local = e0_star[self.idx_input]
 
-        return np.ravel(state_array_local), gamma_star_local, e0_star_local
+        return xp.ravel(state_array_local), gamma_star_local, e0_star_local
 
     def after_time_integration(
         self,
@@ -151,17 +149,17 @@ class RightHandSide:
                     self.physics.get_double_flux_variables(state)
                 )
 
-                gamma_star[self.idx_input] = gamma_star_local
+                gamma_star = at(gamma_star)[self.idx_input].set(gamma_star_local)
                 assert e0_star is not None
-                e0_star[self.idx_input] = e0_star_local
+                e0_star = at(e0_star)[self.idx_input].set(e0_star_local)
 
-        state_array = np.reshape(state_array, self.shape_full)
-        state_array[self.idx_input] = state_array_local
+        state_array = xp.reshape(state_array, self.shape_full)
+        state_array = at(state_array)[self.idx_input].set(state_array_local)
 
         # Update the input indices for next time step
         self.update_indices(time, state)
 
-        return np.ravel(state_array), gamma_star, e0_star
+        return xp.ravel(state_array), gamma_star, e0_star
 
     def precompute_for_source(
         self,
@@ -177,7 +175,7 @@ class RightHandSide:
         FluidState | None,
     ]:
         """Perform all calculations which must occur prior to source term evaluation."""
-        state_array_local = np.reshape(state_array_local, self.shape_input)
+        state_array_local = xp.reshape(state_array_local, self.shape_input)
 
         if self.boundary_conditions is not None:
             state_array_local = self.boundary_conditions.update_ghost_layers(
@@ -238,10 +236,12 @@ class RightHandSide:
 
     def add_source(self, y: Array, dy: Array) -> Array:
         """Add (2D) source term to the (1D) state array."""
-        dy = np.reshape(dy, self.shape_output)
-        state_array_local = np.reshape(y, self.shape_input)
-        state_array_local[self.idx_output, self.idx_source] += dy
-        return np.ravel(state_array_local)
+        dy = xp.reshape(dy, self.shape_output)
+        state_array_local = xp.reshape(y, self.shape_input)
+        state_array_local = at(state_array_local)[self.idx_output, self.idx_source].add(
+            dy
+        )
+        return xp.ravel(state_array_local)
 
     def source_full(
         self,
@@ -251,7 +251,7 @@ class RightHandSide:
         e0_star: Array | None = None,
     ) -> Array:
         """Reshape the source term to match the state array."""
-        dydt = np.zeros_like(state_array_local)
+        dydt = xp.zeros_like(state_array_local)
 
         return self.add_source(
             dydt, self.source(time, state_array_local, gamma_star, e0_star)
@@ -277,10 +277,10 @@ class FastSlowSource(RightHandSide):
     _mode: FastSlowMode
 
     # By default, all locations and sources are set to slow:
-    idx_output_implicit: Index = np.array([], dtype=np.int64)
-    idx_source_implicit: Index = np.s_[:]
-    idx_output_explicit: Index = np.s_[:]
-    idx_source_explicit: Index = np.s_[:]
+    idx_output_implicit: Index = xp.array([], dtype=Int)
+    idx_source_implicit: Index = xp.s_[:]
+    idx_output_explicit: Index = xp.s_[:]
+    idx_source_explicit: Index = xp.s_[:]
 
     def __init__(
         self, mode: FastSlowMode = "slow", **precompute_steps: Unpack[PrecomputeSteps]
@@ -299,11 +299,11 @@ class FastSlowSource(RightHandSide):
         if mode == "fast":
             self.idx_output = self.idx_output_implicit
             self.idx_source = self.idx_source_implicit
-            self.source_implementation = self.source_fast
+            self.source_implementation = self.source_fast  # type: ignore[method-assign]
         elif mode == "slow":
             self.idx_output = self.idx_output_explicit
             self.idx_source = self.idx_source_explicit
-            self.source_implementation = self.source_slow
+            self.source_implementation = self.source_slow  # type: ignore[method-assign]
 
     @abstractmethod
     def source_slow(
@@ -331,7 +331,7 @@ class FastSlowSource(RightHandSide):
 
 
 class CombinedSource(RightHandSide):
-    REQUIRED_PRECOMPUTE_STEPS = ()
+    REQUIRED_PRECOMPUTE_STEPS: tuple[PrecomputeStepName, ...] = ()
 
     def __init__(self, sources: list[RightHandSide]) -> None:
         self.sources = sources
@@ -355,7 +355,7 @@ class CombinedSource(RightHandSide):
         # Don't modify the shapes, as the sources will handle that internally
         # self.shape_full = max(source.shape_full for source in self.sources)
         # self.shape_input = self.shape_output = self.shape_full
-        # self.idx_input = self.idx_output = np.s_[:]
+        # self.idx_input = self.idx_output = xp.s_[:]
 
     def source(
         self,
@@ -364,7 +364,7 @@ class CombinedSource(RightHandSide):
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
-        rhs: Array = np.zeros_like(state_array_local)
+        rhs: Array = xp.zeros_like(state_array_local)
 
         state_array_local, state, face_states, avg_face_states, face_gradients = (
             self.precompute_for_source(time, state_array_local, gamma_star, e0_star)

@@ -3,9 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal
 
-import numpy as np
-
-from stanshock.system.backend import Array, Index, TypeAlias
+from stanshock.system.backend import Array, Index, TypeAlias, at, is_array, to_array, xp
 
 SpatioTemporalFunction: TypeAlias = Callable[[float, Array], Array | float]
 SpatioTemporalLike: TypeAlias = (
@@ -28,7 +26,7 @@ class LinearInterpolator:
         self.fp: Array = fp
 
     def __call__(self, _time: float, x: Array) -> Array:
-        return np.interp(x=x, xp=self.xp, fp=self.fp)
+        return xp.interp(x=x, xp=self.xp, fp=self.fp)
 
 
 class Geometry:
@@ -47,9 +45,9 @@ class Geometry:
         self.xc: Array = 0.5 * (xf[1:] + xf[:-1])  # Cell-center locations
         self.n_cells: int = self.n_faces - 1
         self.n_cells_interior = self.n_cells + 0
-        self.dx: Array | float = np.diff(self.xf)
+        self.dx: Array | float = xp.diff(self.xf)
         # If mesh spacing is constant, simplify this to a float
-        if np.max(np.abs(np.diff(self.dx))) < 1e-8:
+        if xp.max(xp.abs(xp.diff(self.dx))) < 1e-8:
             self.dx = self.dx[0]
 
         # Denote distinct regions by their x-range, mapping them to the mesh index
@@ -70,7 +68,9 @@ class Geometry:
             if isinstance(area, float | int):
                 self.dlnA_dx = None
             else:
-                if isinstance(area, np.ndarray):
+                x_tmp: Array
+                y_tmp: Array | float
+                if is_array(area):
                     x_tmp, y_tmp = self.xf, area
                 elif isinstance(area, tuple):
                     x_tmp, y_tmp = area
@@ -83,8 +83,8 @@ class Geometry:
                 else:
                     x_midpoint: Array = 0.5 * (x_tmp[1:] + x_tmp[:-1])
                     area_midpoint: Array = 0.5 * (y_tmp[1:] + y_tmp[:-1])
-                    dlnA_dx_fd: Array = np.diff(y_tmp) / (
-                        np.diff(x_tmp) * area_midpoint
+                    dlnA_dx_fd: Array = xp.diff(y_tmp) / (
+                        xp.diff(x_tmp) * area_midpoint
                     )
                     self.dlnA_dx = LinearInterpolator(xp=x_midpoint, fp=dlnA_dx_fd)
         else:
@@ -92,7 +92,7 @@ class Geometry:
 
         # Add ghost layers
         self.n_ghost_layers = 0
-        self.idx_cells: Index = np.s_[:]
+        self.idx_cells: Index = xp.s_[:]
         self.setup_ghost_layers(n_ghost_layers)
 
     def to_spatiotemporal(
@@ -106,7 +106,7 @@ class Geometry:
             func = ConstantValue(constant=value)
         elif isinstance(value, tuple):
             func = LinearInterpolator(xp=value[0], fp=value[1])
-        elif isinstance(value, np.ndarray):
+        elif is_array(value):
             func = LinearInterpolator(xp=self.xf, fp=value)
         else:
             func = value
@@ -119,17 +119,17 @@ class Geometry:
             return
 
         if isinstance(self.dx, float):
-            xc_left = self.xc[0] - np.arange(n_added, 0, -1) * self.dx
-            xc_right = self.xc[-1] + np.arange(1, n_added + 1) * self.dx
+            xc_left = self.xc[0] - xp.arange(n_added, 0, -1) * self.dx
+            xc_right = self.xc[-1] + xp.arange(1, n_added + 1) * self.dx
         else:
-            self.dx = np.pad(self.dx, pad_width=n_added, mode="edge")
-            xc_left = self.xc[0] - np.cumulative_sum(self.dx[n_added - 1 :: -1])[::-1]
-            xc_right = self.xc[-1] + np.cumulative_sum(self.dx[-n_added:])
+            self.dx = xp.pad(self.dx, pad_width=n_added, mode="edge")
+            xc_left = self.xc[0] - xp.cumulative_sum(self.dx[n_added - 1 :: -1])[::-1]
+            xc_right = self.xc[-1] + xp.cumulative_sum(self.dx[-n_added:])
 
-        self.xc = np.concatenate([xc_left, self.xc, xc_right])
+        self.xc = xp.concatenate([xc_left, self.xc, xc_right])
         self.n_ghost_layers = n_ghost_layers
         self.n_cells = len(self.xc)
-        self.idx_cells = np.s_[self.n_ghost_layers : -self.n_ghost_layers]
+        self.idx_cells = xp.s_[self.n_ghost_layers : -self.n_ghost_layers]
 
     def hydraulic_diameter(
         self, time: float = 0.0, x: Array | None = None
@@ -137,7 +137,7 @@ class Geometry:
         if x is None:
             x = self.xc[self.idx_cells]
 
-        return 4.0 * self.area(time, x) / self.perimeter(time, x)
+        return to_array(4.0 * self.area(time, x) / self.perimeter(time, x))
 
     def characteristic_length(
         self, time: float = 0.0, x: Array | None = None
@@ -149,14 +149,14 @@ class Geometry:
 
     def get_region_index(self, region_name: str) -> Index:
         if region_name not in self.regions:
-            return np.s_[:0]
+            return xp.s_[:0]
 
         if region_name not in self._region_indices:
             x_region_start, x_region_end = self.regions[region_name]
-            start_index: np.intp = np.argmin(np.abs(self.xc - x_region_start))
-            end_index: np.intp = np.argmin(np.abs(self.xc - x_region_end))
+            start_index: xp.intp = xp.argmin(xp.abs(self.xc - x_region_start))
+            end_index: xp.intp = xp.argmin(xp.abs(self.xc - x_region_end))
 
-            self._region_indices[region_name] = np.s_[start_index:end_index]
+            self._region_indices[region_name] = xp.s_[start_index:end_index]
 
         return self._region_indices[region_name]
 
@@ -173,17 +173,17 @@ class Geometry:
             if not isinstance(dx, float | int):
                 dx = dx[self.idx_cells]
         else:
-            dx = np.diff(x)
+            dx = xp.diff(x)
 
         x_half = 0.5 * (x[1:] + x[:-1])
 
         area = self.area(time, x)
         area_half = self.area(time, x_half)
         if isinstance(area, float | int):
-            area = np.full_like(x, area)
-            area_half = np.full_like(x_half, area_half)
+            area = xp.full_like(x, area)
+            area_half = xp.full_like(x_half, area_half)
 
-        return (area[1:] + 4.0 * area_half + area[:-1]) * dx / 6.0
+        return to_array(area[1:] + 4.0 * area_half + area[:-1] * dx / 6.0)
 
 
 class Cylinder(Geometry):
@@ -209,19 +209,19 @@ class Cylinder(Geometry):
         area: SpatioTemporalLike = self._area
         perimeter: SpatioTemporalLike = self._perimeter
 
-        if isinstance(d_outer, np.ndarray | float | int) and isinstance(
-            d_inner, np.ndarray | float | int
+        if (is_array(d_outer) or isinstance(d_outer, float | int)) and (
+            is_array(d_inner) or isinstance(d_inner, float | int)
         ):
-            area = 0.25 * np.pi * (d_outer**2 - d_inner**2)
-            perimeter = np.pi * (d_outer + d_inner)
+            area = 0.25 * xp.pi * (d_outer**2 - d_inner**2)
+            perimeter = xp.pi * (d_outer + d_inner)
 
         super().__init__(xf, area, perimeter, dlnA_dt, dlnA_dx, regions, n_ghost_layers)
 
     def _area(self, t: float, x: Array) -> Array | float:
-        return 0.25 * np.pi * (self.d_outer(t, x) ** 2 - self.d_inner(t, x) ** 2)
+        return 0.25 * xp.pi * (self.d_outer(t, x) ** 2 - self.d_inner(t, x) ** 2)
 
     def _perimeter(self, t: float, x: Array) -> Array | float:
-        return np.pi * (self.d_outer(t, x) + self.d_inner(t, x))
+        return xp.pi * (self.d_outer(t, x) + self.d_inner(t, x))
 
     def hydraulic_diameter(
         self, time: float = 0.0, x: Array | None = None
@@ -244,8 +244,8 @@ class Cylinder(Geometry):
         if isinstance(d_inner, float | int) and d_inner > 0:
             characteristic_length *= 0.5
         else:
-            assert isinstance(characteristic_length, np.ndarray)
-            characteristic_length[d_inner > 0] *= 0.5
+            assert not isinstance(characteristic_length, float | int)
+            characteristic_length = at(characteristic_length)[d_inner > 0].multiply(0.5)
 
         return characteristic_length
 
@@ -257,20 +257,20 @@ class Cylinder(Geometry):
             if not isinstance(dx, float | int):
                 dx = dx[self.idx_cells]
         else:
-            dx = np.diff(x)
+            dx = xp.diff(x)
 
         x_half = 0.5 * (x[1:] + x[:-1])
 
         ro = 0.5 * self.d_outer(time, x)
         ro_half = 0.5 * self.d_outer(time, x_half)
         if isinstance(ro, float | int):
-            ro = np.full_like(x, ro)
-            ro_half = np.full_like(x_half, ro_half)
+            ro = xp.full_like(x, ro)
+            ro_half = xp.full_like(x_half, ro_half)
 
-        drdx = np.diff(ro) / dx
-        arc = (ro[1:] + 4.0 * ro_half + ro[:-1]) * np.sqrt(1.0 + drdx**2)
+        drdx = xp.diff(ro) / dx
+        arc = (ro[1:] + 4.0 * ro_half + ro[:-1]) * xp.sqrt(1.0 + drdx**2)
 
-        return np.pi * arc * dx / 3.0
+        return to_array(xp.pi * arc * dx / 3.0)
 
 
 class Box(Geometry):
@@ -293,8 +293,8 @@ class Box(Geometry):
         area: SpatioTemporalLike = self._area
         perimeter: SpatioTemporalLike = self._perimeter
 
-        if isinstance(h, np.ndarray | float | int) and isinstance(
-            w, np.ndarray | float | int
+        if (is_array(h) or isinstance(h, float | int)) and (
+            is_array(w) or isinstance(w, float | int)
         ):
             area = h * w
             perimeter = 2 * (h + w)
@@ -315,7 +315,7 @@ class Box(Geometry):
 
         h: Array | float = self.h(time, x)
         w: Array | float = self.w(time, x)
-        return 2 * h * w / (h + w)
+        return to_array(2 * h * w / (h + w))
 
     def surface_area(self, time: float = 0.0, x: Array | None = None) -> Array:
         """Use Simpson's rule to return surface area between given points."""
@@ -325,7 +325,7 @@ class Box(Geometry):
             if not isinstance(dx, float | int):
                 dx = dx[self.idx_cells]
         else:
-            dx = np.diff(x)
+            dx = xp.diff(x)
 
         x_half = 0.5 * (x[1:] + x[:-1])
 
@@ -333,28 +333,28 @@ class Box(Geometry):
         y = 0.5 * self.h(time, x)
         y_half = 0.5 * self.h(time, x_half)
         if isinstance(y, float | int):
-            y = np.full_like(x, y)
-            y_half = np.full_like(x_half, y_half)
-        dydx = np.diff(y) / dx
+            y = xp.full_like(x, y)
+            y_half = xp.full_like(x_half, y_half)
+        dydx = xp.diff(y) / dx
 
         w = 0.5 * self.w(time, x)
         w_half = 0.5 * self.w(time, x_half)
         if isinstance(w, float | int):
-            w = np.full_like(x, w)
-            w_half = np.full_like(x_half, w_half)
-        dwdx = np.diff(w) / dx
+            w = xp.full_like(x, w)
+            w_half = xp.full_like(x_half, w_half)
+        dwdx = xp.diff(w) / dx
 
         # Side wall area
         area_sides = (
-            2.0 * (y[1:] + 4.0 * y_half + y[:-1]) * np.sqrt(1.0 + dwdx**2) * dx / 3.0
+            2.0 * (y[1:] + 4.0 * y_half + y[:-1]) * xp.sqrt(1.0 + dwdx**2) * dx / 3.0
         )
 
         # Upper and lower wall area
         area_horizontal = (
-            2.0 * (w[1:] + 4.0 * w_half + w[:-1]) * np.sqrt(1.0 + dydx**2) * dx / 3.0
+            2.0 * (w[1:] + 4.0 * w_half + w[:-1]) * xp.sqrt(1.0 + dydx**2) * dx / 3.0
         )
 
-        return area_sides + area_horizontal
+        return to_array(area_sides + area_horizontal)
 
 
 class AsymmetricBox(Box):
@@ -396,50 +396,50 @@ class AsymmetricBox(Box):
             if not isinstance(dx, float | int):
                 dx = dx[self.idx_cells]
         else:
-            dx = np.diff(x)
+            dx = xp.diff(x)
 
         x_half = 0.5 * (x[1:] + x[:-1])
 
         yu = self.upper_wall(time, x)
         yu_half = self.upper_wall(time, x_half)
         if isinstance(yu, float | int):
-            yu = np.full_like(x, yu)
-            yu_half = np.full_like(x_half, yu_half)
-        dyudx = np.diff(yu) / dx
+            yu = xp.full_like(x, yu)
+            yu_half = xp.full_like(x_half, yu_half)
+        dyudx = xp.diff(yu) / dx
 
         yl = self.lower_wall(time, x)
         yl_half = self.lower_wall(time, x_half)
         if isinstance(yl, float | int):
-            yl = np.full_like(x, yl)
-            yl_half = np.full_like(x_half, yl_half)
-        dyldx = np.diff(yl) / dx
+            yl = xp.full_like(x, yl)
+            yl_half = xp.full_like(x_half, yl_half)
+        dyldx = xp.diff(yl) / dx
 
         w = 0.5 * self.w(time, x)
         w_half = 0.5 * self.w(time, x_half)
         if isinstance(w, float | int):
-            w = np.full_like(x, w)
-            w_half = np.full_like(x_half, w_half)
-        dwdx = np.diff(w) / dx
+            w = xp.full_like(x, w)
+            w_half = xp.full_like(x_half, w_half)
+        dwdx = xp.diff(w) / dx
 
-        area = np.zeros_like(x_half)
+        area = xp.zeros_like(x_half)
 
         if surface in ["sides", "all"]:
             # Side wall area
             h = yu - yl
             area += (
                 (h[1:] + 4.0 * (yu_half - yl_half) + h[:-1])
-                * np.sqrt(1.0 + dwdx**2)
+                * xp.sqrt(1.0 + dwdx**2)
                 * dx
                 / 3.0
             )
 
         if surface in ["top", "all"]:
             # Upper wall area
-            area += (w[1:] + 4.0 * w_half + w[:-1]) * np.sqrt(1.0 + dyudx**2) * dx / 3.0
+            area += (w[1:] + 4.0 * w_half + w[:-1]) * xp.sqrt(1.0 + dyudx**2) * dx / 3.0
 
         if surface in ["bottom", "all"]:
             # Lower wall area
-            area += (w[1:] + 4.0 * w_half + w[:-1]) * np.sqrt(1.0 + dyldx**2) * dx / 3.0
+            area += (w[1:] + 4.0 * w_half + w[:-1]) * xp.sqrt(1.0 + dyldx**2) * dx / 3.0
 
         return area
 

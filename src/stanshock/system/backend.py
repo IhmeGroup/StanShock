@@ -9,7 +9,9 @@ __all__: list[str] = [
     "TypeAlias",
     "Unpack",
     "apply_where",
+    "assert_array",
     "at",
+    "is_array",
     "jit",
     "np",
     "xp",
@@ -18,7 +20,7 @@ __all__: list[str] = [
 import os
 import sys
 import warnings
-from typing import TYPE_CHECKING, TypeAlias, TypeVar, overload
+from typing import TYPE_CHECKING, TypeAlias, TypeVar, cast, overload
 
 import array_api_compat
 import array_api_extra as xpx
@@ -27,9 +29,9 @@ import numpy as np
 from stanshock import config
 
 if sys.version_info >= (3, 13):
-    from typing import NotRequired, Self, Unpack
+    from typing import NotRequired, Self, TypeIs, Unpack
 else:
-    from typing_extensions import NotRequired, Self, Unpack
+    from typing_extensions import NotRequired, Self, TypeIs, Unpack
 
 
 if TYPE_CHECKING:
@@ -187,3 +189,19 @@ Array: TypeAlias = ArrayType[Float, tuple[int, ...]]
 Index: TypeAlias = ArrayType[Int, tuple[int, ...]] | slice
 
 Composition: TypeAlias = dict[str, float]
+
+
+# is_array = array_api_compat.is_array_api_obj
+def is_array(x: object) -> TypeIs[Array]:
+    """Check if given object is an Array."""
+    return array_api_compat.is_array_api_obj(x)
+
+
+def assert_array(_x: object) -> TypeIs[Array]:
+    """Tell the type-checker that the given object is an Array, even if it's not."""
+    return True
+
+
+def to_array(x: object) -> Array:
+    """Simply cast the given object to an Array type."""
+    return cast(Array, x)
