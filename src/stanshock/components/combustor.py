@@ -36,8 +36,9 @@ from stanshock.numerics.time_integration import (
 from stanshock.numerics.viscous_flux import ViscousFlux
 from stanshock.physics.chemistry_source import ChemistrySource, ConstantVolumeChemistry
 from stanshock.physics.fluid_base import FluidPhysics
+from stanshock.processing.csv_writer import CSVWriter
 from stanshock.processing.initialize import Initialization, InitializeRestart
-from stanshock.processing.plot import XTDiagram, plot_state
+from stanshock.processing.plot import VariableInfo, XTDiagram, plot_state
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
 from stanshock.system.base import RightHandSide
@@ -77,6 +78,8 @@ class Combustor:
         include_diffusion: bool = False,  # exclude diffusion
         thickening: None = None,  # thickening function
         plot_state_interval: int = -1,  # plot the state every n iterations
+        plot_state_variables: list[str | list[str]] | None = None,
+        plot_state_variable_info_map: dict[str, VariableInfo] | None = None,
         iteration: int = 0,  # Iteration to start from
         n_restart_interval: int = -1,  # If >0, saves the fluid state to a file every n_restart_interval iterations
     ) -> None:
@@ -97,8 +100,11 @@ class Combustor:
         self.include_diffusion = include_diffusion
         self.thickening = thickening
         self.plot_state_interval = plot_state_interval
+        self.plot_state_variables = plot_state_variables
+        self.plot_state_variable_info_map = plot_state_variable_info_map
         self.iteration = iteration
         self.n_restart_interval = n_restart_interval
+        self.reacting = reacting
 
         # Initialize values which are passed in as None
         self.probes: list[Probe] = [] if probes is None else probes
@@ -131,6 +137,9 @@ class Combustor:
             geometry=self.geometry,
             physics=self.physics,
         )
+
+        # Initialize CSV writers
+        self.csv_writers: list[CSVWriter] = []
 
         # Set up time integrators
         integrators: list[TimeIntegrator] = []
@@ -183,6 +192,7 @@ class Combustor:
                 geometry=self.geometry,
                 physics=self.physics,
             )
+
             integrators += [ForwardEuler(self.boundary_layer)]
 
         if source_terms is not None:
@@ -313,6 +323,7 @@ class Combustor:
             # perform other updates
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
+            self.update_csv_writers(iters)
             iters += 1
             res_p = float(np.linalg.norm(p_new - p_old))
             if self.verbose and iters % self.output_every == 0:
@@ -326,7 +337,9 @@ class Combustor:
             ):
                 plot_state(
                     self,
-                    f"figures/anim/test_{iters // self.plot_state_interval:05d}.png",
+                    f"./figures/anim/test_{iters // self.plot_state_interval:05d}.png",
+                    variable_info_map=self.plot_state_variable_info_map,
+                    plot_variables=self.plot_state_variables,
                 )
 
             # Periodically save the fluid state
@@ -337,3 +350,8 @@ class Combustor:
         self.iteration = iters
         if self.n_restart_interval > 0:
             self.state.save(groupname="stop")
+
+    def update_csv_writers(self, iters: int) -> None:
+        """Update all CSV writers to the current value."""
+        for csv_writer in self.csv_writers:
+            csv_writer.update(iters)

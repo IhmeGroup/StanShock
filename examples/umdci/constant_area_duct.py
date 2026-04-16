@@ -14,7 +14,9 @@ from stanshock.models.wall_models import (
 )
 from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.thermotable import ThermoTable
+from stanshock.processing.csv_writer import CSVWriter
 from stanshock.processing.initialize import InitializeConstant
+from stanshock.processing.plot import get_variable_info_map
 from stanshock.system.geometry import Box
 
 """
@@ -53,6 +55,7 @@ p2 = p1 * 2.5
 tFinal = 0.01
 
 physics_model = ThermoTable(gas1)
+variable_info_map = get_variable_info_map(physics_model)
 BC_inlet = SpecifiedFace(
     location="left", reference_state=(gas1.density, u1, gas1.P, (1.0,))
 )
@@ -72,8 +75,20 @@ ss = Combustor(
     include_diffusion=False,
     output_every=100,
     plot_state_interval=100,
+    plot_state_variables=["mach", "p", "T"],
+    plot_state_variable_info_map=variable_info_map,
     use_double_flux=False,
 )
+ss.csv_writers = [
+    CSVWriter(
+        combustor=ss,
+        filename=figdir / "csv" / "state.csv",
+        interval=ss.plot_state_interval,
+        variables=["x", "mach", "p", "T"],
+        variable_info_map=variable_info_map,
+    )
+]
+
 try:
     t0 = time.perf_counter()
     ss.advance_simulation(tFinal)

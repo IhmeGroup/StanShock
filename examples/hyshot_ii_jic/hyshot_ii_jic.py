@@ -11,6 +11,7 @@ from stanshock.components.combustor import Combustor
 from stanshock.models.jicf import JICModel
 from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
+from stanshock.processing.csv_writer import CSVWriter
 from stanshock.processing.initialize import InitializeConstant
 from stanshock.processing.plot import XTDiagram
 from stanshock.system.geometry import Box
@@ -248,127 +249,6 @@ jic = JICModel(
     physics=fpv_table,
 )
 
-###################################################################
-
-# i_m = 1
-# z_plot = jic.z_inj[1]
-# i_z = np.argmin(np.abs(jic.z_3D_data - z_plot))
-
-# fig, ax = plt.subplots()
-# c = ax.contourf(jic.x_3D_data*scale,
-#                 jic.y_3D_data*scale,
-#                 jic.Z_3D_data[i_m,:,:,i_z].T,
-#                 levels=np.linspace(0, 0.3, 100))
-# y_cl_max = jic.y_cl(L - x_inj)[i_m]
-# y_cl_arr = np.linspace(0, y_cl_max, 1000)
-# x_cl_arr = jic.x_cl_from_y_cl(y_cl_arr[:,np.newaxis])[:,i_m]
-# ax.plot((x_cl_arr + x_inj)*scale, y_cl_arr*scale, 'r')
-# ax.set_xlabel(r'$x$ [mm]')
-# ax.set_ylabel(r'$y$ [mm]')
-# ax.set_xlim((50.0, 100.0))
-# cbar = plt.colorbar(c, ticks=[0.0, 0.05, 0.1, 0.15, 0.2, 0.25, 0.3])
-# cbar.set_label(r'$Z$')
-# ax.set_aspect('equal')
-# plt.savefig(os.path.join(figdir, "injector_xy.png"), bbox_inches='tight', dpi=300)
-
-
-# x_plot = x_inj + np.array([0.0e-3,
-#                            25.0e-3,
-#                            50.0e-3])
-# i_plot = np.array([np.argmin(np.abs(x - x_i)) for x_i in x_plot])
-
-# fig, axs = plt.subplots(len(x_plot), 1, sharex=True, figsize=(6, 8))
-# for i in range(len(x_plot)):
-#     i_x = i_plot[i]
-#     c = axs[i].contourf(jic.z_3D_data*scale,
-#                         jic.y_3D_data*scale,
-#                         jic.Z_3D_data[i_m,i_x,:,:],
-#                         levels=np.linspace(0, 0.3, 100))
-#     for i_inj in range(N_f):
-#         axs[i].scatter(jic.z_inj[i_inj]*scale,
-#                        jic.y_cl(jic.x_3D_data[i_x] - x_inj)[i_m]*scale,
-#                        color='r', marker='x')
-#     axs[i].set_ylabel(r'$y$ [mm]')
-#     axs[i].set_aspect('equal')
-#     # plt.colorbar(c, ax=axs[i_x])
-# axs[-1].set_xlabel(r'$z$ [mm]')
-# plt.tight_layout()
-# plt.savefig(os.path.join(figdir, "injector_zy.png"), bbox_inches='tight', dpi=300)
-
-# breakpoint()
-
-###################################################################
-
-# # Evaluate the mixture fraction PDFs along the axial direction
-# print("Evaluating the mixture fraction PDFs along the axial direction...")
-# Z_pdf = []
-# Z_pdf_samples = []
-# Z_pdf_weights = []
-# Z_avg_simple = np.zeros_like(x)
-# Z_avg = np.zeros_like(x)
-# Z_var = np.zeros_like(x)
-# i_last_const = np.where(x <= L_const)[0][-1]
-
-# Z_plot = np.linspace(0, 1, 1000)
-# fig, ax = plt.subplots()
-# ax.set_xlabel(r'$Z$')
-# ax.set_ylabel(r'$p(Z)$')
-
-# for i_x, x_i in enumerate(tqdm(x[:i_last_const])):
-#     func = lambda z, y : jic.Z_3D(x_i, y, z)
-#     grad_func = lambda z, y : jic.grad_Z_3D(x_i, y, z)
-#     ranges = ((-w/2, w/2), (0, h[i_x]))
-#     grid_dims = (int(np.ceil((ranges[0][1] - ranges[0][0]) / dx_Z_pdf)),
-#                  int(np.ceil((ranges[1][1] - ranges[1][0]) / dx_Z_pdf)))
-#     sampler = MonteCarloSampler2D(
-#         ranges, func, grad_func, grid_dims,
-#         alpha=0.0, num_samples_per_iter=5000, max_iters=10)
-#     Z_pdf_i, z_samples, y_samples, Z_pdf_samples_i, Z_pdf_weights_i = sampler.compute_scalar_pdf()
-#     Z_pdf.append(Z_pdf_i)
-#     Z_pdf_samples.append(Z_pdf_samples_i)
-#     Z_pdf_weights.append(Z_pdf_weights_i)
-
-#     # Plot, mapping color to x coordinate
-#     ax.plot(Z_plot, Z_pdf_i(Z_plot), c=plt.cm.viridis(i_x / (len(x) - 1)))
-#     fig.savefig(os.path.join(figdir, "Z_pdf.png"), bbox_inches='tight', dpi=300)
-
-# for i_x in range(i_last_const, len(x)):
-#     Z_pdf.append(Z_pdf[i_last_const-1])
-#     Z_pdf_samples.append(Z_pdf_samples[i_last_const-1])
-#     Z_pdf_weights.append(Z_pdf_weights[i_last_const-1])
-
-#     # Plot, mapping color to x coordinate
-#     ax.plot(Z_plot, Z_pdf[i_last_const-1](Z_plot), c=plt.cm.viridis(i_x / (len(x) - 1)))
-#     fig.savefig(os.path.join(figdir, "Z_pdf.png"), bbox_inches='tight', dpi=300)
-
-# print("Computing the mean and variance of the PDFs...")
-# for i_x in range(len(x)):
-#     Z_avg[i_x] = integrate.quad(lambda Z : Z * Z_pdf[i_x](Z), 0, 1)[0]
-#     Z_var[i_x] = integrate.quad(lambda Z : (Z - Z_avg[i_x])**2 * Z_pdf[i_x](Z), 0, 1)[0]
-
-# np.save(os.path.join(datadir, "Z_avg.npy"), Z_avg)
-# np.save(os.path.join(datadir, "Z_var.npy"), Z_var)
-# with open(os.path.join(datadir, "Z_pdf.pkl"), 'wb') as f:
-#     pickle.dump((Z_pdf_samples, Z_pdf_weights), f)
-
-###################################################################
-
-# fig, ax = plt.subplots(figsize=(4, 3.2))
-# ax.plot(x*scale, jic.Z_avg_profile, 'b')
-# ax.axhline(Z_gl, color='b', linestyle='--')
-# ax.set_ymargin(0.1)
-# ax.set_xlabel(r'$x$ [mm]')
-# ax.set_ylabel(r'$\langle Z \rangle$', color='b')
-# ax.tick_params(axis='y', labelcolor='b')
-# ax1 = ax.twinx()
-# ax1.semilogy(x*scale, jic.Z_var_profile, 'r')
-# ax1.set_ymargin(0.1)
-# ax1.set_ylabel(r"$\langle Z''^2 \rangle$", color='r')
-# ax1.tick_params(axis='y', labelcolor='r')
-# plt.savefig(os.path.join(figdir, "Z_avg_var.png"), bbox_inches='tight', dpi=300)
-
-###################################################################
-
 # Initialize and run the simulation
 ss = Combustor(
     geometry=geometry,
@@ -386,6 +266,15 @@ ss = Combustor(
     plot_state_interval=100,
     use_double_flux=False,
 )
+
+# Update CSV writer initialization to match plot_state_interval
+csv_writer = CSVWriter(
+    combustor=ss,
+    filename=figdir / "data.csv",  # Will become test_00000.csv, test_00001.csv, etc.
+    interval=100,  # Same as plot_state_interval=100
+    wall_temperature=300.0,
+)
+ss.csv_writers = [csv_writer]
 
 plot_variables = [
     "density",
