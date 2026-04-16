@@ -413,6 +413,9 @@ def plot_state(
 
     fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
 
+    output_path = Path(filename)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
     fig.tight_layout()
-    fig.savefig(filename, bbox_inches="tight", dpi=300)
+    fig.savefig(output_path, bbox_inches="tight", dpi=300)
     plt.close()
