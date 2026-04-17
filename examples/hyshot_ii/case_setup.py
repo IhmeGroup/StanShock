@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, TypedDict
 
 import cantera as ct
 import numpy as np
@@ -21,7 +21,7 @@ from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.processing.initialize import InitializeConstant
-from stanshock.system.backend import Array, Unpack
+from stanshock.system.backend import Array, Composition, Unpack
 from stanshock.system.base import PrecomputeSteps, RightHandSide
 from stanshock.system.geometry import AsymmetricBox, Geometry
 
@@ -79,6 +79,40 @@ def hyshot_ii_geometry(n_x: int = 200) -> AsymmetricBox:
     )
 
 
+# Define the default operating conditions
+class _Conditions(TypedDict):
+    temperature: float
+    pressure: float
+    velocity: float | None
+    mach: float | None
+    composition: Composition
+
+
+def default_freestream_conditions() -> _Conditions:
+    return {
+        "temperature": 263.6,
+        "pressure": 2024.0,
+        "velocity": 2398.0,
+        "mach": None,
+        "composition": {"O2": 0.21, "N2": 0.79},
+        # "composition": {"N2": 0.752, "O2": 0.216, "NO": 0.032},
+    }
+
+
+def default_inflow_conditions() -> _Conditions:
+    """Inflow conditions obtained via stream-averaging RANS results."""
+    # rho_in = 0.323551  # kg/m^3
+    # M_in = 2.48942  # -
+    return {
+        "temperature": 1366.81,
+        "pressure": 127.444e3,
+        "velocity": 1791.05,
+        "mach": None,
+        "composition": {"O2": 0.21, "N2": 0.79},
+        # "composition": {"N2": 0.752, "O2": 0.216, "NO": 0.032},
+    }
+
+
 # Define the default fluid physics
 def default_frc_physics(
     mech: str | Path = data_dir / "mechanisms/h2_boivin_9sp_12r_mod.yaml",
@@ -89,6 +123,7 @@ def default_frc_physics(
 
 
 def default_fpv_physics(
+    conditions: _Conditions,
     mech: str | Path = data_dir / "mechanisms/h2_boivin_9sp_12r_mod.yaml",
     table_file: str
     | Path = "./h2_table/flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5",
@@ -97,7 +132,7 @@ def default_fpv_physics(
     return FPVTable(
         table_file,
         gas,
-        ox_def={"O2": 0.21, "N2": 0.79},
+        ox_def=conditions["composition"],
         fuel_def={"H2": 1.0},
         prog_def={"H2O": 1.0},
         p_correction=False,
@@ -106,23 +141,26 @@ def default_fpv_physics(
 
 
 # Define the inflow boundary condition
-def stream_averaged_inflow(physics: FluidPhysics) -> SpecifiedFace:
-    """Inflow conditions obtained via stream-averaging RANS results."""
-    P_in = 127.444e3  # Pa
-    # rho_in = 0.323551  # kg/m^3
-    U_in = 1791.05  # m/s
-    T_in = 1366.81  # K
-    # M_in = 2.48942  # -
-
+def stream_averaged_inflow(
+    conditions: _Conditions, physics: FluidPhysics
+) -> SpecifiedFace:
     # Initialize the state
     gas_init = physics.gas
+    gas_init.TPX = (
+        conditions["temperature"],
+        conditions["pressure"],
+        conditions["composition"],
+    )
 
-    if physics.is_flamelet:
-        gas_init.TPX = T_in, P_in, physics.ox_def
-        composition = (1.0, 0.0, 0.0)
+    if conditions["mach"] is not None:
+        U_in = conditions["mach"] * gas_init.sound_speed
+    elif conditions["velocity"] is not None:
+        U_in = conditions["velocity"]
     else:
-        gas_init.TPX = T_in, P_in, {"O2": 1, "N2": 3.76}
-        composition = gas_init.Y
+        msg = "Must set either velocity or Mach number."
+        raise ValueError(msg)
+
+    composition = (1.0, 0.0, 0.0) if physics.is_flamelet else gas_init.Y
 
     return SpecifiedFace(
         reference_state=(gas_init.density, U_in, gas_init.P, composition)
@@ -130,18 +168,32 @@ def stream_averaged_inflow(physics: FluidPhysics) -> SpecifiedFace:
 
 
 def inlet_diffuser_inflow(
-    geometry: AsymmetricBox, physics: FluidPhysics, theta: float = 3.6
+    conditions: _Conditions,
+    geometry: AsymmetricBox,
+    physics: FluidPhysics,
+    theta: float = 3.6,
 ) -> InletDiffuser:
     gas = physics.gas
     sol = ct.SolutionArray(gas, (1,))
-    sol.TPX = 263.6, 2024.0, physics.ox_def
-    # sol.TPY = 263.6, 2024.0, {"N2": 0.752, "O2": 0.216, "NO": 0.032}
+    sol.TPX = (
+        conditions["temperature"],
+        conditions["pressure"],
+        conditions["composition"],
+    )
+
+    if conditions["mach"] is not None:
+        U_in = conditions["mach"] * sol.sound_speed
+    elif conditions["velocity"] is not None:
+        U_in = np.array([conditions["velocity"]])
+    else:
+        msg = "Must set either velocity or Mach number."
+        raise ValueError(msg)
 
     freestream_state = FluidState(
         shape=sol.shape,
         temperature=sol.T,
         density=sol.density_mass,
-        velocity=np.array([2398.0]),
+        velocity=U_in,
         composition=physics.get_composition_from_mass_fractions(sol.Y),
         sound_speed=sol.sound_speed,
     )
@@ -379,11 +431,19 @@ class Hyshot2Interface:
     def __init__(
         self,
         chemistry: Literal["FRC", "FPV"] = "FPV",
+        conditions: _Conditions | None = None,
         inflow: Literal["constant", "diffuser"] = "diffuser",
         mdot: Literal["constant", "schedule"] = "constant",
     ) -> None:
         # Get case setup
         geometry = hyshot_ii_geometry(200)
+
+        if conditions is None:
+            if inflow == "constant":
+                conditions = default_inflow_conditions()
+            else:
+                conditions = default_freestream_conditions()
+        self.p_ref: float = conditions["pressure"]
 
         source = None
         jic = None
@@ -391,12 +451,13 @@ class Hyshot2Interface:
             physics = default_frc_physics()
             source = HydrogenInjectionFRC(geometry=geometry, physics=physics)
         else:
-            physics = default_fpv_physics()
+            physics = default_fpv_physics(conditions)
 
         if inflow == "constant":
-            self.inflow_bc: BCType = stream_averaged_inflow(physics)
+            self.inflow_bc: BCType = stream_averaged_inflow(conditions, physics)
+            self.p_ref = 2024.0
         else:
-            self.inflow_bc = inlet_diffuser_inflow(geometry, physics)
+            self.inflow_bc = inlet_diffuser_inflow(conditions, geometry, physics)
         BCs: BCInput = {"left": [self.inflow_bc], "right": ["outflow"]}
 
         # Set initial conditions
@@ -433,6 +494,8 @@ class Hyshot2Interface:
         mach: float,
         angle_of_attack: float | None = None,
     ) -> tuple[float, float]:
+        self.p_ref = p_ref
+
         if isinstance(self.inflow_bc, InletDiffuser):
             if angle_of_attack is not None:
                 # Update angle of attack
@@ -476,10 +539,8 @@ class Hyshot2Interface:
         A_e = self.case.geometry.area(self.case.t, x_e)
 
         if isinstance(self.inflow_bc, InletDiffuser):
-            p_inf = physics.get_pressure(self.inflow_bc.freestream)
             momentum_flux_i = self.inflow_bc.reference_flux[0]
         else:
-            p_inf = 2024.0
             in_state = self.case.state[0]
             rho_i = physics.get_density(in_state)
             u_i = physics.get_velocity(in_state)
@@ -491,15 +552,36 @@ class Hyshot2Interface:
         p_e = physics.get_pressure(out_state)
         momentum_flux_e = rho_e * u_e**2
 
-        return momentum_flux_e * A_e - momentum_flux_i * A_i + (p_e - p_inf) * A_e
+        return momentum_flux_e * A_e - momentum_flux_i * A_i + (p_e - self.p_ref) * A_e
 
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    # Test the use of Hyshot2Interface
-    sim = Hyshot2Interface()
+    # Atmospheric conditions at 30 km altitude
+    conditions: _Conditions = {
+        "temperature": 226.51,
+        "pressure": 1197.0,
+        "velocity": None,
+        "mach": 7.6,
+        "composition": {"O2": 0.21, "N2": 0.79},
+    }
 
+    # Test the use of Hyshot2Interface
+    sim = Hyshot2Interface(conditions=conditions)
+
+    # Add runtime plots
+    sim.case.plot_state_interval = 100
+    sim.case.plot_state_variables = [
+        "pressure",
+        "temperature",
+        "mixture fraction",
+        "progress variable",
+        ["Y_H2", "Y_OH", "Y_H2O"],
+        "mach",
+    ]
+
+    # Get reference conditions
     physics = sim.case.physics
     freestream = sim.inflow_bc.freestream
     p_ref = physics.get_pressure(freestream)[0]
@@ -507,12 +589,27 @@ if __name__ == "__main__":
     u_ref = physics.get_velocity(freestream)[0]
     mach_ref = u_ref / physics.get_sound_speed(freestream)[0]
 
-    def angle_of_attack(t: float) -> float:
-        return 2.0 * np.sin(100.0 * t)
+    def angle_of_attack(
+        t: float,
+        t_start: float = 1e-3,
+        theta_start: float = np.deg2rad(3.6),
+        t_end: float = 3e-3,
+        theta_end: float = np.deg2rad(7.2),
+    ) -> float:
+        # Linear ramp from 3.6 to 7.2 degree AoA from 1-3 ms
+        if t < t_start:
+            return theta_start
 
-    # Output data every 0.01 ms for 3 ms
+        if t > t_end:
+            return theta_end
+
+        return (t - t_start) / (t_end - t_start) * (
+            theta_end - theta_start
+        ) + theta_start
+
+    # Output data every 0.01 ms for 4 ms
     dt = 1e-5
-    n = 300
+    n = 400
 
     time = np.zeros((n,))
     aoa = np.zeros((n,))
