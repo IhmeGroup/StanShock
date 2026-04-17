@@ -22,7 +22,7 @@ ss.verbose = True
 ss.output_every = 100
 ss.plot_state_interval = 100
 
-plot_variables = [
+plot_variables: list[str] = [
     "density",
     "velocity",
     "pressure",
@@ -38,11 +38,12 @@ csv_writer = CSVWriter(
     filename=output_dir
     / "data.csv",  # Will become test_00000.csv, test_00001.csv, etc.
     interval=100,  # Same as plot_state_interval=100
+    variables=["x", *plot_variables],
 )
 ss.csv_writers = [csv_writer]
 
-ss.plot_variables = plot_variables
-# ss.plot_variables = [
+ss.plot_state_variables = plot_variables
+# ss.plot_state_variables = [
 #     "density",
 #     "velocity",
 #     "pressure",
