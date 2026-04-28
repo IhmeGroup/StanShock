@@ -279,21 +279,19 @@ def weno5(
         L /= cAverage**2.0
 
         # Perform WENO interpolation in characteristic variables
-        for iVar in range(nVar):
-            for iStencil in range(nStencil):
-                iCellStencil = iStencil - 2 + iCell
+        for iStencil in range(nStencil):
+            iCellStencil = iStencil - 2 + iCell
 
-                # Conservative variables [rhou, rhoE, rhoY1, rhoY2, ...]
-                U[0] = r[iCellStencil] * u[iCellStencil]  # momentum
-                U[1] = (
-                    p[iCellStencil] / (gammaAverage - 1.0)
-                    + 0.5 * r[iCellStencil] * u[iCellStencil] ** 2.0
-                )  # energy
-                for kSc in range(nSc):
-                    U[mn + kSc] = (
-                        r[iCellStencil] * Y[iCellStencil, kSc]
-                    )  # scalar densities
+            # Conservative variables [rhou, rhoE, rhoY1, rhoY2, ...]
+            U[0] = r[iCellStencil] * u[iCellStencil]  # momentum
+            U[1] = (
+                p[iCellStencil] / (gammaAverage - 1.0)
+                + 0.5 * r[iCellStencil] * u[iCellStencil] ** 2.0
+            )  # energy
+            for kSc in range(nSc):
+                U[mn + kSc] = r[iCellStencil] * Y[iCellStencil, kSc]  # scalar densities
 
+            for iVar in range(nVar):
                 CStencil[iStencil, iVar] = 0.0
                 for jVar in range(nVar):
                     CStencil[iStencil, iVar] += L[iVar, jVar] * U[jVar]
@@ -437,6 +435,262 @@ def weno5(
                 PLR[N, iFace, iVar] = P[iCell, iVar] + 0.5 * phi * (
                     P[iCell, iVar] - P[iCellm1, iVar]
                 )
+
+    return PLR
+
+
+# Cell weight (WL(i,j,k); i=left(1) or right(2), j=stencil #, k=weight #)
+W = (
+    np.array(
+        [[[2, 5, -1], [-1, 5, 2], [2, -7, 11]], [[11, -7, 2], [2, 5, -1], [-1, 5, 2]]]
+    )
+    / 6.0
+)
+
+# Stencil Weight (i=left(1) or right(2), j=stencil #)
+D = np.empty((2, 3))
+D = np.array([[0.3, 0.6, 0.1], [0.1, 0.6, 0.3]])
+
+
+def weno5_vectorized(
+    r: Array,
+    u: Array,
+    p: Array,
+    Y: Array,
+    gamma: Array,
+    n_ghost_layers: int,
+    n_scalars_rho_sum: int,
+) -> Array:
+    """
+    This method implements the fifth-order WENO interpolation. This method
+    follows that of Houim and Kuo (JCP2011)
+        inputs:
+            r=density
+            u=velocity
+            p=pressure
+            Y=scalar variables matrix [x,scalars]
+            gamma=specific heat ratio
+            n_ghost_layers=number of ghost layers
+            n_scalars_rho_sum=number of scalars that are summed into density
+        outputs:
+            PLR=a matrix of the primitive variables [LR,]
+    """
+    nLR = 2
+    nCells = len(r) - 2 * n_ghost_layers
+    nFaces = nCells + 1
+    nSc = len(Y[0])  # number of scalars
+    nVar = mn + nSc  # [rhou, rhoE, rhoY1, rhoY2, ...]
+    nStencil = 2 * n_ghost_layers
+    epWENO = 1.0e-06
+
+    B1 = 1.083333333333333
+    B2 = 0.25
+
+    PLR = np.empty((nLR, nFaces, nVar + 1))
+
+    iCell0 = n_ghost_layers - 1
+    iCell1 = nFaces + n_ghost_layers - 1
+    idx_left = slice(iCell0, iCell1)
+    idx_right = slice(iCell0 + 1, iCell1 + 1)
+    idx_sc = np.arange(nSc, dtype=int)
+
+    # Face averages
+    rAverage = 0.5 * (r[idx_left] + r[idx_right])
+    uAverage = 0.5 * (u[idx_left] + u[idx_right])
+    pAverage = 0.5 * (p[idx_left] + p[idx_right])
+    gammaAverage = 0.5 * (gamma[idx_left] + gamma[idx_right])
+    YAverage = 0.5 * (Y[idx_left] + Y[idx_right])
+    eAverage = pAverage / (rAverage * (gammaAverage - 1.0)) + 0.5 * uAverage**2.0
+    hAverage = eAverage + pAverage / rAverage
+    cAverage = np.sqrt(gammaAverage * pAverage / rAverage)
+
+    # Right eigenvector matrix [rhou, rhoE, rhoY1, rhoY2, ...]
+    R = np.zeros((nFaces, nVar, nVar))
+
+    # Acoustic waves (columns 0 and -1)
+    R[:, 0, 0] = uAverage - cAverage  # momentum, left acoustic
+    R[:, 1, 0] = hAverage - uAverage * cAverage  # energy, left acoustic
+    R[:, 0, -1] = uAverage + cAverage  # momentum, right acoustic
+    R[:, 1, -1] = hAverage + uAverage * cAverage  # energy, right acoustic
+
+    # Entropy waves (columns 1 to nSp)
+    R[:, 0, idx_sc + 1] = uAverage[:, None]  # momentum, entropy wave i
+    R[:, 1, idx_sc + 1] = 0.5 * uAverage[:, None] ** 2.0  # energy, entropy wave i
+    R[:, idx_sc + mn, idx_sc + 1] = 1.0  # scalar i density, entropy wave i
+
+    # Scalar densities for acoustic waves
+    R[:, idx_sc + mn, 0] = YAverage  # scalar i, left acoustic
+    R[:, idx_sc + mn, -1] = YAverage  # scalar i, right acoustic
+
+    # Left eigenvector matrix [rhou, rhoE, rhoY1, rhoY2, ...]
+    L = np.zeros((nFaces, nVar, nVar))
+    gammaHat = gammaAverage - 1.0
+    phi = 0.5 * gammaHat * uAverage**2.0
+    firstRowConstant = 0.5 * (phi + uAverage * cAverage)
+    lastRowConstant = 0.5 * (phi - uAverage * cAverage)
+
+    # Acoustic wave rows (rows 0 and -1)
+    # left acoustic, momentum
+    L[:, 0, 0] = -0.5 * (gammaHat * uAverage + cAverage)
+    L[:, 0, 1] = 0.5 * gammaHat  # left acoustic, energy
+    # right acoustic, momentum
+    L[:, -1, 0] = -0.5 * (gammaHat * uAverage - cAverage)
+    L[:, -1, 1] = 0.5 * gammaHat  # right acoustic, energy
+
+    # Acoustic wave interactions with scalars
+    L[:, 0, idx_sc + mn] = firstRowConstant[:, None]  # left acoustic, scalar i
+    L[:, -1, idx_sc + mn] = lastRowConstant[:, None]  # right acoustic, scalar i
+
+    # Entropy wave rows (rows 1 to nSp)
+    # entropy wave i, momentum
+    L[:, idx_sc + 1, 0] = YAverage * (gammaHat * uAverage)[:, None]
+    # entropy wave i, energy
+    L[:, idx_sc + 1, 1] = -YAverage * gammaHat[:, None]
+
+    # Entropy wave interactions with scalars
+    # entropy wave i, scalar j
+    L[:, 1 : nSc + 1, mn : nSc + mn] = -YAverage[:, :, None] * phi[:, None, None]
+    L[:, idx_sc + 1, idx_sc + mn] += cAverage[:, None] ** 2.0  # diagonal correction
+    L /= cAverage[:, None, None] ** 2.0
+
+    # Conservative variables [rhou, rhoE, rhoY1, rhoY2, ...]
+    U0 = np.concatenate(
+        (
+            (r * u)[:, None],  # momentum
+            (0.5 * r * u**2.0)[:, None],  # energy
+            r[:, None] * Y,  # scalar densities
+        ),
+        axis=1,
+    )
+    CStencil = np.empty((nFaces, nStencil, nVar))
+    # ^ all the characteristic values in the stencil
+    for iStencil in range(nStencil):
+        idx = slice(iCell0 + iStencil - 2, iCell1 + iStencil - 2)
+        U = U0[idx].copy()
+        U[:, 1] += p[idx] / (gammaAverage - 1.0)
+        CStencil[:, iStencil] = np.sum(L * U[:, None, :], axis=-1)
+
+    # WENO interpolation in characteristic variables
+    for N in range(nLR):
+        NO = N + 2
+
+        # Smoothness parameters
+        B = np.stack(
+            (
+                (
+                    B1
+                    * (
+                        CStencil[:, NO]
+                        - 2.0 * CStencil[:, NO + 1]
+                        + CStencil[:, NO + 2]
+                    )
+                    ** 2.0
+                    + B2
+                    * (
+                        3.0 * CStencil[:, NO]
+                        - 4.0 * CStencil[:, NO + 1]
+                        + CStencil[:, NO + 2]
+                    )
+                    ** 2
+                ),
+                (
+                    B1
+                    * (
+                        CStencil[:, NO - 1]
+                        - 2.0 * CStencil[:, NO]
+                        + CStencil[:, NO + 1]
+                    )
+                    ** 2.0
+                    + B2 * (CStencil[:, NO - 1] - CStencil[:, NO + 1]) ** 2
+                ),
+                (
+                    B1
+                    * (
+                        CStencil[:, NO - 2]
+                        - 2.0 * CStencil[:, NO - 1]
+                        + CStencil[:, NO]
+                    )
+                    ** 2.0
+                    + B2
+                    * (
+                        CStencil[:, NO - 2]
+                        - 4.0 * CStencil[:, NO - 1]
+                        + 3.0 * CStencil[:, NO]
+                    )
+                    ** 2
+                ),
+            ),
+            axis=1,
+        )
+
+        # Edge interpolation
+        idx = NO - np.arange(n_ghost_layers, dtype=int)
+        CINT = (
+            W[N, None, :, 0, None] * CStencil[:, idx]
+            + W[N, None, :, 1, None] * CStencil[:, idx + 1]
+            + W[N, None, :, 2, None] * CStencil[:, idx + 2]
+        )
+        A = D[N, None, :, None] / ((epWENO + B) ** 2)
+        ATOT = np.sum(A, axis=1)
+        CW = np.sum(CINT * A, axis=1)
+        CiVar = CW / ATOT
+        U = np.sum(R * CiVar[:, None, :], axis=2)
+
+        # Reconstruct primitives from conservatives
+        rLR = np.sum(U[..., mn : mn + n_scalars_rho_sum], axis=-1)
+        rLR = np.maximum(rLR, 1e-30)
+        uLR = U[..., 0] / rLR
+        eLR = U[..., 1] / rLR
+        pLR = rLR * (gammaAverage - 1.0) * (eLR - 0.5 * uLR**2.0)
+
+        # Fill primitive matrix [rho, u, p, Y1, Y2, ...]
+        PLR[N] = np.concatenate(
+            (
+                rLR[:, None],
+                uLR[:, None],
+                pLR[:, None],
+                U[:, mn : mn + nSc] / rLR[:, None],
+            ),
+            axis=1,
+        )
+
+    # Create primitive matrix for limiter
+    P = np.concatenate((r[:, None], u[:, None], p[:, None], Y), axis=-1)
+
+    # Apply limiter
+    alpha = 2.0
+    threshold = 1e-6
+    epsilon = 1.0e-15
+    for N in range(nLR):
+        iCell = np.arange(iCell0, iCell1, dtype=int) + N
+        iCellm1 = iCell - 1 + 2 * N
+        iCellp1 = iCell + 1 - 2 * N
+        iCellm2 = iCell - 2 + 4 * N
+        iCellp2 = iCell + 2 - 4 * N
+        # check the error threshold for smooth regions
+        error = np.abs(
+            (-P[iCellm2] + 4.0 * P[iCellm1] + 4.0 * P[iCellp1] - P[iCellp2] + epsilon)
+            / (6.0 * P[iCell] + epsilon)
+            - 1.0
+        )
+        # compute limiter
+        idx = np.where(error >= threshold)
+        phi = np.full_like(error[idx], alpha)
+
+        denom = P[iCell][idx] - P[iCellm1][idx]
+        sign = np.sign(denom)
+        numer = np.minimum(
+            sign * alpha * (P[iCellp1][idx] - P[iCell][idx]),
+            sign * 2.0 * (PLR[N][idx] - P[iCell][idx]),
+        )
+        denom = np.abs(denom)
+        phi = np.divide(numer, denom, out=phi, where=denom != 0.0)
+        phi = np.clip(phi, 0.0, alpha)
+
+        # apply limiter
+        PLR[N, idx[0], idx[1]] = P[iCell][idx] + 0.5 * phi * (
+            P[iCell][idx] - P[iCellm1][idx]
+        )
 
     return PLR
 
