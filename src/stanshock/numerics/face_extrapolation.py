@@ -460,6 +460,7 @@ def weno5_vectorized(
     gamma: Array,
     n_ghost_layers: int,
     n_scalars_rho_sum: int,
+    disable_ghost_layers: tuple[bool, bool] = (False, False),
 ) -> Array:
     """
     This method implements the fifth-order WENO interpolation. This method
@@ -631,6 +632,15 @@ def weno5_vectorized(
             + W[N, None, :, 2, None] * CStencil[:, idx + 2]
         )
         A = D[N, None, :, None] / ((epWENO + B) ** 2)
+
+        # Optionally disable use of ghost layer points:
+        if disable_ghost_layers[0]:
+            for i in range(1, n_ghost_layers):
+                A[i - N, i:] = 0.0
+        if disable_ghost_layers[1]:
+            for i in range(1, n_ghost_layers):
+                A[-i - N, : n_ghost_layers - i] = 0.0
+
         ATOT = np.sum(A, axis=1)
         CW = np.sum(CINT * A, axis=1)
         CiVar = CW / ATOT
@@ -698,6 +708,15 @@ def weno5_vectorized(
 class FifthOrderWeno(FaceExtrapolator):
     minimum_ghost_layers: int = 3
 
+    def __init__(
+        self,
+        n_scalars_rho_sum: int,
+        n_ghost_layers: int = minimum_ghost_layers,
+        disable_ghost_layers: tuple[bool, bool] = (False, False),
+    ) -> None:
+        super().__init__(n_scalars_rho_sum, n_ghost_layers)
+        self.disable_ghost_layers = disable_ghost_layers
+
     def __call__(self, state: FluidState) -> FluidState:
         """First order interpolation to the edge states."""
         assert state.density is not None
@@ -728,7 +747,7 @@ class FifthOrderWeno(FaceExtrapolator):
             assert state.gamma is not None
             gamma = state.gamma
 
-        face_states_array: Array = weno5(
+        face_states_array: Array = weno5_vectorized(
             r=state.density,
             u=state.velocity,
             p=state.pressure,
@@ -736,6 +755,7 @@ class FifthOrderWeno(FaceExtrapolator):
             gamma=gamma,
             n_ghost_layers=self.n_ghost_layers,
             n_scalars_rho_sum=self.n_scalars_rho_sum,
+            disable_ghost_layers=self.disable_ghost_layers,
         )
 
         return FluidState(
