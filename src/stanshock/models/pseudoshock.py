@@ -9,6 +9,7 @@ from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array
 from stanshock.system.base import FastSlowMode, FastSlowSource, PrecomputeSteps
+from stanshock.system.geometry import Geometry
 
 
 class Pseudoshock(FastSlowSource):
@@ -36,7 +37,7 @@ class Pseudoshock(FastSlowSource):
         self.sf_array = []  # shock foot idx
         self.us = []  # shock speed
         self.t_ps = []
-        self.L_scale = []
+        self.L_scale: float = 0.0
         self.sigma_ss = []
 
         if parameters is None:
@@ -55,6 +56,10 @@ class Pseudoshock(FastSlowSource):
         self.M_ref = parameters.get("M_ref", 1.90)
         self.Alpha_p = parameters.get("Alpha_p", 1.064)
         self.sigma = parameters.get("sigma", 0.769521)
+
+    def Dh_func(self, x_shift: float) -> Array | float:
+        assert self.geometry is not None
+        return self.geometry.hydraulic_diameter(time, x_shift + self.x_shock)
 
     def get_shock_idx(
         self,
@@ -99,13 +104,10 @@ class Pseudoshock(FastSlowSource):
         gamma1 = self.physics.get_gamma(state)
 
         # Compute length scale for pressure ratio
-        x_shock = self.x[shock_idx]
-
-        def Dh_func(x_shift) -> Array | float:
-            return self.geometry.hydraulic_diameter(time, x_shift + x_shock)
+        self.x_shock = self.x[shock_idx]
 
         if not self.L_scale:
-            self.L_scale = float(Dh_func(0))
+            self.L_scale = float(self.geometry.hydraulic_diameter(time, self.x_shock))
 
         d_ind = np.rint(self.L_scale / (4 * self.geometry.dx)).astype(int)
         i0 = max(shock_idx - d_ind, 0)
@@ -128,7 +130,7 @@ class Pseudoshock(FastSlowSource):
         mu1 = self.physics.get_mu(state)
         r1 = state.density
 
-        Re0 = r1 * u1 * Dh_func(0) / mu1
+        Re0 = r1 * u1 * self.geometry.hydraulic_diameter(time, self.x_shock) / mu1
         cf0 = float(self.skin_friction_coefficient(Re0, M1, T_rat))
 
         # Pre-compute Fievet model constants
@@ -138,7 +140,7 @@ class Pseudoshock(FastSlowSource):
         # Prepare initial value and args for spatial integration
         y0 = [float(M1_rel**2), 1.000, float(p1)]
 
-        args = (gamma1, q1, kappa, k_c, cf_model, Dh_func)
+        args = (gamma1, q1, kappa, k_c, cf_model)
 
         # Update shock position, speed, and time trackers
         self.sf_array.append(shock_idx)
