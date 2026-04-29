@@ -95,6 +95,7 @@ plot_variables = ["mach", "pressure", "temperature"]
 ss = Combustor(
     geometry=geometry,
     wall_temperature=330.0,
+    include_pseudoshock=True,
     wall_models=wall_models,
     include_pseudoshock=test_pseudoshock,
     initialization=init,
@@ -115,7 +116,15 @@ ss.csv_writers = [
         interval=ss.plot_state_interval,
         variables=["x", *plot_variables],
         variable_info_map=variable_info_map,
-    )
+    ),
+]
+
+plot_variables = [
+    "density",
+    "velocity",
+    "pressure",
+    "temperature",
+    "mach",
 ]
 ss.xt_diagrams = [XTDiagram(ss, variable, skip_steps=10) for variable in plot_variables]
 
@@ -129,6 +138,21 @@ except Exception as e:
     print("Full traceback:")
     traceback.print_exc()
 finally:
+    # Plot the pseudoshock movement
+    t_ps = np.array(ss.pseudoshock.t_ps).flatten()
+    ind_s = np.array(ss.pseudoshock.sf_array).flatten()
+    u_s = np.array(ss.pseudoshock.us).flatten()
+    x_s = x[ind_s]
+    t_ps_ms = t_ps * 1000
+    plt.figure()
+    plt.plot(x_s, t_ps_ms, c="r")
+    plt.xlabel("x [m]")
+    plt.ylabel("t [ms]")
+    plt.xlim([x[0], x[-1]])
+    plt.tight_layout()
+    plt.show()
+
+    # Plot the spatiotemporal contours
     for diagram in ss.xt_diagrams:
         diagram.plot(figdir=figdir)
 
