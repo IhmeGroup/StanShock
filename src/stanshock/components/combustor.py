@@ -210,6 +210,7 @@ class Combustor:
             if self.include_pseudoshock:
                 self.pseudoshock = Pseudoshock(
                     geometry=self.geometry,
+                    physics=self.physics,
                     boundary_layer=self.boundary_layer,
                 )
                 integrators += [ForwardEuler(self.pseudoshock)]
