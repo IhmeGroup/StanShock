@@ -687,14 +687,14 @@ def weno5_vectorized(
         idx = np.where(error >= threshold)
         phi = np.full_like(error[idx], alpha)
 
-        denom = P[iCell][idx] - P[iCellm1][idx]
-        sign = np.sign(denom)
-        numer = np.minimum(
+        den = P[iCell][idx] - P[iCellm1][idx]
+        sign = np.sign(den)
+        num = np.minimum(
             sign * alpha * (P[iCellp1][idx] - P[iCell][idx]),
             sign * 2.0 * (PLR[N][idx] - P[iCell][idx]),
         )
-        denom = np.abs(denom)
-        phi = np.divide(numer, denom, out=phi, where=denom != 0.0)
+        den = np.abs(den)
+        phi = np.divide(num, den, out=phi, where=den != 0.0)
         phi = np.clip(phi, 0.0, alpha)
 
         # apply limiter
