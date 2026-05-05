@@ -132,37 +132,8 @@ class SymmetryCells(GhostCell):
         return target
 
 
-class DeactivateWenoCells(GhostCellPrimitive):
-    """Applies large values and variance to primitives in ghost layers.
-
-    This is one approach to forcing the WENO stencil to only consider interior cells.
-    """
-
-    def __init__(
-        self, mt: int = 3, location: Literal["left", "right"] = "left"
-    ) -> None:
-        super().__init__(location)
-        if self.location == "left":
-            self.values = (10.0 * np.arange(mt, 0, -1)) ** 10.0
-            self.idx_exterior: Index = np.s_[:mt]
-        else:
-            self.values = (10.0 * np.arange(1, mt + 1)) ** 10.0
-            self.idx_exterior = np.s_[-mt:]
-
-    def update(self, time: float, target: FluidState) -> FluidState:
-        _: float = time
-        assert target.density is not None
-        assert target.velocity is not None
-        assert target.pressure is not None
-        assert target.composition is not None
-
-        values = self.values.copy()
-        target.density[self.idx_exterior] = values
-        target.velocity[self.idx_exterior] = values
-        target.pressure[self.idx_exterior] = values
-        target.composition[self.idx_exterior] = values[:, None]
-
-        return target
+class DeactivateWenoCells(FreezeCells):
+    """Indicates these ghost cells are not to be used within WENO calculations."""
 
 
 class ExtrapolateFace(RiemannFlux):
@@ -274,6 +245,16 @@ class BoundaryConditions:
         self._boundary_conditions += [boundary_condition]
 
     @property
+    def disable_ghost_layers(self) -> tuple[bool, bool]:
+        disable: list[bool] = [False, False]
+        map_lr = {"left": 0, "right": 1}
+        for bc in self._boundary_conditions:
+            if isinstance(bc, DeactivateWenoCells):
+                disable[map_lr[bc.location]] = True
+
+        return disable[0], disable[1]
+
+    @property
     def ghost_cells(self) -> list[GhostCell]:
         return [
             boundary_condition
@@ -347,10 +328,11 @@ def set_boundary_conditions(
 ) -> BoundaryConditions:
     """Convenience function to initialize different boundary conditions."""
 
-    # If ghost layer method not specified, default to freezing (hold constant)
+    # If ghost layer method not specified, default to freezing (hold constant) with
+    # ghost layers disabled for the WENO scheme.
     default_ghost_layers: dict[str, GhostCell | GhostCellPrimitive] = {
-        "left": ExtrapolateCells(mt=mt, location="left"),
-        "right": ExtrapolateCells(mt=mt, location="right"),
+        "left": DeactivateWenoCells(location="left"),
+        "right": DeactivateWenoCells(location="right"),
     }
 
     # Convert lists into BoundaryConditions:

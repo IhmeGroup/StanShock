@@ -5,6 +5,7 @@ from collections.abc import Callable
 import numpy as np
 from numba import double, njit
 
+from stanshock.numerics.face_extrapolation import FifthOrderWeno
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, TypeAlias, Unpack
 from stanshock.system.base import PrecomputeStepName, PrecomputeSteps, RightHandSide
@@ -293,6 +294,14 @@ class InviscidFlux(RightHandSide):
         self.dx: Array | float = self.geometry.dx
         if isinstance(self.dx, np.ndarray):
             self.dx = self.dx[self.geometry.idx_cells]
+
+        # Inform the face extrapolator whether the ghost layers are to be disabled
+        # for the given boundary conditions
+        if isinstance(self.face_extrapolator, FifthOrderWeno):
+            assert self.boundary_conditions is not None
+            self.face_extrapolator.disable_ghost_layers = (
+                self.boundary_conditions.disable_ghost_layers
+            )
 
     def source_implementation(
         self,
