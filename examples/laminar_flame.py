@@ -52,10 +52,10 @@ def main(
     geometry = initialize_geometry(xf)
 
     boundary_conditions: BCInput = {
-        "left": FreezeCells(
-            "left"
-        ),  # (gasUnburned.density, uUnburned, None, gasUnburned.Y),
-        "right": FreezeCells("right"),  # (None, None, gasBurned.P, None),
+        "left": [FreezeCells("left")],
+        "right": [FreezeCells("right")],
+        # "left": [(gasUnburned.density, uUnburned, None, gasUnburned.Y)],
+        # "right": [(None, None, gasBurned.P, None)],
     }
     if physics_model == "ThermoTable":
         physics = ThermoTable(gas)

@@ -211,7 +211,7 @@ BC_inlet = SpecifiedFace(
     reference_state=(gas_init.density, U_in, gas_init.P, (1.0, 0.0, 0.0))
 )
 BC_outlet = "outflow"
-BCs: BCInput = {"left": BC_inlet, "right": BC_outlet}
+BCs: BCInput = {"left": [BC_inlet], "right": [BC_outlet]}
 
 # Load the FPV table
 fpv_table = FPVTable(

@@ -63,7 +63,7 @@ BC_inlet = SpecifiedFace(
     reference_state=(gas_init.density, U_in, gas_init.P, gas_init.Y)
 )
 BC_outlet = "outflow"
-BCs: BCInput = {"left": BC_inlet, "right": BC_outlet}
+BCs: BCInput = {"left": [BC_inlet], "right": [BC_outlet]}
 
 
 # Define the fuel inflow

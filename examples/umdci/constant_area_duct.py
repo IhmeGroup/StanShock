@@ -60,7 +60,7 @@ BC_inlet = SpecifiedFace(
     location="left", reference_state=(gas1.density, u1, gas1.P, (1.0,))
 )
 BC_outlet = SpecifiedFace(location="right", reference_state=(None, None, p2, None))
-BCs: BCInput = {"left": BC_inlet, "right": BC_outlet}
+BCs: BCInput = {"left": [BC_inlet], "right": [BC_outlet]}
 init = InitializeConstant(geometry, physics_model, gas1, u1)
 wall_models = (CompressibleInertSkinFriction(), CompressibleHeatFlux())
 
