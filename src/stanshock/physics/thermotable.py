@@ -6,7 +6,7 @@ from numba import double, njit
 
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.fluid_base import FluidState
-from stanshock.system.backend import Array, Composition
+from stanshock.system.backend import Array, Composition, Index
 
 # Type signatures for numba
 double1D = double[:]
@@ -99,23 +99,19 @@ class ThermoTable(CanteraInterface):
         """
         super().__init__(gas, ox_def, fuel_def, prog_def)
         nSp: int = gas.n_species
-        self.TMin: float = 50.0
-        self.dT: float = 100.0
-        self.TMax: float = 9950.0
-        self.T: Array = np.arange(
-            self.TMin, self.TMax, self.dT, dtype=np.float64
-        )  # vector of temperatures assuming thermal equilibrium between species
-        nT = len(self.T)
-        self.h: Array = np.zeros(
-            (nT, nSp)
-        )  # matrix of species enthalpies per temperature
+        self.TMin: float = gas.min_temp
+        nT = 21
+        self.TMax: float = gas.max_temp
+        # vector of temperatures assuming thermal equilibrium between species
+        self.T: Array = np.linspace(self.TMin, self.TMax, nT, dtype=np.float64)
+        self.dT = (self.TMax - self.TMin) / (nT - 1)
+        # matrix of species enthalpies per temperature
+        self.h: Array = np.zeros((nT, nSp))
         # cpk = ak*T+bk for T in [Tk,Tk+1], k in {0,1,2,...,nT-1}
-        self.a: Array = np.zeros(
-            (nT, nSp)
-        )  # matrix of species first order coefficients
-        self.b: Array = np.zeros(
-            (nT, nSp)
-        )  # matrix of species zeroth order coefficients
+        # matrix of species first order coefficients
+        self.a: Array = np.zeros((nT, nSp))
+        # matrix of species zeroth order coefficients
+        self.b: Array = np.zeros((nT, nSp))
         self.molecularWeights: Array = gas.molecular_weights
         # determine the coefficients
         for kSp, species in enumerate(gas.species()):
@@ -134,6 +130,11 @@ class ThermoTable(CanteraInterface):
                 # update
                 cpk = self.a[kT, kSp] * (Tkp1) + self.b[kT, kSp]
                 hk = hkp1
+        # Compute the matching species internal energies
+        self.e = (
+            self.h - ct.gas_constant * self.T[:, None] / self.molecularWeights[None, :]
+        )
+        self.c = self.b - ct.gas_constant / self.molecularWeights[None, :]
 
     def get_specific_gas_constant(self, state: FluidState) -> Array:
         """
@@ -169,27 +170,6 @@ class ThermoTable(CanteraInterface):
             self.b,
         ).reshape(state.shape)
 
-    def get_frozen_enthalpy(self, T: Array, Y: Array) -> Array:
-        """
-        This method computes the enthalpy according to Billet and Abgrall (2003).
-        This is the enthalpy that is frozen over the time step
-            inputs:
-                T: vector of temperatures [n]
-                Y: matrix of mass fractions [n,nSp]
-            outputs:
-                h0: vector of frozen enthalpies for the mixture [n]
-        """
-        if any(np.logical_or(self.TMin > T, self.TMax < T)):
-            msg = "Temperature not within table"
-            raise ValueError(msg)
-        nT = len(T)
-        indices = [int((Tk - self.TMin) / self.dT) for Tk in T]
-        h0 = np.zeros(nT)
-        for k, index in enumerate(indices):
-            bbar = self.a[index, :] / 2.0 * (T[k] + self.T[index]) + self.b[index, :]
-            h0[k] = np.dot(Y[k, :], self.h[index] - bbar * self.T[index])
-        return h0
-
     def get_gamma(self, state: FluidState) -> Array:
         """
         This method computes the specific heat ratio, gamma.
@@ -210,13 +190,47 @@ class ThermoTable(CanteraInterface):
             outputs:
                 T: vector of temperatures
         """
-        R = self.get_specific_gas_constant(state)
-        if state.pressure is None:
-            state = self.set_state(state)
-            state.temperature = self.sol.T
-        else:
-            assert state.density is not None
+        if state.pressure is not None and state.density is not None:
+            # Compute temperature using ideal gas law
+            R = self.get_specific_gas_constant(state)
             state.temperature = state.pressure / (state.density * R)
+        else:
+            # Compute temperature from the internal energy
+            assert state.composition is not None
+            assert state.internal_energy is not None
+            R = self.get_specific_gas_constant(state)
+            Y = state.composition
+            e_int_ref = Y @ self.e.T
+
+            if not np.all(e_int_ref[:, :-1] <= e_int_ref[:, 1:]):
+                msg = "Tabulated internal energy for the mixture is not monotonic in temperature."
+                raise ValueError(msg)
+
+            N = state.shape[0]
+            index = np.zeros(state.shape[0], dtype=int)
+            for i in range(N):
+                index[i] = max(
+                    np.searchsorted(
+                        e_int_ref[i], state.internal_energy[i], side="right"
+                    )
+                    - 1,
+                    0,
+                )
+            de = state.internal_energy - e_int_ref[np.arange(N, dtype=int), index]
+
+            # Solve quadratic formula - always pick larger real root
+            a: Array = np.sum(Y * (0.5 * self.a[index]), axis=-1)
+            b: Array = np.sum(Y * self.c[index], axis=-1)
+            Tm: Array = self.T[index]
+            c = -((a * Tm + b) * Tm + de)
+
+            state.temperature = np.divide(
+                np.sqrt(b**2 - 4.0 * a * c) - b,
+                2.0 * a,
+                out=-c / b,
+                where=np.abs(a) > 1e-14,
+            )
+
         return state.temperature
 
     def get_pressure(self, state: FluidState) -> Array:
@@ -237,6 +251,24 @@ class ThermoTable(CanteraInterface):
             state.pressure = state.temperature * R * state.density
         return state.pressure
 
+    def get_internal_energy(self, state: FluidState) -> Array:
+        if state.internal_energy is not None:
+            return state.internal_energy
+
+        assert state.temperature is not None
+        T = state.temperature
+        R = self.get_specific_gas_constant(state)
+        h = self.get_enthalpy(state)
+        state.internal_energy = h - R * T
+        return state.internal_energy
+
+    def get_index(self, T: Array) -> Index:
+        return np.asarray((T - self.TMin) / self.dT, dtype=int)
+
+    def get_bbar(self, T: Array) -> tuple[Index, Array]:
+        index = self.get_index(T)
+        return index, 0.5 * self.a[index] * (T + self.T[index])[:, None] + self.b[index]
+
     def get_species_enthalpies(self, state: FluidState) -> Array:
         if state.temperature is None:
             T = self.get_temperature(state)
@@ -247,12 +279,22 @@ class ThermoTable(CanteraInterface):
             msg = "Temperature not within table"
             raise ValueError(msg)
 
-        indices = np.floor((T - self.TMin) / self.dT, casting="unsafe", dtype=int)
-        bbar = (
-            0.5 * self.a[indices, :] * (T + self.T[indices])[..., None]
-            + self.b[indices, :]
-        )
-        return self.h[indices, :] - bbar * self.T[indices, None]
+        index, bbar = self.get_bbar(T)
+        return self.h[index, :] + bbar * (T - self.T[index])[:, None]
+
+    def get_enthalpy(self, state: FluidState) -> Array:
+        """
+        This method computes the enthalpy according to Billet and Abgrall (2003).
+        This is the enthalpy that is frozen over the time step
+            inputs:
+                T: vector of temperatures [n]
+                Y: matrix of mass fractions [n,nSp]
+            outputs:
+                h0: vector of frozen enthalpies for the mixture [n]
+        """
+        assert state.composition is not None
+        hk = self.get_species_enthalpies(state)
+        return np.sum(state.composition * hk, axis=-1)
 
     def get_sound_speed(self, state: FluidState) -> Array:
         assert state.pressure is not None

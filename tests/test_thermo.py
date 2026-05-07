@@ -20,34 +20,46 @@ get_cp_compiled = get_cp_compiled.__wrapped__
 mech = "data/mechanisms/HeliumArgon.yaml"
 
 
-def test_table_computes_correct_temperatures():
+def test_table_computes_correct_temperatures() -> None:
+    N = 101
     gas = ct.Solution(mech)
-    argon_mass_fractions = np.linspace(0, 1)[:, np.newaxis]
+    sol = ct.SolutionArray(gas, (N,))
+    argon_mass_fractions = np.linspace(0, 1, N)[:, None]
     helium_mass_fractions = 1.0 - argon_mass_fractions
     mass_fractions = np.hstack([argon_mass_fractions, helium_mass_fractions])
-    densities = np.logspace(-1, 1)
-    pressures = np.logspace(6, 4)
-    actual_temperatures = []
-    for state in zip(densities, pressures, mass_fractions, strict=False):
-        gas.DPY = state
-        actual_temperatures.append(gas.T)
-    actual_temperatures = np.array(actual_temperatures)
+    densities = np.logspace(-1, 1, N)
+    pressures = np.logspace(6, 4, N)
+
+    sol.DPY = densities, pressures, mass_fractions
+    actual_temperatures = sol.T
 
     table = ThermoTable(gas)
+
+    # Ideal gas law
     predicted_temperatures = table.get_temperature(
         FluidState(
-            shape=len(pressures),
+            shape=(N,),
             density=densities,
             pressure=pressures,
             composition=mass_fractions,
         )
     )
-    assert np.allclose(actual_temperatures, predicted_temperatures)
+    assert actual_temperatures == pytest.approx(predicted_temperatures)
+
+    # Energy to temperature
+    predicted_temperatures = table.get_temperature(
+        FluidState(
+            shape=(N,),
+            internal_energy=sol.int_energy_mass,
+            composition=mass_fractions,
+        )
+    )
+    assert actual_temperatures == pytest.approx(predicted_temperatures, rel=0.01)
 
 
 def test_monatomic_gas_has_constant_gamma():
     gas = ct.Solution(mech)
-    temperatures = np.linspace(50.0, 5000.0)[:, np.newaxis]
+    temperatures = np.linspace(gas.min_temp, gas.max_temp)[:, None]
     mass_fractions = np.hstack(
         [np.ones_like(temperatures), np.zeros_like(temperatures)]
     )
@@ -59,13 +71,12 @@ def test_monatomic_gas_has_constant_gamma():
             composition=mass_fractions,
         )
     )
-    gammas_are_constant = np.allclose(gammas, gammas[0])
-    assert gammas_are_constant
+    assert gammas == pytest.approx(gammas[0])
 
 
 def test_single_species_gas_has_correct_constant():
     molecular_weight = np.array([7.0, 3.0])
-    mass_fraction = np.array([1, 0])[np.newaxis, :]
+    mass_fraction = np.array([1, 0])[None, :]
     actual_gas_constant = ct.gas_constant / molecular_weight[0]
     predicted_gas_constant = get_specific_gas_constant_compiled(
         mass_fraction, molecular_weight
@@ -76,7 +87,7 @@ def test_single_species_gas_has_correct_constant():
 def test_cp_increases_with_larger_coefficients():
     temperatures = np.linspace(300, 3000)
     temperature_table = temperatures
-    mass_fractions = np.ones_like(temperatures)[:, np.newaxis]
+    mass_fractions = np.ones_like(temperatures)[:, None]
     a = np.ones_like(mass_fractions)
     b = np.ones_like(mass_fractions)
     specific_heats_with_small_a = get_cp_compiled(
@@ -95,24 +106,10 @@ def test_cp_increases_with_larger_coefficients():
     assert np.all(specific_heats_with_small_b <= specific_heats_with_large_b)
 
 
-def test_formation_enthalpy_is_invariant_to_temperature():
-    temperatures = np.array([1000.0, 5000.0])
-    gas = ct.Solution(mech)
-    table = ThermoTable(gas)
-    mass_fractions = np.hstack(
-        [
-            np.ones_like(temperatures)[:, np.newaxis],
-            np.zeros_like(temperatures)[:, np.newaxis],
-        ]
-    )
-    enthalpies = table.get_frozen_enthalpy(temperatures, mass_fractions)
-    assert enthalpies[0] == pytest.approx(enthalpies[1], rel=1e-3)
-
-
 def test_out_of_bounds_temperature_raises_exception():
     temperatures = np.array([-100, -90])
     temperature_table = temperatures + 100
-    mass_fractions = np.ones_like(temperatures)[:, np.newaxis]
+    mass_fractions = np.ones_like(temperatures)[:, None]
     a = np.ones_like(mass_fractions)
     b = np.ones_like(mass_fractions)
     with pytest.raises(ValueError, match="Temperature out of bounds"):
@@ -121,4 +118,4 @@ def test_out_of_bounds_temperature_raises_exception():
     gas = ct.Solution(mech)
     table = ThermoTable(gas)
     with pytest.raises(ValueError, match="Temperature not within table"):
-        table.get_frozen_enthalpy(temperatures, mass_fractions)
+        table.get_species_enthalpies(FluidState(shape=(2,), temperature=temperatures))
