@@ -67,7 +67,7 @@ def get_cp_compiled(T: Array, Y: Array, TTable: Array, a: Array, b: Array) -> Ar
     # determine cp
     cp = np.zeros((nX,))
     for iX in range(nX):
-        if (T[iX] < TMin) or (T[iX] > TMax):
+        if (T[iX] < 0.99 * TMin) or (T[iX] > 1.01 * TMax):
             msg = f"Temperature out of bounds: {T[iX]} not in range [{TMin}, {TMax}]"
             raise ValueError(msg)
         index = indices[iX]
@@ -370,8 +370,8 @@ class ThermoTable(CanteraInterface):
     def get_species_enthalpies(self, state: FluidState) -> Array:
         T = self.get_temperature(state)
 
-        if any(np.logical_or(self.TMin > T, self.TMax < T)):
-            msg = "Temperature not within table"
+        if any(np.logical_or(0.99 * self.TMin > T, 1.01 * self.TMax < T)):
+            msg = f"Temperature not within table. {T.min() = }, {T.max() = }"
             raise ValueError(msg)
 
         index, bbar = self.get_bbar(T)
