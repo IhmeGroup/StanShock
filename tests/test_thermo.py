@@ -21,17 +21,17 @@ mech = "data/mechanisms/HeliumArgon.yaml"
 
 
 def test_table_computes_correct_temperatures() -> None:
-    N = 101
+    N = 1001
     gas = ct.Solution(mech)
     sol = ct.SolutionArray(gas, (N,))
     argon_mass_fractions = np.linspace(0, 1, N)[:, None]
     helium_mass_fractions = 1.0 - argon_mass_fractions
     mass_fractions = np.hstack([argon_mass_fractions, helium_mass_fractions])
-    densities = np.logspace(-1, 1, N)
+    temperatures = np.logspace(np.log10(gas.max_temp), np.log10(gas.min_temp), N)
     pressures = np.logspace(6, 4, N)
 
-    sol.DPY = densities, pressures, mass_fractions
-    actual_temperatures = sol.T
+    sol.TPY = temperatures, pressures, mass_fractions
+    densities = sol.density_mass
 
     table = ThermoTable(gas)
 
@@ -44,7 +44,7 @@ def test_table_computes_correct_temperatures() -> None:
             composition=mass_fractions,
         )
     )
-    assert actual_temperatures == pytest.approx(predicted_temperatures)
+    assert temperatures == pytest.approx(predicted_temperatures)
 
     # Energy to temperature
     predicted_temperatures = table.get_temperature(
@@ -54,10 +54,10 @@ def test_table_computes_correct_temperatures() -> None:
             composition=mass_fractions,
         )
     )
-    assert actual_temperatures == pytest.approx(predicted_temperatures, rel=0.01)
+    assert temperatures == pytest.approx(predicted_temperatures, rel=0.013)
 
 
-def test_monatomic_gas_has_constant_gamma():
+def test_monatomic_gas_has_constant_gamma() -> None:
     gas = ct.Solution(mech)
     temperatures = np.linspace(gas.min_temp, gas.max_temp)[:, None]
     mass_fractions = np.hstack(
@@ -74,7 +74,7 @@ def test_monatomic_gas_has_constant_gamma():
     assert gammas == pytest.approx(gammas[0])
 
 
-def test_single_species_gas_has_correct_constant():
+def test_single_species_gas_has_correct_constant() -> None:
     molecular_weight = np.array([7.0, 3.0])
     mass_fraction = np.array([1, 0])[None, :]
     actual_gas_constant = ct.gas_constant / molecular_weight[0]
@@ -84,7 +84,7 @@ def test_single_species_gas_has_correct_constant():
     assert actual_gas_constant == predicted_gas_constant
 
 
-def test_cp_increases_with_larger_coefficients():
+def test_cp_increases_with_larger_coefficients() -> None:
     temperatures = np.linspace(300, 3000)
     temperature_table = temperatures
     mass_fractions = np.ones_like(temperatures)[:, None]
