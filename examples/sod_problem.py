@@ -191,13 +191,13 @@ geometry = Geometry(xf, area=1.0)
 
 # Get analytical solution on fine mesh
 t_final = sod_case["t_final"]
-x_analytical = np.linspace(-0.5 * L, L, 2001)
+x_analytical = np.linspace(-0.5 * L, 0.5 * L, 2001)
 p_analytical, rho_analytical, u_analytical = analytical_sod_solution(
     t_final, x_analytical, g
 )
 
 # Set up solver parameters
-boundary_conditions: BCInput = {"left": "reflecting", "right": "reflecting"}
+boundary_conditions: BCInput = {"left": ["reflecting"], "right": ["reflecting"]}
 physics = ThermoTable(gas_left)
 initialization = InitializeRiemannProblem(
     geometry, physics, left_state, right_state, 0.0

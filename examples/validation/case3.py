@@ -154,7 +154,7 @@ def main(
 
     # set up solver parameters
     print("Solving with boundary layer terms")
-    boundary_conditions: BCInput = {"left": "reflecting", "right": "reflecting"}
+    boundary_conditions: BCInput = {"left": ["reflecting"], "right": ["reflecting"]}
     state1 = (gas1, u1)
     state4 = (gas4, u4)
     physics_model = ThermoTable(gas1)
@@ -184,7 +184,6 @@ def main(
 
     # without  boundary layer model
     print("Solving without boundary layer model")
-    boundary_conditions = {"left": "reflecting", "right": "reflecting"}
     gas1.TP = T1, p1
     gas4.TP = T4, p4
     ssnbl = ShockTube(

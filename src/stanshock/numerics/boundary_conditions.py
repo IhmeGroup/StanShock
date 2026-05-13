@@ -132,37 +132,8 @@ class SymmetryCells(GhostCell):
         return target
 
 
-class DeactivateWenoCells(GhostCellPrimitive):
-    """Applies large values and variance to primitives in ghost layers.
-
-    This is one approach to forcing the WENO stencil to only consider interior cells.
-    """
-
-    def __init__(
-        self, mt: int = 3, location: Literal["left", "right"] = "left"
-    ) -> None:
-        super().__init__(location)
-        if self.location == "left":
-            self.values = (10.0 * np.arange(mt, 0, -1)) ** 10.0
-            self.idx_exterior: Index = np.s_[:mt]
-        else:
-            self.values = (10.0 * np.arange(1, mt + 1)) ** 10.0
-            self.idx_exterior = np.s_[-mt:]
-
-    def update(self, time: float, target: FluidState) -> FluidState:
-        _: float = time
-        assert target.density is not None
-        assert target.velocity is not None
-        assert target.pressure is not None
-        assert target.composition is not None
-
-        values = self.values.copy()
-        target.density[self.idx_exterior] = values
-        target.velocity[self.idx_exterior] = values
-        target.pressure[self.idx_exterior] = values
-        target.composition[self.idx_exterior] = values[:, None]
-
-        return target
+class DeactivateWenoCells(FreezeCells):
+    """Indicates these ghost cells are not to be used within WENO calculations."""
 
 
 class ExtrapolateFace(RiemannFlux):
@@ -204,7 +175,7 @@ class AdiabaticWallFace(ExtrapolateFace):
 
 
 ReferenceStateType: TypeAlias = tuple[
-    float | None, float | None, float | None, Sequence[float] | None
+    float | None, float | None, float | None, Array | Sequence[float] | None
 ]
 
 
@@ -274,6 +245,16 @@ class BoundaryConditions:
         self._boundary_conditions += [boundary_condition]
 
     @property
+    def disable_ghost_layers(self) -> tuple[bool, bool]:
+        disable: list[bool] = [False, False]
+        map_lr = {"left": 0, "right": 1}
+        for bc in self._boundary_conditions:
+            if isinstance(bc, DeactivateWenoCells):
+                disable[map_lr[bc.location]] = True
+
+        return disable[0], disable[1]
+
+    @property
     def ghost_cells(self) -> list[GhostCell]:
         return [
             boundary_condition
@@ -338,8 +319,8 @@ BCLike: TypeAlias = BCType | BCNamesType | ReferenceStateType
 
 
 class BCInput(TypedDict):
-    left: BCLike | Sequence[BCLike]
-    right: BCLike | Sequence[BCLike]
+    left: Sequence[BCLike]
+    right: Sequence[BCLike]
 
 
 def set_boundary_conditions(
@@ -347,40 +328,35 @@ def set_boundary_conditions(
 ) -> BoundaryConditions:
     """Convenience function to initialize different boundary conditions."""
 
-    # If ghost layer method not specified, default to freezing (hold constant)
+    # If ghost layer method not specified, default to freezing (hold constant) with
+    # ghost layers disabled for the WENO scheme.
     default_ghost_layers: dict[str, GhostCell | GhostCellPrimitive] = {
-        "left": DeactivateWenoCells(mt=mt, location="left"),
-        "right": DeactivateWenoCells(mt=mt, location="right"),
+        "left": DeactivateWenoCells(location="left"),
+        "right": DeactivateWenoCells(location="right"),
     }
 
     # Convert lists into BoundaryConditions:
     if not isinstance(boundary_conditions, BoundaryConditions):
-        bc_locs: list[Literal["left", "right"]] = ["left", "right"]
         bcs: list[BCType] = []
-        for bc_loc in bc_locs:
-            if isinstance(boundary_conditions[bc_loc], str | BoundaryCondition | tuple):
-                bc_tmp = [boundary_conditions[bc_loc]]
-            else:
-                bc_tmp = boundary_conditions[bc_loc]
-
-            for bc_specification in bc_tmp:
-                if isinstance(bc_specification, str):
-                    if bc_specification == "periodic":
-                        bcs += [PeriodicCells(mt, location=bc_loc)]
-                    elif bc_specification == "extrapolate":
-                        bcs += [ExtrapolateCells(mt, location=bc_loc)]
-                    elif bc_specification == "outflow":
-                        bcs += [ExtrapolateFace(location=bc_loc)]
-                    elif bc_specification in ["symmetry", "reflecting"]:
-                        bcs += [SymmetryCells(mt, location=bc_loc)]
-                    elif bc_specification == "wall":
-                        bcs += [AdiabaticWallFace(location=bc_loc)]
-                elif isinstance(bc_specification, BoundaryCondition):
-                    bcs += [bc_specification]
-                elif isinstance(bc_specification, tuple):
-                    bcs += [
-                        SpecifiedFace(reference_state=bc_specification, location=bc_loc)
-                    ]
+        bc_loc: Literal["left", "right"]
+        for bc_loc, bc_specification in boundary_conditions.items():  # type: ignore[assignment]
+            if isinstance(bc_specification, str):
+                if bc_specification == "periodic":
+                    bcs += [PeriodicCells(mt, location=bc_loc)]
+                elif bc_specification == "extrapolate":
+                    bcs += [ExtrapolateCells(mt, location=bc_loc)]
+                elif bc_specification == "outflow":
+                    bcs += [ExtrapolateFace(location=bc_loc)]
+                elif bc_specification in ["symmetry", "reflecting"]:
+                    bcs += [SymmetryCells(mt, location=bc_loc)]
+                elif bc_specification == "wall":
+                    bcs += [AdiabaticWallFace(location=bc_loc)]
+            elif isinstance(bc_specification, BoundaryCondition):
+                bcs += [bc_specification]
+            elif isinstance(bc_specification, tuple):
+                bcs += [
+                    SpecifiedFace(reference_state=bc_specification, location=bc_loc)
+                ]
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)
 

@@ -8,7 +8,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from stanshock.components.combustor import Combustor
-from stanshock.numerics.boundary_conditions import BCInput, FreezeCells
+from stanshock.numerics.boundary_conditions import BCInput, DeactivateWenoCells
 from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.initialize import InitializeCanteraArray
@@ -52,10 +52,10 @@ def main(
     geometry = initialize_geometry(xf)
 
     boundary_conditions: BCInput = {
-        "left": FreezeCells(
-            "left"
-        ),  # (gasUnburned.density, uUnburned, None, gasUnburned.Y),
-        "right": FreezeCells("right"),  # (None, None, gasBurned.P, None),
+        "left": [DeactivateWenoCells("left")],
+        "right": [DeactivateWenoCells("right")],
+        # "left": [(gasUnburned.density, uUnburned, None, gasUnburned.Y)],
+        # "right": [(None, None, gasBurned.P, None)],
     }
     if physics_model == "ThermoTable":
         physics = ThermoTable(gas)
