@@ -28,6 +28,29 @@ Data-Driven One Dimensional Modeling of Pseudoshocks
 """
 test_pseudoshock = True
 
+
+XSMALL_SIZE = 10
+SMALL_SIZE = 12
+MEDIUM_SIZE = 14
+BIGGER_SIZE = 18
+
+plt.rcParams.update(
+    {
+        "text.usetex": True,
+        "font.family": "serif",
+        "font.serif": ["Computer Modern Roman"],
+        "axes.xmargin": 0,
+        "axes.ymargin": 0,
+        "font.size": SMALL_SIZE,
+        "axes.titlesize": SMALL_SIZE,
+        "axes.labelsize": MEDIUM_SIZE,
+        "xtick.labelsize": SMALL_SIZE,
+        "ytick.labelsize": SMALL_SIZE,
+        "legend.fontsize": XSMALL_SIZE,
+        "figure.titlesize": BIGGER_SIZE,
+    }
+)
+
 # Data
 figdir = Path("./figures")
 figdir.mkdir(exist_ok=True)
@@ -68,8 +91,8 @@ variable_info_map = get_variable_info_map(physics_model)
 wall_models = (CompressibleInertSkinFriction(), CompressibleHeatFlux())
 
 if test_pseudoshock:
-    t_final = 0.1
-    p2 = p1 * 3.0
+    t_final = 0.10
+    p2 = p1 * 2.0
     gas2 = ct.Solution(mech)
     gas2.TP = T1 * 1.6, p2
     u2 = gas2.sound_speed * 0.5
@@ -95,7 +118,6 @@ plot_variables = ["mach", "pressure", "temperature"]
 ss = Combustor(
     geometry=geometry,
     wall_temperature=330.0,
-    include_pseudoshock=True,
     wall_models=wall_models,
     include_pseudoshock=test_pseudoshock,
     initialization=init,
