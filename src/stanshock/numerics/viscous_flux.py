@@ -41,7 +41,7 @@ class ViscousFlux(RightHandSide):
         diffusivities = self.physics.get_mass_diffusivity(avg_face_states) * self.F
         enthalpies = self.physics.get_species_enthalpies(avg_face_states)
         density = avg_face_states.density
-        Y = avg_face_states.mass_fractions
+        Y = self.physics.get_mass_fractions(avg_face_states)
 
         # Get gradients across the faces
         dudx = face_gradients.velocity

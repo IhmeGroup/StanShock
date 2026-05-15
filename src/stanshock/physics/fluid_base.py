@@ -17,6 +17,7 @@ class FluidState:
     density: Array | None = None
     temperature: Array | None = None
     pressure: Array | None = None
+    enthalpy: Array | None = None
     internal_energy: Array | None = None
     mass_fractions: Array | None = None
     mole_fractions: Array | None = None
@@ -29,12 +30,15 @@ class FluidState:
     gamma: Array | None = None
     viscosity: Array | None = None
     thermal_conductivity: Array | None = None
+    mass_diffusivity: Array | None = None
     sound_speed: Array | None = None
 
     velocity: Array | None = None
 
     gamma_star: Array | None = None
     e0_star: Array | None = None
+
+    logT_poly: Array | None = None
 
     _cache_valid: bool = False
 
@@ -98,6 +102,7 @@ class FluidPhysics(ABC):
         self.n_scalars: int = self.gas.n_species
         self.n_scalars_rho_sum: int = self.n_scalars
         self.scalar_names: list[str] = self.gas.species_names
+        self.molecular_weights: Array = gas.molecular_weights
 
         self.is_flamelet: bool = False
 
@@ -272,6 +277,12 @@ class FluidPhysics(ABC):
         """Returns mass fractions, computing from transported scalars if needed."""
         assert state.composition is not None
         return state.composition
+
+    def get_mole_fractions(self, state: FluidState) -> Array:
+        """Returns mole fractions, computing from mass fractions if needed."""
+        Y = self.get_mass_fractions(state)
+        Y_W = Y / self.molecular_weights[None, :]
+        return Y_W / np.sum(Y_W, axis=-1, keepdims=True)
 
     def get_normalized_progress_variable(self, Z: Array, C: Array) -> Array:
         _ = Z, C
