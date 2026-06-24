@@ -14,33 +14,9 @@ from stanshock.components.combustor import Combustor
 from stanshock.physics.thermotable import ThermoTable
 from stanshock.processing.plot import XTDiagram
 from stanshock.processing.probe import Probe
-from stanshock.processing.splicer import splicer
 
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
-    }
-)
-plt.rcParams["axes.xmargin"] = 0
-plt.rcParams["axes.ymargin"] = 0
-
-XSMALL_SIZE = 12
-SMALL_SIZE = 14
-MEDIUM_SIZE = 16
-BIGGER_SIZE = 18
-
-plt.rc("font", size=SMALL_SIZE)  # controls default text sizes
-plt.rc("axes", titlesize=SMALL_SIZE)  # fontsize of the axes title
-plt.rc("axes", labelsize=MEDIUM_SIZE)  # fontsize of the x and y labels
-plt.rc("xtick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("ytick", labelsize=SMALL_SIZE)  # fontsize of the tick labels
-plt.rc("legend", fontsize=XSMALL_SIZE)  # legend fontsize
-plt.rc("figure", titlesize=BIGGER_SIZE)  # fontsize of the figure title
-
-# Plotting utilities
-scale = 1e3
+root_dir = Path(__file__).resolve().parent / ".." / ".."
+plt.style.use(root_dir / "data" / "stylelib" / "publication.mplstyle")
 
 # Paths
 datadir = Path("./data")
@@ -51,12 +27,6 @@ animdir: Path = figdir / "anim"
 animdir.mkdir(exist_ok=True)
 resultsdir = Path("./xt_raw")
 resultsdir.mkdir(exist_ok=True)
-
-copy_dir: Path = Path(
-    "/Users/nlaing3/Library/CloudStorage/OneDrive-Stanford/MAIN WORK/01_Research/06_Plots/00_StanShock"
-)
-copy_vid_path: Path = copy_dir / "01_movies"
-copy_img_path: Path = copy_dir / "00_plots"
 
 for ext in ("*.png", "*.mp4"):
     for file in figdir.glob(pattern=ext):
@@ -453,9 +423,3 @@ finally:
         dpi=300,
         bbox_inches="tight",
     )
-    import shutil
-
-    splicer(tFinal, figdir / "anim", figdir, copy_vid_path)
-    dest_path = copy_img_path / f"{filename}_{time_stamp}.png"
-    shutil.copyfile(figdir / f"{filename}_{time_stamp}.png", dest_path)
-    plt.show()
