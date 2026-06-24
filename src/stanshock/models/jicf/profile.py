@@ -112,7 +112,7 @@ class AnalyticJICF:
         # Precompute the adjustment factor for the boundary clipping
         self.calc_adjustment_factor()
 
-    def y_cl(self, x_cl):
+    def y_cl(self, x_cl: Array | float) -> Array:
         # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
         # return self.d_inj * 1.6 * (x_cl / self.d_inj)**(1.0/3.0) * self.r_u**(2.0/3.0) # Torrez 2011 (Same as Margason 1968)
         # return 1.6 * x_cl**(1.0/3.0) * (self.d_inj * self.r_u)**(2.0/3.0) # Margason 1968
@@ -120,35 +120,37 @@ class AnalyticJICF:
         # return self.d_inj * 0.527 * self.r_u**1.178 * (x_cl / self.d_inj)**0.314 # Karagozian 1986
 
         # SONIC VERSION
-        return (
-            self.d_inj * self.J * 1.23 * (x_cl / (self.d_inj * self.J)) ** 0.344
-        )  # Gruber 1995 JPP
+        denom = np.divide(
+            1.0, self.d_inj * self.J, out=np.zeros_like(self.J), where=self.J > 0
+        )
+        term = x_cl * denom
+        term = np.power(term, 0.344, out=np.zeros_like(term), where=term > 0)
+        return self.d_inj * self.J * 1.23 * term  # Gruber 1995 JPP
         # return self.d_inj * self.J * 1.20 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J))**0.344 # Gruber 1997 Phys. Fluids
         # return self.d_inj * 2.173 / self.J**0.276 * (x_cl / self.d_inj)**0.281 # Rothstein and Wantuck 1992
 
-    def x_cl_from_y_cl(self, y_cl):
+    def x_cl_from_y_cl(self, y_cl: Array | float) -> Array:
         # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
         # return (y_cl / (self.r_u * self.d_inj * 1.6))**(3.0) * self.r_u * self.d_inj # Hasselbrink and Mungal 2001 Pt. 2
 
         # SONIC VERSION
-        return (
-            (y_cl / (self.d_inj * self.J * 1.23)) ** (1.0 / 0.344) * self.d_inj * self.J
-        )  # Gruber 1995 JPP
+        denom = np.divide(
+            1.0, self.d_inj * self.J * 1.23, out=np.zeros_like(self.J), where=self.J > 0
+        )
+        return (y_cl * denom) ** (1.0 / 0.344) * self.d_inj * self.J  # Gruber 1995 JPP
         # return (y_cl / (self.d_inj * self.J * 1.20))**(1.0 / 0.344) * self.d_inj * self.J - self.d_inj/2 # Gruber 1997 Phys. Fluids
 
-    def dy_cl_dx(self, x_cl):
+    def dy_cl_dx(self, x_cl: Array | float) -> Array:
         # SUBSONIC VERSION - CHECK THESE FOR CORRECTNESS
         # return (self.r_u * self.d_inj)**(2.0/3.0) * 1.6 * (1.0/3.0) * x_cl**(-2.0/3.0) # Hasselbrink and Mungal 2001 Pt. 2
 
         # SONIC VERSION
-        return (
-            0.344
-            * self.d_inj
-            * self.J
-            * 1.23
-            * (x_cl / (self.d_inj * self.J)) ** (0.344 - 1.0)
-            * (1.0 / (self.d_inj * self.J))
-        )  # Gruber 1995 JPP
+        denom = np.divide(
+            1.0, self.d_inj * self.J, out=np.zeros_like(self.J), where=self.J > 0
+        )
+        term = x_cl * denom
+        term = np.power(term, 0.344 - 1.0, out=np.zeros_like(term), where=term > 0)
+        return 0.344 * self.d_inj * self.J * 1.23 * term * denom  # Gruber 1995 JPP
         # return (0.344 *
         #         self.d_inj * self.J * 1.20 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J))**(0.344 - 1.0) *
         #         (1.0 / (self.d_inj * self.J))) # Gruber 1997 Phys. Fluids
@@ -176,24 +178,8 @@ class AnalyticJICF:
 
         return x_cl, y_cl, n2
 
-    def __match_ndarray_shapes(self, *args):
-        is_ndarray = [isinstance(arg, np.ndarray) for arg in args]
-        if not any(is_ndarray):
-            return args
-        shape = np.shape(args[is_ndarray.index(True)])
-        args_out = []
-        for i in range(len(args)):
-            if is_ndarray[i]:
-                if np.shape(args[i]) != shape:
-                    msg = "Shapes do not match"
-                    raise ValueError(msg)
-                args_out.append(args[i])
-            else:
-                args_out.append(np.full(shape, args[i]))
-        return args_out
-
     def nearest_on_cl(self, x, y, dz, i_m):
-        x_match, y_match, dz_match = self.__match_ndarray_shapes(x, y, dz)
+        x_match, y_match, dz_match = np.broadcast_arrays(x, y, dz)
 
         if isinstance(x_match, np.ndarray):
             x_flat = x_match.flatten()
@@ -212,37 +198,40 @@ class AnalyticJICF:
             return x_cl, y_cl, n2
         return self.__nearest_on_cl_single(x, y, dz)
 
-    def Z_cl(self, x_cl):
+    def Z_cl(self, x_cl: Array | float) -> Array:
+        denom = np.divide(
+            1.0, self.r_u, out=np.zeros_like(self.r_u), where=self.r_u > 0
+        )
+        term = x_cl * denom / self.d_inj
+        term = np.power(term, -2.0 / 3.0, out=np.zeros_like(term), where=term > 0)
         Z = (
-            0.85
-            * (1 / self.r_u)
-            * (self.rho_inj / self.rho) ** (0.5)
-            * (x_cl / (self.r_u * self.d_inj)) ** (-2.0 / 3.0)
+            0.85 * denom * np.sqrt(self.rho_inj / self.rho) * term
         )  # Hasselbrink and Mungal 2001 Pt. 1
         return np.clip(Z, self.Z_gl, 1.0)
 
     def calc_adjustment_factor(self):
         print("Computing adjustment factor...")
         self.adjustment_factor_interp = []
+        y_cl_max = self.y_cl(self.x[-1])
+
+        # Create grid along the centerline
+        y_cl_arr = np.linspace(0, y_cl_max, 1000, axis=0)
+        x_cl_arr = self.x_cl_from_y_cl(y_cl_arr)
+
         for i_m in tqdm(range(len(self.mdot_inj))):
             if self.u_inj[i_m] == 0.0:
                 self.adjustment_factor_interp.append(np.ones_like)
                 continue
 
-            # Create grid along the centerline
-            y_cl_max = self.y_cl(self.x[-1])[i_m]
-            y_cl_arr = np.linspace(0, y_cl_max, 1000)
-            x_cl_arr = self.x_cl_from_y_cl(y_cl_arr[:, np.newaxis])[:, i_m]
-
             # Iterate over the centerline
             adjustment_factor_arr = self.calc_adjustment_factor_xy(
-                x_cl_arr, y_cl_arr, i_m
+                x_cl_arr[:, i_m], y_cl_arr[:, i_m], i_m
             )
             adjustment_factor_arr[np.isnan(adjustment_factor_arr)] = 1.0
 
             # Interpolate over y because the most rapid variation is near the injection point
             self.adjustment_factor_interp.append(
-                interpolate.CubicSpline(y_cl_arr, adjustment_factor_arr, axis=1)
+                interpolate.CubicSpline(y_cl_arr[:, i_m], adjustment_factor_arr, axis=1)
             )
 
     def calc_adjustment_factor_xy(self, x_cl, y_cl, i_m):
@@ -393,8 +382,12 @@ class AnalyticJICF:
 
         Z_cl = self.Z_cl(x_cl)
 
-        sigma2 = self.Z_cl_int / (Z_cl * 2 * np.pi)
-        return Z_cl * np.exp(-n2 / (2 * sigma2))
+        sigma2 = np.divide(
+            self.Z_cl_int, Z_cl * 2 * np.pi, out=np.zeros_like(Z_cl), where=Z_cl > 0
+        )
+        return Z_cl * np.exp(
+            np.divide(-n2, 2 * sigma2, out=np.zeros_like(sigma2), where=sigma2 > 0)
+        )
 
     def grad_Z_3D_single_inj(self, x, y, z, z_inj):
         """
