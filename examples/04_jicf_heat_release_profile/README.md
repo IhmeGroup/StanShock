@@ -1,18 +1,18 @@
 # 04_jicf_heat_release_profile
 
 This example pivots 04 toward a **jet-in-crossflow FPV validation case** that is
-closer to StanShock's intended scramjet-style workflow than the earlier standalone
-autoignition benchmark.
+closer to StanShock's intended scramjet-style workflow than the earlier
+standalone autoignition benchmark.
 
 The reference paper is:
 
-> Micka, D. J.; Driscoll, J. F. *Stratified jet flames in a heated (1390 K) air
-> cross-flow with autoignition*. Combustion and Flame 159 (2012) 1205–1214.
+> Micka, D. J.; Driscoll, J. F. _Stratified jet flames in a heated (1390 K) air
+> cross-flow with autoignition_. Combustion and Flame 159 (2012) 1205–1214.
 
 ## Why this case
 
-This paper is a good match for a pseudo-1D JICF example because it reports reduced,
-streamwise quantities that StanShock can compare honestly:
+This paper is a good match for a pseudo-1D JICF example because it reports
+reduced, streamwise quantities that StanShock can compare honestly:
 
 - the axial heat-release profile `q(x)`
 - the flame liftoff distance
@@ -40,7 +40,8 @@ This example is configured around **Case 2** from Table 1 of the paper:
 ## Important modeling note
 
 The paper reports an experimentally inferred heat-release profile `q(x)` from
-chemiluminescence. StanShock does not produce that quantity directly in the same way.
+chemiluminescence. StanShock does not produce that quantity directly in the same
+way.
 
 So this example compares a **normalized heat-release proxy**:
 
@@ -49,9 +50,11 @@ So this example compares a **normalized heat-release proxy**:
 - the resulting profile is normalized so that its integral is 1
 - comparison is therefore made against **`q/Q` shape**, plus:
   - liftoff distance
-  - `x90`: the axial distance where 90% of cumulative model heat release has occurred
+  - `x90`: the axial distance where 90% of cumulative model heat release has
+    occurred
 
-This keeps the comparison honest while still using the most useful paper observable.
+This keeps the comparison honest while still using the most useful paper
+observable.
 
 ## Required user step
 
@@ -93,7 +96,7 @@ The script writes:
 
 This is an **FPV-only** case for now. It is meant to answer:
 
-> *How sufficient is the current JICF/FPV modeling for a scramjet-relevant,
-> autoignition-assisted hydrogen JICF flame?*
+> _How sufficient is the current JICF/FPV modeling for a scramjet-relevant,
+> autoignition-assisted hydrogen JICF flame?_
 
 It is not yet a direct FPV-vs-FRC JICF benchmark.

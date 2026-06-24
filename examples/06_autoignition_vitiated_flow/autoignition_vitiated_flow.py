@@ -11,7 +11,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.fluid_base import FluidState
 
@@ -52,15 +51,23 @@ def get_default_paths(root: Path) -> dict[str, Path]:
         "figures": root / "figures",
         "output": root / "output",
         "reference": root / "reference_data" / "ignition_delay_reference.csv",
-        "table": root / "table_input" / "flamelet_results" / "H2_O2N2_p01_0_tf0300_to1400_200x2x200.h5",
-        "mechanism": root.parent.parent / "data" / "mechanisms" / "h2_boivin_9sp_12r_mod.yaml",
+        "table": root
+        / "table_input"
+        / "flamelet_results"
+        / "H2_O2N2_p01_0_tf0300_to1400_200x2x200.h5",
+        "mechanism": root.parent.parent
+        / "data"
+        / "mechanisms"
+        / "h2_boivin_9sp_12r_mod.yaml",
     }
 
 
-def print_progress(model_name: str, index: int, total: int, z: float, tign_ms: float | None) -> None:
+def print_progress(
+    model_name: str, index: int, total: int, z: float, tign_ms: float | None
+) -> None:
     progress = index / total
     width = 24
-    n_fill = int(round(width * progress))
+    n_fill = round(width * progress)
     bar = "#" * n_fill + "-" * (width - n_fill)
     if tign_ms is None or not np.isfinite(tign_ms):
         status = "no ignition"
@@ -97,7 +104,11 @@ def mixed_initial_gas(config: CaseConfig, mechanism: Path, z: float) -> ct.Solut
     gas_ox = ct.Solution(mechanism)
 
     gas_fuel.TPX = config.fuel_temperature, config.pressure, config.fuel_composition
-    gas_ox.TPX = config.oxidizer_temperature, config.pressure, config.oxidizer_composition
+    gas_ox.TPX = (
+        config.oxidizer_temperature,
+        config.pressure,
+        config.oxidizer_composition,
+    )
 
     y_mix = z * gas_fuel.Y + (1.0 - z) * gas_ox.Y
     y_mix /= y_mix.sum()
@@ -123,7 +134,7 @@ def frc_ignition_delay_for_z(
     tign_ms = np.nan
     while network.time < config.t_final:
         network.step()
-        if reactor.T >= T_threshold:
+        if T_threshold <= reactor.T:
             tign_ms = 1.0e3 * network.time
             break
 
@@ -145,9 +156,9 @@ def fpv_state_from_zc(fpv: FPVTable, pressure: float, z: float, c: float) -> Flu
 
     # In the shipped table workflow without pressure/temperature corrections,
     # T0 is the natural table temperature coordinate at the given (Z, L).
-    l = 0.0 if c_max <= 0.0 else c_clipped / c_max
-    T = float(fpv.lookup_direct("T0", z, 0.0, l))
-    R = float(fpv.lookup_direct("ROM", z, 0.0, l))
+    L = 0.0 if c_max <= 0.0 else c_clipped / c_max
+    T = float(fpv.lookup_direct("T0", z, 0.0, L))
+    R = float(fpv.lookup_direct("ROM", z, 0.0, L))
     rho = pressure / (R * T)
 
     return FluidState(
@@ -159,7 +170,9 @@ def fpv_state_from_zc(fpv: FPVTable, pressure: float, z: float, c: float) -> Flu
     )
 
 
-def fpv_temperature_from_zc(fpv: FPVTable, pressure: float, z: float, c: float) -> float:
+def fpv_temperature_from_zc(
+    fpv: FPVTable, pressure: float, z: float, c: float
+) -> float:
     state = fpv_state_from_zc(fpv, pressure, z, c)
     return float(state.temperature[0])
 
@@ -193,7 +206,9 @@ def fpv_ignition_delay_for_z(
         return np.array([fpv_rhs(fpv, config.pressure, z, float(y[0]))], dtype=float)
 
     def ignition_event(t: float, y: np.ndarray) -> float:
-        return fpv_temperature_from_zc(fpv, config.pressure, z, float(y[0])) - T_threshold
+        return (
+            fpv_temperature_from_zc(fpv, config.pressure, z, float(y[0])) - T_threshold
+        )
 
     ignition_event.terminal = True
     ignition_event.direction = 1.0
@@ -254,9 +269,12 @@ def run_branch(
             tign_ms, T_initial, diag = frc_ignition_delay_for_z(z, config, mechanism)
         elif model_name == "fpv":
             assert table_file is not None
-            tign_ms, T_initial, diag = fpv_ignition_delay_for_z(z, config, mechanism, table_file)
+            tign_ms, T_initial, diag = fpv_ignition_delay_for_z(
+                z, config, mechanism, table_file
+            )
         else:
-            raise ValueError(f"Unknown model name: {model_name}")
+            msg = f"Unknown model name: {model_name}"
+            raise ValueError(msg)
 
         ignition_delay_ms[i - 1] = tign_ms
         temperature_initial[i - 1] = T_initial
@@ -287,7 +305,9 @@ def run_branch(
     }
 
 
-def l1_error(x_ref: np.ndarray, y_ref: np.ndarray, x_model: np.ndarray, y_model: np.ndarray) -> float:
+def l1_error(
+    x_ref: np.ndarray, y_ref: np.ndarray, x_model: np.ndarray, y_model: np.ndarray
+) -> float:
     mask_ref = np.isfinite(x_ref) & np.isfinite(y_ref)
     mask_model = np.isfinite(x_model) & np.isfinite(y_model)
     if mask_ref.sum() < 2 or mask_model.sum() < 2:
@@ -296,7 +316,9 @@ def l1_error(x_ref: np.ndarray, y_ref: np.ndarray, x_model: np.ndarray, y_model:
     return float(np.mean(np.abs(y_interp - y_ref[mask_ref])))
 
 
-def write_curve_csv(filename: Path, z: np.ndarray, ignition_delay_ms: np.ndarray) -> None:
+def write_curve_csv(
+    filename: Path, z: np.ndarray, ignition_delay_ms: np.ndarray
+) -> None:
     filename.parent.mkdir(parents=True, exist_ok=True)
     with filename.open("w", newline="") as f:
         writer = csv.writer(f)
@@ -325,20 +347,42 @@ def make_plots(
     figures_dir.mkdir(parents=True, exist_ok=True)
 
     fig, ax = plt.subplots(figsize=(7, 4.5))
-    ax.semilogy(z_ref, tign_ref, "k:", linewidth=2.5, label="Reference (Caban & Tyliszczak, 2024)")
+    ax.semilogy(
+        z_ref,
+        tign_ref,
+        "k:",
+        linewidth=2.5,
+        label="Reference (Caban & Tyliszczak, 2024)",
+    )
     for name, result in results.items():
         mask = np.isfinite(result["ignition_delay_ms"])
-        ax.semilogy(result["z"][mask], result["ignition_delay_ms"][mask], linewidth=2, marker="o", label=name.upper())
+        ax.semilogy(
+            result["z"][mask],
+            result["ignition_delay_ms"][mask],
+            linewidth=2,
+            marker="o",
+            label=name.upper(),
+        )
         if np.isfinite(result["xi_mr"]) and np.isfinite(result["tign_ms"]):
             ax.semilogy(result["xi_mr"], result["tign_ms"], "o", ms=7)
-    ax.semilogy(config.reference_xi_mr, config.reference_tign_ms, "rs", ms=6, label="Reference scalar")
+    ax.semilogy(
+        config.reference_xi_mr,
+        config.reference_tign_ms,
+        "rs",
+        ms=6,
+        label="Reference scalar",
+    )
     ax.set_xlabel("Mixture fraction, Z [-]")
     ax.set_ylabel("Ignition delay [ms]")
-    ax.set_title("H$_2$–O$_2$–N$_2$ autoignition at $T_O=1400$ K, $Y_{N_2}=0.767$")
+    ax.set_title("H$_2$-O$_2$-N$_2$ autoignition at $T_O=1400$ K, $Y_{N_2}=0.767$")
     ax.grid(True, alpha=0.3)
     ax.legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(figures_dir / "oxygen_nitrogen_1400K_ignition_delay.png", dpi=300, bbox_inches="tight")
+    fig.savefig(
+        figures_dir / "oxygen_nitrogen_1400K_ignition_delay.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
     plt.close(fig)
 
     fig, axes = plt.subplots(3, 1, figsize=(7, 8), sharex=True)
@@ -348,14 +392,24 @@ def make_plots(
         (axes[2], "Y_H2O_final", r"Final $Y_{H_2O}$ [-]"),
     ]:
         for name, result in results.items():
-            ax.plot(result["z"], result["diagnostics"][key], linewidth=2, marker="o", label=name.upper())
+            ax.plot(
+                result["z"],
+                result["diagnostics"][key],
+                linewidth=2,
+                marker="o",
+                label=name.upper(),
+            )
         ax.grid(True, alpha=0.3)
         ax.set_ylabel(ylabel)
     axes[-1].set_xlabel("Mixture fraction, Z [-]")
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=2, frameon=False)
     fig.tight_layout(rect=(0, 0, 1, 0.95))
-    fig.savefig(figures_dir / "oxygen_nitrogen_1400K_final_diagnostics.png", dpi=300, bbox_inches="tight")
+    fig.savefig(
+        figures_dir / "oxygen_nitrogen_1400K_final_diagnostics.png",
+        dpi=300,
+        bbox_inches="tight",
+    )
     plt.close(fig)
 
 
@@ -378,7 +432,9 @@ def main(
 
     if run_fpv:
         if paths["table"].exists():
-            results["fpv"] = run_branch("fpv", z_points, config, paths["mechanism"], table_file=paths["table"])
+            results["fpv"] = run_branch(
+                "fpv", z_points, config, paths["mechanism"], table_file=paths["table"]
+            )
         else:
             print(
                 f"FPV table not found at {paths['table']}. Skipping FPV branch. "
@@ -386,15 +442,28 @@ def main(
             )
 
     for name, result in results.items():
-        write_curve_csv(paths["output"] / f"{name}_ignition_delay_curve.csv", result["z"], result["ignition_delay_ms"])
+        write_curve_csv(
+            paths["output"] / f"{name}_ignition_delay_curve.csv",
+            result["z"],
+            result["ignition_delay_ms"],
+        )
 
         diag_file = paths["output"] / f"{name}_diagnostics.csv"
         with diag_file.open("w", newline="") as f:
             writer = csv.writer(f)
-            keys = ["mixture_fraction", "ignition_delay_ms", "temperature_initial"] + list(result["diagnostics"].keys())
+            keys = [
+                "mixture_fraction",
+                "ignition_delay_ms",
+                "temperature_initial",
+                *list(result["diagnostics"].keys()),
+            ]
             writer.writerow(keys)
             for i in range(len(result["z"])):
-                row = [result["z"][i], result["ignition_delay_ms"][i], result["temperature_initial"][i]]
+                row = [
+                    result["z"][i],
+                    result["ignition_delay_ms"][i],
+                    result["temperature_initial"][i],
+                ]
                 row += [result["diagnostics"][k][i] for k in result["diagnostics"]]
                 writer.writerow(row)
 
@@ -408,9 +477,15 @@ def main(
                 "tign_ms": result["tign_ms"],
                 "xi_mr_ref": config.reference_xi_mr,
                 "tign_ref_ms": config.reference_tign_ms,
-                "abs_error_xi_mr": abs(result["xi_mr"] - config.reference_xi_mr) if np.isfinite(result["xi_mr"]) else np.nan,
-                "abs_error_tign_ms": abs(result["tign_ms"] - config.reference_tign_ms) if np.isfinite(result["tign_ms"]) else np.nan,
-                "l1_tign_curve_vs_reference": l1_error(z_ref, tign_ref, result["z"], result["ignition_delay_ms"]),
+                "abs_error_xi_mr": abs(result["xi_mr"] - config.reference_xi_mr)
+                if np.isfinite(result["xi_mr"])
+                else np.nan,
+                "abs_error_tign_ms": abs(result["tign_ms"] - config.reference_tign_ms)
+                if np.isfinite(result["tign_ms"])
+                else np.nan,
+                "l1_tign_curve_vs_reference": l1_error(
+                    z_ref, tign_ref, result["z"], result["ignition_delay_ms"]
+                ),
             }
         )
 
@@ -424,12 +499,18 @@ def main(
                     results["fpv"]["z"],
                     results["fpv"]["ignition_delay_ms"],
                 ),
-                "abs_delta_xi_mr": abs(results["fpv"]["xi_mr"] - results["frc"]["xi_mr"]),
-                "abs_delta_tign_ms": abs(results["fpv"]["tign_ms"] - results["frc"]["tign_ms"]),
+                "abs_delta_xi_mr": abs(
+                    results["fpv"]["xi_mr"] - results["frc"]["xi_mr"]
+                ),
+                "abs_delta_tign_ms": abs(
+                    results["fpv"]["tign_ms"] - results["frc"]["tign_ms"]
+                ),
             }
         )
 
-    write_summary_csv(summary_rows, paths["output"] / "oxygen_nitrogen_1400K_summary.csv")
+    write_summary_csv(
+        summary_rows, paths["output"] / "oxygen_nitrogen_1400K_summary.csv"
+    )
     make_plots(results, z_ref, tign_ref, config, paths["figures"])
 
     return {"results": results, "summary": summary_rows}
