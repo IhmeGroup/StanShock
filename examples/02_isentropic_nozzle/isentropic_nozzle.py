@@ -37,8 +37,7 @@ def make_nozzle_area(
 
     area_ratio = 1.0 + (area_ratio_max - 1.0) * profile
     throat_area = 1.0 / area_ratio_max
-    area = throat_area * area_ratio
-    return area
+    return throat_area * area_ratio
 
 
 def build_theory_profiles(
@@ -96,7 +95,9 @@ def build_theory_profiles(
     }
 
 
-def extract_numerical_profiles(ss: Combustor, idx: slice | np.ndarray) -> dict[str, np.ndarray]:
+def extract_numerical_profiles(
+    ss: Combustor, idx: slice | np.ndarray
+) -> dict[str, np.ndarray]:
     """Extract primitive profiles from the current combustor state."""
     state = ss.state[idx]
     sound_speed = ss.physics.get_sound_speed(state)
@@ -180,7 +181,9 @@ def plot_results(
     axes[3].set_xlabel("x [mm]")
 
     fig.tight_layout()
-    fig.savefig(figures_dir / "isentropic_nozzle_profiles.png", dpi=300, bbox_inches="tight")
+    fig.savefig(
+        figures_dir / "isentropic_nozzle_profiles.png", dpi=300, bbox_inches="tight"
+    )
     plt.close(fig)
 
     fig, ax1 = plt.subplots(figsize=(5, 3))
@@ -196,7 +199,9 @@ def plot_results(
     ax2.set_ylabel(r"$A/A^*$ [-]")
 
     fig.tight_layout()
-    fig.savefig(figures_dir / "isentropic_nozzle_mach.png", dpi=300, bbox_inches="tight")
+    fig.savefig(
+        figures_dir / "isentropic_nozzle_mach.png", dpi=300, bbox_inches="tight"
+    )
     plt.close(fig)
 
 
@@ -301,7 +306,9 @@ def main(
     numerical_final = extract_numerical_profiles(ss, idx)
 
     metrics: dict[str, float] = {}
-    metrics.update(compute_error_metrics(x, numerical_initial, theory, prefix="initial"))
+    metrics.update(
+        compute_error_metrics(x, numerical_initial, theory, prefix="initial")
+    )
     metrics.update(compute_error_metrics(x, numerical_final, theory, prefix="final"))
     metrics.update(compute_drift_metrics(x, numerical_initial, numerical_final))
 

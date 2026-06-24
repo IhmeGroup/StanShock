@@ -26,8 +26,14 @@ def get_root() -> Path:
 def get_paths(root: Path) -> dict[str, Path]:
     return {
         "root": root,
-        "mechanism": root.parent.parent / "data" / "mechanisms" / "h2_boivin_9sp_12r_mod.yaml",
-        "table": root / "h2_table" / "flamelet_results" / "H2_O2N2_p01_0_tf0247_to1413_200x2x200.h5",
+        "mechanism": root.parent.parent
+        / "data"
+        / "mechanisms"
+        / "h2_boivin_9sp_12r_mod.yaml",
+        "table": root
+        / "h2_table"
+        / "flamelet_results"
+        / "H2_O2N2_p01_0_tf0247_to1413_200x2x200.h5",
         "table_input": root / "h2_table" / "input.toml",
         "cache_dir": root / "data",
         "reference_dir": root / "reference_data",
@@ -106,7 +112,9 @@ def load_scalar_reference(filename: Path) -> dict[str, float]:
     return out
 
 
-def l1_error(x_ref: np.ndarray, y_ref: np.ndarray, x_model: np.ndarray, y_model: np.ndarray) -> float:
+def l1_error(
+    x_ref: np.ndarray, y_ref: np.ndarray, x_model: np.ndarray, y_model: np.ndarray
+) -> float:
     if len(x_ref) < 2 or len(x_model) < 2:
         return np.nan
     y_interp = np.interp(x_ref, x_model, y_model)
@@ -125,10 +133,11 @@ def write_summary_csv(rows: list[dict[str, Any]], filename: Path) -> None:
 
 def build_fpv_table(paths: dict[str, Path]) -> FPVTable:
     if not paths["table"].exists():
-        raise FileNotFoundError(
+        msg = (
             f"Missing FPV table: {paths['table']}\n"
             "Generate the flamelet table first using h2_table/input.toml."
         )
+        raise FileNotFoundError(msg)
     gas = ct.Solution(str(paths["mechanism"]))
     return FPVTable(
         str(paths["table"]),
@@ -141,7 +150,9 @@ def build_fpv_table(paths: dict[str, Path]) -> FPVTable:
     )
 
 
-def build_injector(geometry: Box, physics: FPVTable, paths: dict[str, Path], t_end: float) -> JICModel:
+def build_injector(
+    geometry: Box, physics: FPVTable, paths: dict[str, Path], t_end: float
+) -> JICModel:
     t_inj = np.array([0.0, t_end])
     rho_inj = np.array([RHO_F, RHO_F])
 
@@ -153,7 +164,7 @@ def build_injector(geometry: Box, physics: FPVTable, paths: dict[str, Path], t_e
         n_inj=N_INJ,
         d_inj=D_F,
         t_inj=t_inj,
-        rho_inj = rho_inj,
+        rho_inj=rho_inj,
         u_inj=U_F,
         T_inj=T_F,
         rho=RHO_IN,
@@ -180,7 +191,9 @@ def collect_profiles(combustor: Combustor) -> dict[str, np.ndarray]:
         "pressure": np.asarray(state.pressure),
         "temperature": np.asarray(physics.get_temperature(state)),
         "velocity": np.asarray(state.velocity),
-        "mach": np.asarray(physics.get_velocity(state) / physics.get_sound_speed(state)),
+        "mach": np.asarray(
+            physics.get_velocity(state) / physics.get_sound_speed(state)
+        ),
     }
 
     if state.composition is not None:
@@ -201,7 +214,6 @@ def save_profiles_csv(filename: Path, profiles: dict[str, np.ndarray]) -> None:
         writer.writerow(keys)
         for i in range(n):
             writer.writerow([profiles[k][i] for k in keys])
-
 
 
 def integrate_profile_to_x(x: np.ndarray, y: np.ndarray, x_cutoff: float) -> float:
@@ -237,6 +249,7 @@ def integrate_profile_to_x(x: np.ndarray, y: np.ndarray, x_cutoff: float) -> flo
         return 0.0
     return float(np.trapezoid(y_int, x_int))
 
+
 def compute_q_proxy(combustor: Combustor) -> dict[str, np.ndarray]:
     """Compute line-integrated heat-release quantities for comparison to Micka & Driscoll.
 
@@ -251,7 +264,9 @@ def compute_q_proxy(combustor: Combustor) -> dict[str, np.ndarray]:
     physics = combustor.physics
 
     source_prog = np.asarray(physics.get_source_terms(state))
-    factor = np.asarray(physics.get_source_progress_variable_compressibility_factor(state))
+    factor = np.asarray(
+        physics.get_source_progress_variable_compressibility_factor(state)
+    )
     source_rC = np.maximum(0.0, factor * state.density * source_prog)
 
     try:
@@ -282,12 +297,18 @@ def compute_q_proxy(combustor: Combustor) -> dict[str, np.ndarray]:
 
     peak = float(np.max(q_over_Q_per_m)) if len(q_over_Q_per_m) > 0 else 0.0
     liftoff_threshold = 0.01 * peak
-    liftoff_idx = int(np.argmax(q_over_Q_per_m > liftoff_threshold)) if np.any(q_over_Q_per_m > liftoff_threshold) else -1
+    liftoff_idx = (
+        int(np.argmax(q_over_Q_per_m > liftoff_threshold))
+        if np.any(q_over_Q_per_m > liftoff_threshold)
+        else -1
+    )
     x_liftoff = float(x[liftoff_idx]) if liftoff_idx >= 0 else np.nan
 
     cumulative = np.zeros_like(x)
     if len(x) > 1:
-        cumulative[1:] = np.cumsum(0.5 * (q_over_Q_per_m[1:] + q_over_Q_per_m[:-1]) * np.diff(x))
+        cumulative[1:] = np.cumsum(
+            0.5 * (q_over_Q_per_m[1:] + q_over_Q_per_m[:-1]) * np.diff(x)
+        )
     x90 = np.nan
     # With 300 mm normalization, x90 means the location where 90% of Q_300 has been released.
     if cumulative[-1] >= 0.9:
@@ -314,8 +335,16 @@ def compute_q_proxy(combustor: Combustor) -> dict[str, np.ndarray]:
 
 
 def make_xt_diagrams(combustor: Combustor, figdir: Path) -> None:
-    variables = ["pressure", "temperature", "mixture fraction", "progress variable", "mach"]
-    combustor.xt_diagrams = [XTDiagram(combustor, variable, skip_steps=10) for variable in variables]
+    variables = [
+        "pressure",
+        "temperature",
+        "mixture fraction",
+        "progress variable",
+        "mach",
+    ]
+    combustor.xt_diagrams = [
+        XTDiagram(combustor, variable, skip_steps=10) for variable in variables
+    ]
     for diagram in combustor.xt_diagrams:
         diagram.plot(figdir=figdir)
 
@@ -358,10 +387,12 @@ def make_comparison_plots(
     ax.set_ylabel(r"$q$ [kJ mm$^{-1}$ s$^{-1}$]")
     ax.set_title("Micka & Driscoll Case 2: heat-release profile")
     ax.grid(True, alpha=0.3)
-    ax.set_xlim(left=0.0,right=300.0)
+    ax.set_xlim(left=0.0, right=300.0)
     ax.legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(figdir / "case2_q_dimensional_comparison.png", dpi=300, bbox_inches="tight")
+    fig.savefig(
+        figdir / "case2_q_dimensional_comparison.png", dpi=300, bbox_inches="tight"
+    )
     plt.close(fig)
 
     # Normalized comparison: q/Q. Since x is in mm, both curves are 1/mm.
@@ -370,18 +401,44 @@ def make_comparison_plots(
         ax.plot(x_ref_mm, y_ref_norm_per_mm, "o", ms=4, label="Reference")
     ax.plot(q_x_mm, q_proxy["q_over_Q_per_mm"], linewidth=2.5, label="StanShock")
     if "liftoff_mm" in scalar_ref:
-        ax.axvline(scalar_ref["liftoff_mm"], color="red", linestyle="--", linewidth=1, label="Ref liftoff")
+        ax.axvline(
+            scalar_ref["liftoff_mm"],
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            label="Ref liftoff",
+        )
     if "x90_mm" in scalar_ref:
-        ax.axvline(scalar_ref["x90_mm"], color="purple", linestyle=":", linewidth=1, label="Ref x90")
+        ax.axvline(
+            scalar_ref["x90_mm"],
+            color="purple",
+            linestyle=":",
+            linewidth=1,
+            label="Ref x90",
+        )
     if np.isfinite(q_proxy["x_liftoff"][0]):
-        ax.axvline(1.0e3 * float(q_proxy["x_liftoff"][0]), color="k", linestyle="--", linewidth=1, label="Model liftoff")
+        ax.axvline(
+            1.0e3 * float(q_proxy["x_liftoff"][0]),
+            color="k",
+            linestyle="--",
+            linewidth=1,
+            label="Model liftoff",
+        )
     if np.isfinite(q_proxy["x90"][0]):
-        ax.axvline(1.0e3 * float(q_proxy["x90"][0]), color="gray", linestyle=":", linewidth=1, label="Model x90")
+        ax.axvline(
+            1.0e3 * float(q_proxy["x90"][0]),
+            color="gray",
+            linestyle=":",
+            linewidth=1,
+            label="Model x90",
+        )
     ax.set_xlabel("x [mm]")
     ax.set_ylabel(r"$q/Q$ [mm$^{-1}$]")
-    ax.set_title("Micka & Driscoll Case 2: normalized heat-release profile (Q over 0-300 mm)")
+    ax.set_title(
+        "Micka & Driscoll Case 2: normalized heat-release profile (Q over 0-300 mm)"
+    )
     ax.grid(True, alpha=0.3)
-    ax.set_xlim(left=0.0,right=300.0)
+    ax.set_xlim(left=0.0, right=300.0)
     ax.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(figdir / "case2_q_over_Q_comparison.png", dpi=300, bbox_inches="tight")
@@ -393,17 +450,31 @@ def make_comparison_plots(
         ax.plot(x_ref_mm, y_ref_over_qmax, "o", ms=4, label="Reference")
     ax.plot(q_x_mm, q_proxy["q_over_qmax"], linewidth=2.5, label="StanShock")
     if "liftoff_mm" in scalar_ref:
-        ax.axvline(scalar_ref["liftoff_mm"], color="red", linestyle="--", linewidth=1, label="Ref liftoff")
+        ax.axvline(
+            scalar_ref["liftoff_mm"],
+            color="red",
+            linestyle="--",
+            linewidth=1,
+            label="Ref liftoff",
+        )
     if np.isfinite(q_proxy["x_liftoff"][0]):
-        ax.axvline(1.0e3 * float(q_proxy["x_liftoff"][0]), color="k", linestyle="--", linewidth=1, label="Model liftoff")
+        ax.axvline(
+            1.0e3 * float(q_proxy["x_liftoff"][0]),
+            color="k",
+            linestyle="--",
+            linewidth=1,
+            label="Model liftoff",
+        )
     ax.set_xlabel("x [mm]")
     ax.set_ylabel(r"$q/q_{\max}$ [-]")
     ax.set_title("Micka & Driscoll Case 2: peak-normalized heat-release profile")
     ax.grid(True, alpha=0.3)
-    ax.set_xlim(left=0.0,right=300.0)
+    ax.set_xlim(left=0.0, right=300.0)
     ax.legend(frameon=False)
     fig.tight_layout()
-    fig.savefig(figdir / "case2_q_over_qmax_comparison.png", dpi=300, bbox_inches="tight")
+    fig.savefig(
+        figdir / "case2_q_over_qmax_comparison.png", dpi=300, bbox_inches="tight"
+    )
     plt.close(fig)
 
     fig, axes = plt.subplots(4, 1, figsize=(7, 9), sharex=True)
@@ -437,7 +508,9 @@ def run_case(verbose: bool = True) -> dict[str, Any]:
     gas_init = ct.Solution(str(paths["mechanism"]))
     gas_init.TPX = T_IN, P_IN, X_OX
 
-    bc_inlet = SpecifiedFace(reference_state=(gas_init.density, U_IN, gas_init.P, (1.0, 0.0, 0.0)))
+    bc_inlet = SpecifiedFace(
+        reference_state=(gas_init.density, U_IN, gas_init.P, (1.0, 0.0, 0.0))
+    )
     boundary_conditions: BCInput = {"left": bc_inlet, "right": "outflow"}
 
     t_end = T_END_MULTIPLIER * (L_DOMAIN / U_IN)
@@ -462,11 +535,22 @@ def run_case(verbose: bool = True) -> dict[str, Any]:
         combustor=combustor,
         filename=local["output"] / "case2_state.csv",
         interval=0,
-        variables=["x", "pressure", "temperature", "mach", "mixture fraction", "progress variable", "Y_H2", "Y_H2O", "Y_OH"],
+        variables=[
+            "x",
+            "pressure",
+            "temperature",
+            "mach",
+            "mixture fraction",
+            "progress variable",
+            "Y_H2",
+            "Y_H2O",
+            "Y_OH",
+        ],
     )
     combustor.csv_writers = [csv_writer]
 
     import time
+
     t0 = time.perf_counter()
     combustor.advance_simulation(t_end)
     runtime_s = time.perf_counter() - t0
@@ -476,9 +560,19 @@ def run_case(verbose: bool = True) -> dict[str, Any]:
     save_profiles_csv(local["output"] / "case2_profiles.csv", profiles)
 
     q_proxy = compute_q_proxy(combustor)
-    with (local["output"] / "case2_heat_release_profiles.csv").open("w", newline="") as f:
+    with (local["output"] / "case2_heat_release_profiles.csv").open(
+        "w", newline=""
+    ) as f:
         writer = csv.writer(f)
-        writer.writerow(["x_mm", "q_kJ_mm^-1_s^-1", "q_over_Q_mm^-1", "q_over_Q_m^-1", "q_over_qmax"])
+        writer.writerow(
+            [
+                "x_mm",
+                "q_kJ_mm^-1_s^-1",
+                "q_over_Q_mm^-1",
+                "q_over_Q_m^-1",
+                "q_over_qmax",
+            ]
+        )
         for xi, qi_dim, qi_norm_mm, qi_norm_m, qi_qmax in zip(
             1.0e3 * q_proxy["x"],
             q_proxy["q_line_kJ_per_mm_s"],
@@ -492,7 +586,9 @@ def run_case(verbose: bool = True) -> dict[str, Any]:
     with (local["output"] / "case2_q_over_Q.csv").open("w", newline="") as f:
         writer = csv.writer(f)
         writer.writerow(["x_mm", "q_over_Q_mm^-1"])
-        for xi, qi in zip(1.0e3 * q_proxy["x"], q_proxy["q_over_Q_per_mm"], strict=True):
+        for xi, qi in zip(
+            1.0e3 * q_proxy["x"], q_proxy["q_over_Q_per_mm"], strict=True
+        ):
             writer.writerow([xi, qi])
 
     with (local["output"] / "case2_q_over_qmax.csv").open("w", newline="") as f:
@@ -502,25 +598,37 @@ def run_case(verbose: bool = True) -> dict[str, Any]:
             writer.writerow([xi, qi])
 
     q_ref = load_reference_curve(paths["reference_dir"] / "case2_q_over_Q.csv")
-    scalar_ref = load_scalar_reference(paths["reference_dir"] / "case2_scalar_metrics.csv")
+    scalar_ref = load_scalar_reference(
+        paths["reference_dir"] / "case2_scalar_metrics.csv"
+    )
     l1_q = make_comparison_plots(profiles, q_proxy, q_ref, scalar_ref, local["figures"])
 
-    summary_rows = [{
-        "runtime_s": runtime_s,
-        "x_liftoff_mm": 1.0e3 * float(q_proxy["x_liftoff"][0]),
-        "x90_mm": 1.0e3 * float(q_proxy["x90"][0]),
-        "q_over_Q_l1_error": l1_q,
-        "Q_model_kJ_s": float(q_proxy["Q_model_kJ_s"][0]),
-        "Q_model_300mm_kJ_s": float(q_proxy["Q_model_300mm_kJ_s"][0]),
-        "q_normalization_length_mm": float(q_proxy["q_normalization_length_mm"][0]),
-        "q_max_kJ_mm^-1_s^-1": float(q_proxy["q_max_kJ_per_mm_s"][0]),
-        "reference_curve_loaded": q_ref is not None,
-        "reference_liftoff_mm": scalar_ref.get("liftoff_mm", np.nan),
-        "reference_x90_mm": scalar_ref.get("x90_mm", np.nan),
-        "abs_error_liftoff_mm": abs(1.0e3 * float(q_proxy["x_liftoff"][0]) - scalar_ref["liftoff_mm"]) if "liftoff_mm" in scalar_ref else np.nan,
-        "abs_error_x90_mm": abs(1.0e3 * float(q_proxy["x90"][0]) - scalar_ref["x90_mm"]) if "x90_mm" in scalar_ref else np.nan,
-        "table_file": str(paths["table"]),
-    }]
+    summary_rows = [
+        {
+            "runtime_s": runtime_s,
+            "x_liftoff_mm": 1.0e3 * float(q_proxy["x_liftoff"][0]),
+            "x90_mm": 1.0e3 * float(q_proxy["x90"][0]),
+            "q_over_Q_l1_error": l1_q,
+            "Q_model_kJ_s": float(q_proxy["Q_model_kJ_s"][0]),
+            "Q_model_300mm_kJ_s": float(q_proxy["Q_model_300mm_kJ_s"][0]),
+            "q_normalization_length_mm": float(q_proxy["q_normalization_length_mm"][0]),
+            "q_max_kJ_mm^-1_s^-1": float(q_proxy["q_max_kJ_per_mm_s"][0]),
+            "reference_curve_loaded": q_ref is not None,
+            "reference_liftoff_mm": scalar_ref.get("liftoff_mm", np.nan),
+            "reference_x90_mm": scalar_ref.get("x90_mm", np.nan),
+            "abs_error_liftoff_mm": abs(
+                1.0e3 * float(q_proxy["x_liftoff"][0]) - scalar_ref["liftoff_mm"]
+            )
+            if "liftoff_mm" in scalar_ref
+            else np.nan,
+            "abs_error_x90_mm": abs(
+                1.0e3 * float(q_proxy["x90"][0]) - scalar_ref["x90_mm"]
+            )
+            if "x90_mm" in scalar_ref
+            else np.nan,
+            "table_file": str(paths["table"]),
+        }
+    ]
     write_summary_csv(summary_rows, local["output"] / "case2_summary.csv")
 
     return {
@@ -532,8 +640,12 @@ def run_case(verbose: bool = True) -> dict[str, Any]:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run the Micka & Driscoll JICF heat-release example.")
-    parser.add_argument("--quiet", action="store_true", help="Reduce terminal solver logging.")
+    parser = argparse.ArgumentParser(
+        description="Run the Micka & Driscoll JICF heat-release example."
+    )
+    parser.add_argument(
+        "--quiet", action="store_true", help="Reduce terminal solver logging."
+    )
     return parser.parse_args()
 
 
