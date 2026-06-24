@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Unpack
 
 import numpy as np
 from scipy import integrate
@@ -9,7 +8,7 @@ from scipy import integrate
 from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.models.wall_models import get_wall_state
 from stanshock.physics.fluid_base import FluidState
-from stanshock.system.backend import Array
+from stanshock.system.backend import Array, Unpack
 from stanshock.system.base import FastSlowMode, FastSlowSource, PrecomputeSteps
 
 DhFunction = Callable[[Array | float], Array | float]
