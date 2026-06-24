@@ -4,7 +4,7 @@ import numpy as np
 
 from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer
-from stanshock.models.jicf import JICFChemistrySource, JICModel
+from stanshock.models.jicf import FuelInjector, JICFChemistrySource, JICModel
 from stanshock.models.pseudoshock import Pseudoshock
 from stanshock.models.wall_models import HeatFlux, SkinFriction
 from stanshock.numerics.boundary_conditions import (
@@ -96,11 +96,18 @@ class Combustor:
         self.output_every = output_every
         self.use_double_flux = use_double_flux
         if injector is None:
-            self.injectors: list[JICModel] = []
+            self.injectors: list[FuelInjector] = []
         elif isinstance(injector, list):
-            self.injectors = injector
+            self.injectors = [
+                FuelInjector(inj, geometry=inj.geometry, physics=inj.physics)
+                for inj in injector
+            ]
         else:
-            self.injectors = [injector]
+            self.injectors = [
+                FuelInjector(
+                    injector, geometry=injector.geometry, physics=injector.physics
+                )
+            ]
         self.optimization_iteration = optimization_iteration
         self.physics: FluidPhysics = physics
         self.initialization: Initialization = initialization
