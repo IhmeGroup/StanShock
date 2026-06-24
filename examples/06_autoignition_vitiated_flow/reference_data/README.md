@@ -1,7 +1,7 @@
 # reference_data
 
-This folder contains the lightweight in-repo reference dataset used by the shipped
-04 autoignition example.
+This folder contains the lightweight in-repo reference dataset used by the
+shipped 04 autoignition example.
 
 ## Shipped case
 
@@ -14,8 +14,8 @@ This folder contains the lightweight in-repo reference dataset used by the shipp
 ## Files
 
 - `ignition_delay_reference.csv`
-  - digitized from the ignition-delay-versus-mixture-fraction curve for the shipped
-    case in Caban & Tyliszczak (2024)
+  - digitized from the ignition-delay-versus-mixture-fraction curve for the
+    shipped case in Caban & Tyliszczak (2024)
 
 ## Appendix scalar values used by the example
 
@@ -26,5 +26,5 @@ From the paper appendices for the shipped case:
 - temperature-based ignition delay:
   - **t_ign = 0.034 ms**
 
-The example script compares both FRC and FPV against these scalar values in addition
-to the digitized ignition-delay curve.
+The example script compares both FRC and FPV against these scalar values in
+addition to the digitized ignition-delay curve.

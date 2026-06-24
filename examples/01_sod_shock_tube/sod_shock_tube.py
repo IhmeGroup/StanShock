@@ -97,7 +97,9 @@ def analytical_sod_solution(
 
     def resid(y: Array) -> Array:
         c1_factor = np.sqrt((gamma + 1.0) / (2.0 * gamma) * (y - 1.0) + 1)
-        c2_factor = (gamma - 1.0) / (2.0 * c4) * (u4 - u1 - c1 / gamma * (y - 1.0) / c1_factor)
+        c2_factor = (
+            (gamma - 1.0) / (2.0 * c4) * (u4 - u1 - c1 / gamma * (y - 1.0) / c1_factor)
+        )
         exponent: float = -2.0 * gamma / (gamma - 1)
         return np.array(y * (1.0 + c2_factor) ** exponent - p4 / p1)
 
@@ -168,11 +170,15 @@ def format_table(rows: list[dict[str, float | str]]) -> str:
         ]
         for row in rows
     ]
-    widths = [max(len(headers[i]), *(len(r[i]) for r in table_rows)) for i in range(len(headers))]
+    widths = [
+        max(len(headers[i]), *(len(r[i]) for r in table_rows))
+        for i in range(len(headers))
+    ]
     line = "  ".join(headers[i].ljust(widths[i]) for i in range(len(headers)))
     sep = "  ".join("-" * widths[i] for i in range(len(headers)))
     body = "\n".join(
-        "  ".join(r[i].ljust(widths[i]) for i in range(len(headers))) for r in table_rows
+        "  ".join(r[i].ljust(widths[i]) for i in range(len(headers)))
+        for r in table_rows
     )
     return f"{line}\n{sep}\n{body}"
 
@@ -188,7 +194,9 @@ def save_summary_csv(rows: list[dict[str, float | str]], filename: Path) -> None
         writer.writerows(rows)
 
 
-def build_reference_states(mech_file: Path) -> tuple[ct.Solution, ct.Solution, ct.Solution, float, float, float, float]:
+def build_reference_states(
+    mech_file: Path,
+) -> tuple[ct.Solution, ct.Solution, ct.Solution, float, float, float, float]:
     gas = ct.Solution(mech_file)
     tref = 600.0
     pref = 101325.0
@@ -337,7 +345,9 @@ def plot_results(
     axes[-1].set_xlabel("x", fontsize=14)
     axes[0].legend(loc="best", fontsize=9)
     fig_combined.tight_layout()
-    fig_combined.savefig(figures_dir / "sod_comparison.png", dpi=300, bbox_inches="tight")
+    fig_combined.savefig(
+        figures_dir / "sod_comparison.png", dpi=300, bbox_inches="tight"
+    )
     plt.close(fig_combined)
 
 
@@ -355,13 +365,17 @@ def main(
     figures_dir = output_root / "figures"
     csv_dir = output_root / "csv"
 
-    gas, gas_left, gas_right, gamma, p_ref, rho_ref, length_ref = build_reference_states(mech_file)
+    gas, gas_left, gas_right, gamma, p_ref, rho_ref, length_ref = (
+        build_reference_states(mech_file)
+    )
 
     left_state = (gas_left, SOD_CASE["uL"])
     right_state = (gas_right, SOD_CASE["uR"])
 
     domain_length = SOD_CASE["L"]
-    xf = np.linspace(-0.5 * domain_length * length_ref, 0.5 * domain_length * length_ref, n_cells + 1)
+    xf = np.linspace(
+        -0.5 * domain_length * length_ref, 0.5 * domain_length * length_ref, n_cells + 1
+    )
     geometry = Geometry(xf, area=1.0)
 
     x_analytical = np.linspace(-0.5 * domain_length, 0.5 * domain_length, 2001)
@@ -379,7 +393,9 @@ def main(
     final_states: dict[str, tuple[Array, FluidState]] = {}
     summary_rows: list[dict[str, float | str]] = []
 
-    cases_to_run = [case for case in SCHEME_CASES if requested is None or case.slug in requested]
+    cases_to_run = [
+        case for case in SCHEME_CASES if requested is None or case.slug in requested
+    ]
     if not cases_to_run:
         msg = "No matching scheme cases were selected."
         raise ValueError(msg)
