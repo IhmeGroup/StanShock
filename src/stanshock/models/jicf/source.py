@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+from scipy.interpolate import make_interp_spline
 
 from stanshock.models.jicf.generate import JICModel
 from stanshock.physics.flamelet import FPVTable
@@ -38,7 +39,7 @@ class FuelInjector(RightHandSide):
         # Position of the first injected fluid particle
         self.fluid_tips = np.array([[self.jicf.x_inj, self.jicf.mdot_inj[0]]])
 
-    def update_fluid_tip_positions(self, dt, t, u):
+    def update_fluid_tip_positions(self, dt: float, t: float, u: Array) -> None:
         """
         This method updates the position of the fluid tips based on the velocity
         of the fluid.
@@ -46,16 +47,16 @@ class FuelInjector(RightHandSide):
             The current time
         dt: float
             The time step
-        x: float
-            The current x-coordinate of the fluid tips
-        u: float
+        u: Array
             The current velocity of the fluid
         """
         # Update the fluid tip positions
-        self.fluid_tips[:, 0] += dt * np.interp(self.fluid_tips[:, 0], self.xc, u)
+        self.fluid_tips[:, 0] += dt * make_interp_spline(self.xc, u, k=1)(
+            self.fluid_tips[:, 0]
+        )
 
         # Emit a new fluid tip
-        mdot = np.interp(t, self.jicf.t_inj, self.jicf.mdot_inj)
+        mdot = self.jicf.mdot_f_interp(t)
         next_tip = np.array([[self.jicf.x_inj, mdot]])
         self.fluid_tips = np.concatenate([self.fluid_tips, next_tip], axis=0)
 
@@ -75,7 +76,7 @@ class FuelInjector(RightHandSide):
         state_array_local = np.reshape(state_array_local, self.shape_input)
         rhs = np.zeros_like(state_array_local)
 
-        mdot = np.interp(time, self.jicf.t_inj, self.jicf.mdot_inj)
+        mdot: Array | float = self.jicf.mdot_f_interp(time)
         u_inj = np.interp(time, self.jicf.t_inj, self.jicf.u_inj)
         E_inj = np.interp(time, self.jicf.t_inj, self.jicf.E_inj)
         L_src = 3e-2
@@ -139,11 +140,11 @@ class JICFChemistrySource(RightHandSide):
         factor = self.physics.get_source_progress_variable_compressibility_factor(state)
 
         # Get the mixture fraction variance profile
-        mdot_inj = np.interp(
-            self.injector.xc,
+        mdot_inj = make_interp_spline(
             np.flip(self.injector.fluid_tips, axis=0)[:, 0],
             np.flip(self.injector.fluid_tips, axis=0)[:, 1],
-        )
+            k=1,
+        )(self.injector.xc)
         Zvar = self.injector.jicf.Z_var_profile_interp((mdot_inj, self.injector.xc))
         Zvar = np.maximum(Zvar, 10 ** self.injector.jicf.logsigma2_vec.min())
 

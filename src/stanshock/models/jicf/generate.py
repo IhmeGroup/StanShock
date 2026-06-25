@@ -8,7 +8,8 @@ import cantera as ct
 import h5py
 import numpy as np
 from joblib import Parallel, delayed
-from scipy import integrate, interpolate, special, stats
+from scipy import integrate, special, stats
+from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 
@@ -37,11 +38,11 @@ class JICModel:
         rho: float,
         u: float,
         T: float,
-        alpha: float,
         geometry: Box,
         physics: FPVTable,
         datadir: Path | str = "./data",
         theta_inj: float = 0.0,
+        alpha: float = 1e6,
         model_file: str = "jicf_model.h5",
         x_profile: Array | None = None,
     ) -> None:
@@ -112,7 +113,7 @@ class JICModel:
         self.h = float(self.geometry.h(0.0, np.array(self.x_inj)))
         self.n_inj = n_inj
         self.d_inj = d_inj
-        self.theta_inj = theta_inj if theta_inj is not None else 0.0
+        self.theta_inj = theta_inj
 
         self.rho_inj = rho_inj
         self.u_inj = u_inj
@@ -120,7 +121,7 @@ class JICModel:
 
         self.rho = rho
 
-        self.alpha = alpha if alpha is not None else 1e6
+        self.alpha = alpha
         self.datadir = Path(datadir)
         self.datadir.mkdir(exist_ok=True)
         self.model_file = self.datadir / model_file
@@ -171,12 +172,8 @@ class JICModel:
         self.p_inj_unique = self.p_inj[self.mdot_inj_unique_idx]
 
         # Mass flow rate and equivalence ratio schedules
-        self.mdot_f_interp = interpolate.interp1d(
-            self.t_inj, self.mdot_inj, bounds_error=False, fill_value=0.0
-        )
-        self.phi_f_interp = interpolate.interp1d(
-            self.t_inj, self.phi_inj, bounds_error=False, fill_value=0.0
-        )
+        self.mdot_f_interp = make_interp_spline(self.t_inj, self.mdot_inj, k=1)
+        self.phi_f_interp = make_interp_spline(self.t_inj, self.phi_inj, k=1)
 
         # Set up the analytic JICF model
         self.analytic = AnalyticJICF(
@@ -221,13 +218,13 @@ class JICModel:
         # simulation mesh decouples the profiles from the simulation grid, so the
         # model does not need to be regenerated when the mesh changes. Out-of-range
         # query points (e.g. ghost cells) are linearly extrapolated.
-        self.Z_avg_profile_interp = interpolate.RegularGridInterpolator(
+        self.Z_avg_profile_interp = RegularGridInterpolator(
             (self.mdot_inj_unique, self.x_profile),
             self.Z_avg_profile,
             bounds_error=False,
             fill_value=None,
         )
-        self.Z_var_profile_interp = interpolate.RegularGridInterpolator(
+        self.Z_var_profile_interp = RegularGridInterpolator(
             (self.mdot_inj_unique, self.x_profile),
             self.Z_var_profile,
             bounds_error=False,
@@ -242,7 +239,7 @@ class JICModel:
                 self.Lbar_vec = group["Lbar"][:]
                 self.logsigma2_vec = group["logsigma2"][:]
                 self.omega_C_int = group["omega_C_int"][:]
-            self.omega_C_int_interp = interpolate.RegularGridInterpolator(
+            self.omega_C_int_interp = RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
         else:
@@ -264,7 +261,14 @@ class JICModel:
                     del grp[name]
                 grp[name] = array
 
-    def __stretched_grid(self, x_start, x_end, dx, growth_rate, target_x):
+    def __stretched_grid(
+        self,
+        x_start: float,
+        x_end: float,
+        dx: float,
+        growth_rate: float,
+        target_x: float,
+    ) -> Array:
         x_grid = [x_start, x_end]
         for direction in [-1, 1]:
             x, spacing = target_x, dx
@@ -274,7 +278,7 @@ class JICModel:
                 spacing *= growth_rate
         return np.sort(np.unique(x_grid))
 
-    def calc_Z_3D_interp(self, write=False):
+    def calc_Z_3D_interp(self, write: bool = False) -> None:
         print("Computing Z 3D array...")
         dx = 5.0e-4
         Ny = int(np.ceil(self.h / dx))
@@ -312,53 +316,54 @@ class JICModel:
     def _build_Z_3D_interp(self) -> None:
         self.Z_3D_interp = []
         for i_m in range(len(self.mdot_inj_unique)):
-            interp = interpolate.RegularGridInterpolator(
+            interp = RegularGridInterpolator(
                 (self.x_3D_data, self.y_3D_data, self.z_3D_data),
                 self.Z_3D_data[i_m],
                 method="cubic",
             )
             self.Z_3D_interp.append(interp)
 
-    def eval_Z_3D_interp(self, x, y, z):
+    def eval_Z_3D_interp(self, x: Array, y: Array, z: Array) -> Array:
         Z_arr = np.zeros_like(self.mdot_inj_unique)
         for i_m in range(len(self.mdot_inj_unique)):
             Z_arr[i_m] = self.Z_3D_interp[i_m]((x, y, z))
         return Z_arr
 
-    def Z_avg_var(self, x):
-        Z_avg = np.zeros_like(self.mdot_inj_unique)
-        Z_var = np.zeros_like(self.mdot_inj_unique)
-        x_local = x - self.x_inj
-        for i_m in range(len(self.mdot_inj_unique)):
-            if np.isnan(self.rho_inj_unique[i_m]):
+    def Z_avg_var(self, x: Array) -> tuple[Array, Array]:
+        Z_avg = np.zeros_like(self.mdot_inj)
+        Z_var = np.zeros_like(self.mdot_inj)
+        for i_m in range(len(self.mdot_inj)):
+            if np.isnan(self.rho_inj[i_m]):
                 Z_avg[i_m] = 0.0
                 Z_var[i_m] = 0.0
                 continue
 
-            def func(z, y, i_m=i_m):
-                return self.analytic.Z_3D(x_local, y, z)[i_m]
+            def mu_Z(z: Array, y: Array, i_m: int = i_m) -> Array:
+                return self.analytic.Z_3D(x, y, z)[i_m]
 
             Z_avg[i_m] = (
                 2.0
                 * integrate.dblquad(
-                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                    mu_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
                 )[0]
                 / (self.w * self.h)
             )
 
-            def func(z, y, i_m=i_m):
-                return (self.analytic.Z_3D(x_local, y, z)[i_m] - Z_avg[i_m]) ** 2
+            def sigma_Z(
+                z: Array, y: Array, i_m: int = i_m, Z_avg: Array = Z_avg
+            ) -> Array:
+                return (self.analytic.Z_3D(x, y, z)[i_m] - Z_avg[i_m]) ** 2
 
             Z_var[i_m] = (
                 2.0
                 * integrate.dblquad(
-                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                    sigma_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
                 )[0]
                 / (self.w * self.h)
             )
         return Z_avg, Z_var
 
-    def Z_avg_var_adjusted(self, x):
+    def Z_avg_var_adjusted(self, x: Array) -> tuple[Array, Array]:
         Z_avg = np.zeros_like(self.mdot_inj_unique)
         Z_var = np.zeros_like(self.mdot_inj_unique)
         for i_m in range(len(self.mdot_inj_unique)):
@@ -368,31 +373,33 @@ class JICModel:
                 continue
 
             # func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_m]
-            def func(z, y, i_m=i_m):
+            def mu_Z(z: Array, y: Array, i_m: int = i_m) -> Array:
                 return self.Z_3D_interp[i_m]((x, y, z))
 
             Z_avg[i_m] = (
                 2.0
                 * integrate.dblquad(
-                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                    mu_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
                 )[0]
                 / (self.w * self.h)
             )
 
             # func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_m] - Z_avg[i_m])**2
-            def func(z, y, i_m=i_m):
+            def sigma_Z(
+                z: Array, y: Array, i_m: int = i_m, Z_avg: Array = Z_avg
+            ) -> Array:
                 return (self.Z_3D_interp[i_m]((x, y, z)) - Z_avg[i_m]) ** 2
 
             Z_var[i_m] = (
                 2.0
                 * integrate.dblquad(
-                    func, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
+                    sigma_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
                 )[0]
                 / (self.w * self.h)
             )
         return Z_avg, Z_var
 
-    def calc_Z_avg_var_profiles(self, write=False):
+    def calc_Z_avg_var_profiles(self, write: bool = False) -> None:
         print("Computing Z average and variance profiles...")
         # Record the mesh the profiles are generated on so the interpolators can
         # be rebuilt independently of the simulation mesh. Use the caller-supplied
@@ -424,34 +431,34 @@ class JICModel:
                 },
             )
 
-    def estimate_p_Z(self, x, Z):
+    def estimate_p_Z(self, x: Array, Z: Array) -> Array:
         """
         This method estimates the PDF of the mixture fraction at a given point
         using a Beta distribution.
-        x: float
+        x: Array
             The query x-coordinate
-        Z: float
+        Z: Array
             The query mixture fraction
         """
         Z_avg, Z_var = self.Z_avg_var_adjusted(x)
-        if Z_avg == 0.0:
-            return 0.0
+        if np.all(Z_avg == 0.0):
+            return Z_avg
         a = ((Z_avg * (1 - Z_avg) / Z_var) - 1) * Z_avg
         b = a * (1 - Z_avg) / Z_avg
-        return stats.beta.pdf(Z, a, b)
+        return np.asarray(stats.beta.pdf(Z, a, b))
 
     @staticmethod
     def _compute_omega_C_int(
-        i_Zbar,
-        i_Lbar,
-        i_S,
-        Zbar_vec,
-        Lbar_vec,
-        logsigma2_vec,
-        uv_vec,
-        W_vec,
-        omega_C_interp,
-    ):
+        i_Zbar: int,
+        i_Lbar: int,
+        i_S: int,
+        Zbar_vec: Array,
+        Lbar_vec: Array,
+        logsigma2_vec: Array,
+        uv_vec: Array,
+        W_vec: Array,
+        omega_C_interp: RegularGridInterpolator[np.float64],
+    ) -> tuple[int, int, int, float]:
         Zbar = Zbar_vec[i_Zbar]
         Lbar = Lbar_vec[i_Lbar]
         logsigma2 = logsigma2_vec[i_S]
@@ -459,8 +466,7 @@ class JICModel:
 
         eps = 1.0e-6
         if (Zbar < eps) or (Zbar > 1 - eps) or (Lbar < eps) or (Lbar > 1 - eps):
-            result = omega_C_interp((Zbar, Lbar))
-            return (i_Zbar, i_Lbar, i_S, result)
+            return (i_Zbar, i_Lbar, i_S, float(omega_C_interp((Zbar, Lbar))))
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -482,11 +488,11 @@ class JICModel:
             integrand = omega_C_interp((Z_int_mesh, L_int_mesh))
 
             # Perform the integration
-            result = np.sum(integrand * W_mesh)
+            result = float(np.sum(integrand * W_mesh))
 
         return (i_Zbar, i_Lbar, i_S, result)
 
-    def calc_chemical_sources(self, write=False):
+    def calc_chemical_sources(self, write: bool = False) -> None:
         """
         This method precomputes the chemical source terms as a function of x, mdot_f, and L.
         """
@@ -499,7 +505,7 @@ class JICModel:
         omega_C = self.physics.lookup_direct(
             "SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh
         )
-        omega_C_interp = interpolate.RegularGridInterpolator(
+        omega_C_interp = RegularGridInterpolator(
             (Z_sample, L_sample), omega_C, bounds_error=False, fill_value=0.0
         )
 
@@ -553,6 +559,6 @@ class JICModel:
             )
 
         # Build 3D table interpolator
-        self.omega_C_int_interp = interpolate.RegularGridInterpolator(
+        self.omega_C_int_interp = RegularGridInterpolator(
             (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
         )
