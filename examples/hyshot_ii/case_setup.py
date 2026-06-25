@@ -324,6 +324,7 @@ def get_injectors_fpv(
     mdot: Literal["constant", "schedule"] = "constant",
     fpv_dir: Path = Path("./data"),
 ) -> JICModel:
+    assert isinstance(geometry, AsymmetricBox)
     # Freeze after constant cross section region of the combustor
     L_const = 300.0e-3  # m
 
@@ -416,12 +417,12 @@ def get_injectors_fpv(
         u=U_in,
         T=T_in,
         alpha=1e6,
+        geometry=geometry,
+        physics=physics,
         load_Z_3D=(fpv_dir / "Z_3D.npy").exists(),
         load_Z_avg_var_profiles=(fpv_dir / "Z_var_profile.npy").exists(),
         load_chemical_sources=(fpv_dir / "omega_C_int.npy").exists(),
         load_MIB_profile=(fpv_dir / "C_profile_MIB.npy").exists(),
-        geometry=geometry,
-        physics=physics,
     )
 
 
