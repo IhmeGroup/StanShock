@@ -232,7 +232,7 @@ class XTDiagram:
         if domain.injectors is not None:
             mdot_f = 0.0
             for inj in domain.injectors:
-                mdot_f += float(inj.mdot_f_interp(domain.t))
+                mdot_f += float(inj.jicf.mdot_f_interp(domain.t))
             self.mdot.append(mdot_f)
 
     def plot(self, figdir: Path | str = ".") -> None:
@@ -329,8 +329,8 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
             h_inj = 0.0
             ax1.annotate(
                 "",
-                xy=(inj.x_inj * scale, h_inj * scale),
-                xytext=(inj.x_inj * scale, h_inj * scale - 0.02),
+                xy=(inj.jicf.x_inj * scale, h_inj * scale),
+                xytext=(inj.jicf.x_inj * scale, h_inj * scale - 0.02),
                 arrowprops={"arrowstyle": "-|>", "color": "0.5", "lw": 1},
             )
             # ax1.scatter(inj.x_inj * scale, h_inj * scale,
@@ -347,27 +347,31 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
 def get_state_plot_bounds(
     domain,
 ) -> tuple[float, float, float, dict[str, tuple[float, float]]]:
-    rlims = [0, 0]
-    ulims = [0, 0]
-    plims = [0, 0]
+    state = domain.state[[0, -1]]
+    rlims = domain.physics.get_density(state)
+    ulims = domain.physics.get_velocity(state)
+    plims = domain.physics.get_pressure(state)
+    g = domain.physics.get_gamma(state)
 
-    g = 1.4
+    map_lr = {"left": 0, "right": 1}
+    for bc in domain.boundary_conditions._boundary_conditions:
+        if not hasattr(bc, "reference_state"):
+            continue
 
-    for ibc in [0, 1]:
-        if type(domain.boundary_conditions[ibc]) is not str:
-            if domain.boundary_conditions[ibc][0] is not None:
-                rlims[ibc] = domain.boundary_conditions[ibc][0]
-            if domain.boundary_conditions[ibc][1] is not None:
-                ulims[ibc] = domain.boundary_conditions[ibc][1]
-            if domain.boundary_conditions[ibc][2] is not None:
-                plims[ibc] = domain.boundary_conditions[ibc][2]
+        ibc = map_lr[bc.location]
+        if bc.reference_state[0] is not None:
+            rlims[ibc] = bc.reference_state[0]
+        if bc.reference_state[1] is not None:
+            ulims[ibc] = bc.reference_state[1]
+        if bc.reference_state[2] is not None:
+            plims[ibc] = bc.reference_state[2]
 
-    a = domain.physics.get_sound_speed(domain.state)
-    T = domain.physics.get_temperature(domain.state)
-    cp = domain.physics.get_cp(domain.state)
-    cp_max = max([cp[0], cp[-1]])
+    a = domain.physics.get_sound_speed(state)
+    T = domain.physics.get_temperature(state)
+    cp = domain.physics.get_cp(state)
+    cp_max = np.max(cp)
 
-    Mlims = [ulims[0] / a[0], ulims[-1] / a[-1]]
+    Mlims = ulims / a
 
     p1 = plims[0]
     r1 = rlims[0]
@@ -429,7 +433,7 @@ def plot_state(
 
     fig: Figure
     axs: list[Axes]
-    fig, axs = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
+    fig, axs = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9), layout="constrained")
 
     subtitle_str = []
     for iax, vnames in enumerate(plot_variables):
@@ -482,10 +486,10 @@ def plot_state(
         for inj in domain.injectors:
             ax.scatter(
                 inj.fluid_tips[:, 0] * xscale,
-                inj.fluid_tips[:, 1] * 1e3 * inj.n_inj,
+                inj.fluid_tips[:, 1] * 1e3 * inj.jicf.n_inj,
                 s=1,
             )
-            phi_tot += inj.phi_f_interp(domain.t)
+            phi_tot += inj.jicf.phi_f_interp(domain.t)
         ax.set_title(rf"$\phi={phi_tot:.2f}$")
         ax.set_ymargin(0.1)
         ax.set_ylabel(r"$\dot{m}_f$ [g/s]")
@@ -496,13 +500,15 @@ def plot_state(
             add_h_plot(domain, ax, scale=xscale)
 
     full_title = rf"$t = {domain.t * 1.0e3:.4f}$ ms"
-    if subtitle_str:
-        full_title += rf"\n\footnotesize{{{', '.join(subtitle_str)}}}"
     fig.suptitle(full_title)
+    if subtitle_str:
+        axs[0].set_title(", ".join(subtitle_str))
+        # axs[0].set_title(rf"\footnotesize{{{', '.join(subtitle_str)}}}")
 
     output_path = Path(filename)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fig.tight_layout()
-    fig.savefig(output_path, bbox_inches="tight", dpi=300)
+    # fig.tight_layout()
+    # fig.savefig(output_path, bbox_inches="tight", dpi=300)
+    fig.savefig(output_path, dpi=300)
     plt.close()

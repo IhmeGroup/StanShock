@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from case_setup import Hyshot2Interface
+import matplotlib.pyplot as plt
+from case_setup import Hyshot2Interface, data_dir
 
 from stanshock.processing.csv_writer import CSVWriter
 from stanshock.processing.plot import XTDiagram
+
+plt.style.use(data_dir / "stylelib" / "publication.mplstyle")
 
 # Output data directories
 fig_dir = Path("./figures")
@@ -16,7 +19,7 @@ output_dir = Path("./output")
 output_dir.mkdir(exist_ok=True)
 
 # Initialize and run the simulation
-sim = Hyshot2Interface(chemistry="FPV", inflow="constant")
+sim = Hyshot2Interface(chemistry="FPV", inflow="constant", mdot="schedule")
 ss = sim.case
 ss.verbose = True
 ss.output_every = 100
@@ -52,7 +55,7 @@ ss.plot_state_variables = plot_variables
 #     ["Y_H2", "Y_OH", "Y_H2O"],
 # ]
 ss.xt_diagrams = [XTDiagram(ss, variable, skip_steps=10) for variable in plot_variables]
-ss.advance_simulation(ss.injectors[0].t_inj[-1])
+ss.advance_simulation(ss.injectors[0].jicf.t_inj[-1])
 for diagram in ss.xt_diagrams:
     diagram.plot(figdir=fig_dir)
 
