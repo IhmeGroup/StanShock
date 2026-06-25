@@ -35,7 +35,6 @@ dynamic = ["version"]
 dependencies = [
   "numpy",
   "scipy",
-  # "scipy-stubs",
   "scikit-learn",
   "matplotlib",
   "numba",
@@ -47,9 +46,14 @@ dependencies = [
   "h5py",
   "imageio",
   # Conditional:
+  "scipy-stubs>=1.18.0; python_version>='3.12'",
   "cantera>=3.2.0; python_version>='3.14'",
   "numba>=0.63.0rc1; python_version>='3.14'",
 ]
+
+[tool.pyrefly.errors]
+redundant-condition = "error"
+redundant-cast = "warn"
 
 [project.urls]
 Homepage = "https://github.com/IhmeGroup/StanShock"
@@ -121,14 +125,14 @@ report.exclude_also = [
 
 [tool.mypy]
 files = ["src", "tests"]
-python_version = "3.10"
+python_version = "3.12"
 warn_unused_configs = true
 strict = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 warn_unreachable = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
-mypy_path = ["src", "stubs", "tests"]
+mypy_path = ["src", "tests"]
 
 [[tool.mypy.overrides]]
 module = "stanshock.*"
@@ -200,4 +204,20 @@ messages_control.disable = [
   "missing-module-docstring",
   "missing-function-docstring",
   "wrong-import-position",
+]
+
+[tool.pyrefly]
+project-includes = [
+    "src",
+    "tests",
+]
+search-path = [
+    "src",
+    "tests",
+]
+python-version = "3.12.0"
+preset = "legacy"
+ignore-missing-imports = [
+    "numba.*",
+    "h5py.*",
 ]
