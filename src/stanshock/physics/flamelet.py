@@ -219,6 +219,8 @@ class FPVTable(FluidPhysics):
         """
         Compute the dynamic viscosity at the given Z, Q, and L values.
         """
+        if state.temperature is None:
+            state.temperature = self.get_temperature(state)
         assert state.temperature is not None
         mu0 = self.lookup("MU0", state)
         T0 = self.lookup("T0", state)

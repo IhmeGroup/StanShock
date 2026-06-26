@@ -41,7 +41,7 @@ from stanshock.processing.initialize import Initialization, InitializeRestart
 from stanshock.processing.plot import VariableInfo, XTDiagram, plot_state
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
-from stanshock.system.base import RightHandSide
+from stanshock.system.base import CombinedSource, RightHandSide
 from stanshock.system.geometry import Geometry
 
 
@@ -93,7 +93,12 @@ class Combustor:
         self.verbose = verbose
         self.output_every = output_every
         self.use_double_flux = use_double_flux
-        self.injector = injector
+        if injector is None:
+            self.injectors: list[JICModel] = []
+        elif isinstance(injector, list):
+            self.injectors = injector
+        else:
+            self.injectors = [injector]
         self.optimization_iteration = optimization_iteration
         self.physics: FluidPhysics = physics
         self.initialization: Initialization = initialization
@@ -145,17 +150,23 @@ class Combustor:
         integrators: list[TimeIntegrator] = []
         advection = SSPRK3(self.inviscid_flux)
         chemistry: TimeIntegrator
+
         if reacting and self.physics.is_flamelet:
-            if self.injector is not None:
-                chemistry = HeunsMethod(
-                    JICFChemistrySource(
-                        self.injector, geometry=self.geometry, physics=self.physics
-                    )
+            if self.injectors:
+                chemistry_source = CombinedSource(
+                    [
+                        JICFChemistrySource(
+                            inj, geometry=self.geometry, physics=self.physics
+                        )
+                        for inj in self.injectors
+                    ]
                 )
             else:
-                chemistry = HeunsMethod(
-                    ChemistrySource(geometry=self.geometry, physics=self.physics)
+                chemistry_source = ChemistrySource(
+                    geometry=self.geometry, physics=self.physics
                 )
+            chemistry = HeunsMethod(chemistry_source)
+
             integrators += [advection, chemistry]
         elif reacting and self.physics.gas.n_reactions > 0:
             chemistry = ScipyIVP(
@@ -201,11 +212,7 @@ class Combustor:
             else:
                 integrators += [HeunsMethod(source_terms)]
 
-        if self.injector is not None:
-            if not self.physics.is_flamelet:
-                msg = "JIC injector model requires FPVTable physics."
-                raise Exception(msg)
-            integrators += [HeunsMethod(self.injector)]
+        integrators += [HeunsMethod(inj) for inj in self.injectors]
 
         # Apply Lie splitting approach
         self.time_integrator = LieSplitting(tuple(integrators), update_double_flux=True)
@@ -300,11 +307,15 @@ class Combustor:
             p_old = p_new + 0.0
 
             # Update the injector
-            if self.injector is not None:
+            if self.injectors is not None:
                 assert self.state.velocity is not None
-                self.injector.update_fluid_tip_positions(
-                    dt, self.t, self.state.velocity[self.geometry.idx_cells]
-                )
+                for inj in self.injectors:
+                    inj.update_fluid_tip_positions(
+                        dt, self.t, self.state.velocity[self.geometry.idx_cells]
+                    )
+                # self.injector.update_fluid_tip_positions(
+                #     dt, self.t, self.state.velocity[self.geometry.idx_cells]
+                # )
 
             # Update the system state
             self.t, state_array, gamma_star, e0_star = self.time_integrator.advance(
@@ -328,9 +339,9 @@ class Combustor:
             res_p = float(np.linalg.norm(p_new - p_old))
             if self.verbose and iters % self.output_every == 0:
                 print(
-                    f"Iteration: {iters}. Current time: {self.t}. Time step: {dt:e}. "
-                    + f"Max T[K]: {self.physics.get_temperature(self.state).max()}. "
-                    + f"Residual(p): {res_p}."
+                    f"Iteration: {iters}. Current time: {self.t:.3e}. Time step: {dt:.3e}. "
+                    + f"Max T[K]: {self.physics.get_temperature(self.state).max():.3e}. "
+                    + f"Residual(p): {res_p:.3e}."
                 )
             if (self.plot_state_interval > 0) and (
                 iters % self.plot_state_interval == 0
