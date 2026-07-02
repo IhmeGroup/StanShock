@@ -1,0 +1,10 @@
+# Generated simulation artifacts and large data (regenerate locally)
+data/
+figures/
+output/
+__pycache__/
+
+# FPV / flamelet tables are large; generate with FPVgen (see h2_table/input.toml)
+h2_table/flamelet_results/
+*.h5
+*.npy
