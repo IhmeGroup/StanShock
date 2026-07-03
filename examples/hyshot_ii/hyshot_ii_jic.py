@@ -55,7 +55,7 @@ ss.plot_state_variables = plot_variables
 #     ["Y_H2", "Y_OH", "Y_H2O"],
 # ]
 ss.xt_diagrams = [XTDiagram(ss, variable, skip_steps=10) for variable in plot_variables]
-ss.advance_simulation(ss.injectors[0].jicf.t_inj[-1])
+ss.advance_simulation(ss.injectors[0].t_inj[-1])
 for diagram in ss.xt_diagrams:
     diagram.plot(figdir=fig_dir)
 
