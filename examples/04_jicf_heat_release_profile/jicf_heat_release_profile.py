@@ -174,7 +174,6 @@ def build_injector(
         load_Z_3D=(cache_dir / "Z_3D.npy").exists(),
         load_Z_avg_var_profiles=(cache_dir / "Z_var_profile.npy").exists(),
         load_chemical_sources=(cache_dir / "omega_C_int.npy").exists(),
-        load_MIB_profile=(cache_dir / "C_profile_MIB.npy").exists(),
         geometry=geometry,
         physics=physics,
     )
