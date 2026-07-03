@@ -232,7 +232,7 @@ class XTDiagram:
         if domain.injectors is not None:
             mdot_f = 0.0
             for inj in domain.injectors:
-                mdot_f += float(inj.jicf.mdot_f_interp(domain.t))
+                mdot_f += float(inj.mdot_f_interp(domain.t))
             self.mdot.append(mdot_f)
 
     def plot(self, figdir: Path | str = ".") -> None:
@@ -489,7 +489,7 @@ def plot_state(
                 inj.fluid_tips[:, 1] * 1e3 * inj.jicf.n_inj,
                 s=1,
             )
-            phi_tot += inj.jicf.phi_f_interp(domain.t)
+            phi_tot += inj.phi_f_interp(domain.t)
         ax.set_title(rf"$\phi={phi_tot:.2f}$")
         ax.set_ymargin(0.1)
         ax.set_ylabel(r"$\dot{m}_f$ [g/s]")

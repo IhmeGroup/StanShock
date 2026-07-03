@@ -9,7 +9,7 @@ from injector_models import fuel_props_from_phi
 
 from stanshock.components.combustor import Combustor
 from stanshock.models.inlet_diffuser import InletDiffuser
-from stanshock.models.jicf import JICModel, plot_jicf_flowfield
+from stanshock.models.jicf import FuelInjector, JICModel, plot_jicf_flowfield
 from stanshock.models.wall_models import (
     CompressibleHeatFlux,
     CompressibleReactingSkinFriction,
@@ -323,7 +323,9 @@ def get_injectors_fpv(
     U_in: float,
     mdot: Literal["constant", "schedule"] = "constant",
     fpv_dir: Path = Path("./data"),
-) -> JICModel:
+    phi_range: tuple[float, float] = (0.1, 0.7),
+    n_throttle: int = 8,
+) -> FuelInjector:
     assert isinstance(geometry, AsymmetricBox)
     # Freeze after constant cross section region of the combustor
     L_const = 300.0e-3  # m
@@ -390,29 +392,42 @@ def get_injectors_fpv(
             ]
         )
 
-    t_f = np.zeros(t_phi_gl_schedule.shape[0])
-    rho_f = np.zeros(t_phi_gl_schedule.shape[0])
-    U_f = np.zeros(t_phi_gl_schedule.shape[0])
-    T_f = np.zeros(t_phi_gl_schedule.shape[0])
-    for i in range(t_phi_gl_schedule.shape[0]):
-        t_f[i] = t_phi_gl_schedule[i, 0]
-        rho_f[i], U_f[i], T_f[i] = fuel_props_from_phi(
-            physics, t_phi_gl_schedule[i, 1], mdot_ox, T0_f, P_in, A_f_tot
+    def _props(phi_gl: float) -> tuple[float, float, float, float, float, float]:
+        """Injected-fluid state for a global equivalence ratio ``phi_gl``.
+
+        Returns ``(rho_f, U_f, T_f, mdot_f, E_f, J)``, where ``J`` is the
+        momentum-flux ratio relative to the (fixed) crossflow inflow.
+        """
+        rho_f, U_f, T_f = fuel_props_from_phi(
+            physics, phi_gl, mdot_ox, T0_f, P_in, A_f_tot
         )
-    # # NOTE: Assuming perfect gas & isentropic choked flow, only rho_f changes with phi/mdot
-    # U_f = U_f[-1]
-    # T_f = T_f[-1]
+        mdot_f = N_f * rho_f * U_f * A_f
+        J = rho_f * U_f**2 / (rho_in * U_in**2)
+        gas = physics.gas
+        gas.TDX = T_f, rho_f, physics.fuel_def
+        E_f = float(gas.int_energy_mass) + 0.5 * U_f**2
+        return rho_f, U_f, T_f, mdot_f, E_f, J
+
+    # Tabulation grid: discretize the throttle range as a range of momentum-flux
+    # ratios J (the throttle-agnostic table dimension) at the requested
+    # resolution. The runtime throttle schedule below maps onto this table.
+    phi_grid = np.linspace(phi_range[0], phi_range[1], n_throttle)
+    rho_g = np.zeros(n_throttle)
+    U_g = np.zeros(n_throttle)
+    T_g = np.zeros(n_throttle)
+    J_g = np.zeros(n_throttle)
+    for i, phi_gl in enumerate(phi_grid):
+        rho_g[i], U_g[i], T_g[i], _, _, J_g[i] = _props(phi_gl)
 
     jicf = JICModel(
         x_inj=x_inj,
         x_noz=L_const,
         n_inj=N_f,
         d_inj=2 * r_f,
-        t_inj=t_f,
-        phi_inj=t_phi_gl_schedule[:, 1],
-        rho_inj=rho_f,
-        u_inj=U_f,
-        T_inj=T_f,
+        J=J_g,
+        rho_inj=rho_g,
+        u_inj=U_g,
+        T_inj=T_g,
         rho=rho_in,
         u=U_in,
         T=T_in,
@@ -425,7 +440,27 @@ def get_injectors_fpv(
     # Generate plots of the fuel jets
     plot_jicf_flowfield(jicf)
 
-    return jicf
+    # Runtime throttle schedule: recover the original fixed-schedule behaviour by
+    # evaluating the injected-fluid state at each scheduled equivalence ratio.
+    t_f = t_phi_gl_schedule[:, 0]
+    phi_s = t_phi_gl_schedule[:, 1]
+    n_s = t_phi_gl_schedule.shape[0]
+    mdot_s = np.zeros(n_s)
+    U_s = np.zeros(n_s)
+    E_s = np.zeros(n_s)
+    for i in range(n_s):
+        _, U_s[i], _, mdot_s[i], E_s[i], _ = _props(phi_s[i])
+
+    return FuelInjector(
+        jicf,
+        t_inj=t_f,
+        phi_inj=phi_s,
+        mdot_inj=mdot_s,
+        u_inj=U_s,
+        E_inj=E_s,
+        geometry=geometry,
+        physics=physics,
+    )
 
 
 class Hyshot2Interface:
