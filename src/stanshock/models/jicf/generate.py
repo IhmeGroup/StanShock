@@ -5,6 +5,7 @@ import warnings
 from pathlib import Path
 
 import cantera as ct
+import h5py
 import numpy as np
 from joblib import Parallel, delayed
 from scipy import integrate, interpolate, special, stats
@@ -41,9 +42,7 @@ class JICModel:
         physics: FPVTable,
         datadir: Path | str = "./data",
         theta_inj: float = 0.0,
-        load_Z_3D: bool = False,
-        load_Z_avg_var_profiles: bool = False,
-        load_chemical_sources: bool = False,
+        model_file: Path | str | None = None,
     ) -> None:
         """
         This method initializes the Jet-in-Crossflow model with the following
@@ -78,12 +77,10 @@ class JICModel:
             The relaxation parameter (used here only for storage)
         datadir: str
             Where to access or store tables written for this injector
-        load_Z_3D: bool
-            Whether to load the 3D Z table
-        load_Z_avg_var_profiles: bool
-            Whether to load the Z average and variance profiles
-        load_chemical_sources: bool
-            Whether to load the chemical source terms
+        model_file: Path | str | None
+            Path to the HDF5 file caching the generated model tables. Defaults
+            to ``<datadir>/jicf_model.h5``. Tables already present in the file
+            are loaded; any that are missing are computed and written to it.
         geometry: Box
             The geometry object describing the mesh and cross-section
         physics: FPVTable
@@ -118,6 +115,11 @@ class JICModel:
         self.alpha = alpha if alpha is not None else 1e6
         self.datadir = Path(datadir)
         self.datadir.mkdir(exist_ok=True)
+        self.model_file = (
+            Path(model_file)
+            if model_file is not None
+            else self.datadir / "jicf_model.h5"
+        )
 
         # Geometry parameters
         self.A = self.w * self.h
@@ -184,48 +186,75 @@ class JICModel:
         )
 
         # Precompute a 3D array of the mixture fraction and generate an interpolator
-        if load_Z_3D:
-            self.x_3D_data = np.load(self.datadir / "Z_3D_x.npy")
-            self.y_3D_data = np.load(self.datadir / "Z_3D_y.npy")
-            self.z_3D_data = np.load(self.datadir / "Z_3D_z.npy")
-            self.Z_3D_data = np.load(self.datadir / "Z_3D.npy")
-            self.Z_3D_interp = []
-            for i_m in range(len(self.mdot_inj_unique)):
-                interp = interpolate.RegularGridInterpolator(
-                    (self.x_3D_data, self.y_3D_data, self.z_3D_data),
-                    self.Z_3D_data[i_m],
-                    method="cubic",
-                )
-                self.Z_3D_interp.append(interp)
+        if self._h5_has("Z_3D/Z"):
+            with h5py.File(self.model_file, "r") as f:
+                group = f["Z_3D"]
+                self.x_3D_data = group["x"][:]
+                self.y_3D_data = group["y"][:]
+                self.z_3D_data = group["z"][:]
+                self.Z_3D_data = group["Z"][:]
+            self._build_Z_3D_interp()
         else:
             self.calc_Z_3D_interp(write=True)
 
-        # Precompute the axial mean and variance profiles of Z
-        if load_Z_avg_var_profiles:
-            self.Z_avg_profile = np.load(self.datadir / "Z_avg_profile.npy")
-            self.Z_var_profile = np.load(self.datadir / "Z_var_profile.npy")
+        # Precompute the axial mean and variance profiles of Z, along with the
+        # mesh they were generated on.
+        if self._h5_has("Z_profiles/Z_avg"):
+            with h5py.File(self.model_file, "r") as f:
+                group = f["Z_profiles"]
+                self.x_profile = group["x"][:]
+                self.Z_avg_profile = group["Z_avg"][:]
+                self.Z_var_profile = group["Z_var"][:]
         else:
             self.calc_Z_avg_var_profiles(write=True)
 
-        # Precompute the mapping from mdot to Z mean and variance profiles
+        # Map mdot -> Z mean/variance on the *generation* mesh (self.x_profile).
+        # Building the interpolators on the stored mesh rather than the current
+        # simulation mesh decouples the profiles from the simulation grid, so the
+        # model does not need to be regenerated when the mesh changes. Out-of-range
+        # query points (e.g. ghost cells) are linearly extrapolated.
         self.Z_avg_profile_interp = interpolate.RegularGridInterpolator(
-            (self.mdot_inj_unique, self.xc), self.Z_avg_profile
+            (self.mdot_inj_unique, self.x_profile),
+            self.Z_avg_profile,
+            bounds_error=False,
+            fill_value=None,
         )
         self.Z_var_profile_interp = interpolate.RegularGridInterpolator(
-            (self.mdot_inj_unique, self.xc), self.Z_var_profile
+            (self.mdot_inj_unique, self.x_profile),
+            self.Z_var_profile,
+            bounds_error=False,
+            fill_value=None,
         )
 
         # Precompute and tabulate chemical source terms
-        if load_chemical_sources:
-            self.Zbar_vec = np.load(self.datadir / "Zbar_vec.npy")
-            self.Lbar_vec = np.load(self.datadir / "Lbar_vec.npy")
-            self.logsigma2_vec = np.load(self.datadir / "logsigma2_vec.npy")
-            self.omega_C_int = np.load(self.datadir / "omega_C_int.npy")
+        if self._h5_has("chemical_sources/omega_C_int"):
+            with h5py.File(self.model_file, "r") as f:
+                group = f["chemical_sources"]
+                self.Zbar_vec = group["Zbar"][:]
+                self.Lbar_vec = group["Lbar"][:]
+                self.logsigma2_vec = group["logsigma2"][:]
+                self.omega_C_int = group["omega_C_int"][:]
             self.omega_C_int_interp = interpolate.RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
         else:
             self.calc_chemical_sources(write=True)
+
+    def _h5_has(self, key: str) -> bool:
+        """Return True if the model file exists and contains the given dataset."""
+        if not self.model_file.exists():
+            return False
+        with h5py.File(self.model_file, "r") as f:
+            return key in f
+
+    def _h5_write(self, group: str, data: dict[str, Array]) -> None:
+        """Write (overwriting if present) a group of named arrays to the model file."""
+        with h5py.File(self.model_file, "a") as f:
+            grp = f.require_group(group)
+            for name, array in data.items():
+                if name in grp:
+                    del grp[name]
+                grp[name] = array
 
     def __stretched_grid(self, x_start, x_end, dx, growth_rate, target_x):
         x_grid = [x_start, x_end]
@@ -260,11 +289,19 @@ class JICModel:
         self.Z_3D_data[np.isnan(self.rho_inj_unique)] = 0.0
 
         if write:
-            np.save(self.datadir / "Z_3D_x.npy", self.x_3D_data)
-            np.save(self.datadir / "Z_3D_y.npy", self.y_3D_data)
-            np.save(self.datadir / "Z_3D_z.npy", self.z_3D_data)
-            np.save(self.datadir / "Z_3D.npy", self.Z_3D_data)
+            self._h5_write(
+                "Z_3D",
+                {
+                    "x": self.x_3D_data,
+                    "y": self.y_3D_data,
+                    "z": self.z_3D_data,
+                    "Z": self.Z_3D_data,
+                },
+            )
 
+        self._build_Z_3D_interp()
+
+    def _build_Z_3D_interp(self) -> None:
         self.Z_3D_interp = []
         for i_m in range(len(self.mdot_inj_unique)):
             interp = interpolate.RegularGridInterpolator(
@@ -349,21 +386,31 @@ class JICModel:
 
     def calc_Z_avg_var_profiles(self, write=False):
         print("Computing Z average and variance profiles...")
-        self.Z_avg_profile = np.zeros([len(self.mdot_inj_unique), len(self.xc)])
-        self.Z_var_profile = np.zeros([len(self.mdot_inj_unique), len(self.xc)])
-        for i in tqdm(range(len(self.xc))):
-            if self.xc[i] > self.x_noz:
+        # Record the mesh the profiles are generated on so the interpolators can
+        # be rebuilt independently of the simulation mesh.
+        self.x_profile = np.asarray(self.xc, dtype=float)
+        n_mdot = len(self.mdot_inj_unique)
+        self.Z_avg_profile = np.zeros([n_mdot, len(self.x_profile)])
+        self.Z_var_profile = np.zeros([n_mdot, len(self.x_profile)])
+        for i in tqdm(range(len(self.x_profile))):
+            if self.x_profile[i] > self.x_noz:
                 # Freeze the profiles in the nozzle
                 self.Z_avg_profile[:, i] = self.Z_avg_profile[:, i - 1]
                 self.Z_var_profile[:, i] = self.Z_var_profile[:, i - 1]
             else:
                 self.Z_avg_profile[:, i], self.Z_var_profile[:, i] = (
-                    self.Z_avg_var_adjusted(self.xc[i])
+                    self.Z_avg_var_adjusted(self.x_profile[i])
                 )
 
         if write:
-            np.save(self.datadir / "Z_avg_profile.npy", self.Z_avg_profile)
-            np.save(self.datadir / "Z_var_profile.npy", self.Z_var_profile)
+            self._h5_write(
+                "Z_profiles",
+                {
+                    "x": self.x_profile,
+                    "Z_avg": self.Z_avg_profile,
+                    "Z_var": self.Z_var_profile,
+                },
+            )
 
     def estimate_p_Z(self, x, Z):
         """
@@ -483,10 +530,15 @@ class JICModel:
         self.omega_C_int[np.isnan(self.omega_C_int)] = 0.0
 
         if write:
-            np.save(self.datadir / "Zbar_vec.npy", self.Zbar_vec)
-            np.save(self.datadir / "Lbar_vec.npy", self.Lbar_vec)
-            np.save(self.datadir / "logsigma2_vec.npy", self.logsigma2_vec)
-            np.save(self.datadir / "omega_C_int.npy", self.omega_C_int)
+            self._h5_write(
+                "chemical_sources",
+                {
+                    "Zbar": self.Zbar_vec,
+                    "Lbar": self.Lbar_vec,
+                    "logsigma2": self.logsigma2_vec,
+                    "omega_C_int": self.omega_C_int,
+                },
+            )
 
         # Build 3D table interpolator
         self.omega_C_int_interp = interpolate.RegularGridInterpolator(
