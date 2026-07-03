@@ -422,7 +422,6 @@ def get_injectors_fpv(
         load_Z_3D=(fpv_dir / "Z_3D.npy").exists(),
         load_Z_avg_var_profiles=(fpv_dir / "Z_var_profile.npy").exists(),
         load_chemical_sources=(fpv_dir / "omega_C_int.npy").exists(),
-        load_MIB_profile=(fpv_dir / "C_profile_MIB.npy").exists(),
     )
 
 

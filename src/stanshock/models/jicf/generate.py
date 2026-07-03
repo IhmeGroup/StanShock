@@ -44,7 +44,6 @@ class JICModel:
         load_Z_3D: bool = False,
         load_Z_avg_var_profiles: bool = False,
         load_chemical_sources: bool = False,
-        load_MIB_profile: bool = False,
     ) -> None:
         """
         This method initializes the Jet-in-Crossflow model with the following
@@ -85,8 +84,6 @@ class JICModel:
             Whether to load the Z average and variance profiles
         load_chemical_sources: bool
             Whether to load the chemical source terms
-        load_MIB_profile: bool
-            Whether to load the MIB profile
         geometry: Box
             The geometry object describing the mesh and cross-section
         physics: FPVTable
@@ -230,14 +227,6 @@ class JICModel:
         else:
             self.calc_chemical_sources(write=True)
 
-        # Calculate the progress variable and chemical energy profiles for the
-        # mixed is burned (MIB) model
-        if load_MIB_profile:
-            self.C_profile = np.load(self.datadir / "C_profile_MIB.npy")
-            self.E_CHEM_profile = np.load(self.datadir / "E_CHEM_profile_MIB.npy")
-        else:
-            self.calc_MIB_profile(write=True)
-
     def __stretched_grid(self, x_start, x_end, dx, growth_rate, target_x):
         x_grid = [x_start, x_end]
         for direction in [-1, 1]:
@@ -375,83 +364,6 @@ class JICModel:
         if write:
             np.save(self.datadir / "Z_avg_profile.npy", self.Z_avg_profile)
             np.save(self.datadir / "Z_var_profile.npy", self.Z_var_profile)
-
-    def C_E_CHEM_avg_MIB(self, x):
-        C_avg = np.zeros_like(self.mdot_inj_unique)
-        E_CHEM_avg = np.zeros_like(self.mdot_inj_unique)
-        for i_m in range(len(self.mdot_inj_unique)):
-            if np.isnan(self.rho_inj_unique[i_m]):
-                C_avg[i_m] = self.physics.lookup_direct("PROG", 0.0, 0.0, 0.0)
-                E_CHEM_avg[i_m] = self.physics.lookup_direct("E_CHEM", 0.0, 0.0, 0.0)
-                continue
-
-            def integrand(z, y, i_m=i_m):
-                # Z = self.Z_3D_adjusted(x, y, z)[i_m]
-                Z = self.Z_3D_interp[i_m]((x, y, z))
-                return self.physics.lookup_direct("PROG", Z, 0.0, 1.0)
-
-            C_avg[i_m] = (
-                2.0
-                * integrate.dblquad(
-                    integrand, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + y * 0
-                )[0]
-                / (self.w * self.h)
-            )
-
-            def integrand(z, y, i_m=i_m):
-                # Z = self.Z_3D_adjusted(x, y, z)[i_m]
-                Z = self.Z_3D_interp[i_m]((x, y, z))
-                return self.physics.lookup_direct("E_CHEM", Z, 0.0, 1.0)
-
-            E_CHEM_avg[i_m] = (
-                2.0
-                * integrate.dblquad(
-                    integrand, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + y * 0
-                )[0]
-                / (self.w * self.h)
-            )
-        return C_avg, E_CHEM_avg
-
-    def calc_MIB_profile(self, write=False):
-        print("Computing MIB profile...")
-        self.C_profile = np.zeros([len(self.mdot_inj_unique), len(self.xc)])
-        self.E_CHEM_profile = np.zeros([len(self.mdot_inj_unique), len(self.xc)])
-
-        # Debugging way
-        C = self.physics.lookup_direct("PROG", self.Z_3D_data, 0.0, 1.0)
-        E_CHEM = self.physics.lookup_direct("E_CHEM", self.Z_3D_data, 0.0, 1.0)
-
-        C_profile = np.mean(C, axis=(2, 3))
-        E_CHEM_profile = np.mean(E_CHEM, axis=(2, 3))
-        self.C_profile = np.zeros([len(self.mdot_inj_unique), len(self.xc)])
-        self.E_CHEM_profile = np.zeros([len(self.mdot_inj_unique), len(self.xc)])
-        for i_m in range(len(self.mdot_inj_unique)):
-            self.C_profile[i_m] = np.interp(self.xc, self.x_3D_data, C_profile[i_m])
-            self.E_CHEM_profile[i_m] = np.interp(
-                self.xc, self.x_3D_data, E_CHEM_profile[i_m]
-            )
-
-        # # Real way
-        # for i in tqdm(range(len(self.x))):
-        #     if self.x[i] < self.x_inj:
-        #         # Assume no fuel in the domain
-        #         self.C_profile[:, i] = self.physics.lookup_direct('PROG', 0.0, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.physics.lookup_direct('E_CHEM', 0.0, 0.0, 0.0)
-        #     elif self.x[i] > self.x_noz:
-        #         # Freeze the profiles in the nozzle
-        #         self.C_profile[:, i] = self.C_profile[:, i-1]
-        #         self.E_CHEM_profile[:, i] = self.E_CHEM_profile[:, i-1]
-        #     elif self.x[i] < self.x_inj + 0.001:
-        #         # DEBUG: Assume nearly no mixing, so no burning
-        #         Z_avg = self.Z_avg_profile[:, i]
-        #         self.C_profile[:, i] = self.physics.lookup_direct('PROG', Z_avg, 0.0, 0.0)
-        #         self.E_CHEM_profile[:, i] = self.physics.lookup_direct('E_CHEM', Z_avg, 0.0, 0.0)
-        #     else:
-        #         self.C_profile[:,i], self.E_CHEM_profile[:, i] = self.C_E_CHEM_avg_MIB(self.x[i])
-
-        if write:
-            np.save(self.datadir / "C_profile_MIB.npy", self.C_profile)
-            np.save(self.datadir / "E_CHEM_profile_MIB.npy", self.E_CHEM_profile)
 
     def estimate_p_Z(self, x, Z):
         """
