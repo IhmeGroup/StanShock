@@ -29,8 +29,7 @@ class JICModel:
         x_noz: float,
         n_inj: int,
         d_inj: float,
-        t_inj: Array,
-        phi_inj: Array,
+        J: Array,
         rho_inj: Array,
         u_inj: Array,
         T_inj: Array,
@@ -47,6 +46,13 @@ class JICModel:
         """
         This method initializes the Jet-in-Crossflow model with the following
         parameters:
+
+        The model is tabulated over a range of momentum-flux ratios ``J``
+        (the throttle-agnostic table dimension) rather than a specific
+        schedule of mass flow rates. The runtime throttle schedule lives in the
+        :class:`~stanshock.models.jicf.source.FuelInjector`, which maps the
+        live throttle/inflow state onto this table via ``J``.
+
         x_inj: float
             The x-coordinate of the injection point
         x_noz: float
@@ -57,16 +63,16 @@ class JICModel:
             The diameter of the injected jet
         theta_inj: float
             The angle of the jet relative to the x axis (rads)
-        t_inj: np.ndarray
-            Time array for the injection profile
-        phi_inj: np.ndarray
-            Scheduled equivalence ratio of injected jet
+        J: np.ndarray
+            The grid of momentum-flux ratios to tabulate over. Sets the table
+            resolution and range; each entry corresponds to one injected-fluid
+            state ``(rho_inj[i], u_inj[i], T_inj[i])``.
         rho_inj: np.ndarray
-            The density of the injected jet, as a function of time
+            The density of the injected jet at each ``J`` grid point
         u_inj: np.ndarray
-            The velocity of the injected jet
+            The velocity of the injected jet at each ``J`` grid point
         T_inj: np.ndarray
-            The temperature of the injected jet
+            The temperature of the injected jet at each ``J`` grid point
         rho: float
             The density of the crossflow
         u: float
@@ -106,10 +112,6 @@ class JICModel:
         self.d_inj = d_inj
         self.theta_inj = theta_inj if theta_inj is not None else 0.0
 
-        self.rho_inj = rho_inj
-        self.u_inj = u_inj
-        self.T_inj = T_inj
-
         self.rho = rho
 
         self.alpha = alpha if alpha is not None else 1e6
@@ -136,13 +138,19 @@ class JICModel:
         self.M = self.u / self.c
         self.Y_ox = gas.Y
 
-        # Properties of the injected fluid
-        self.t_inj = t_inj
-        self.phi_inj = phi_inj
-        sol = ct.SolutionArray(gas, shape=self.t_inj.shape)
+        # Momentum-flux-ratio grid (the table dimension). Sort ascending and
+        # carry the per-grid injected-fluid state along so the tables and the
+        # RegularGridInterpolators built below share a monotone axis.
+        order = np.argsort(np.asarray(J, dtype=float))
+        self.J = np.asarray(J, dtype=float)[order]
+        self.rho_inj = np.asarray(rho_inj, dtype=float)[order]
+        self.u_inj = np.asarray(u_inj, dtype=float)[order]
+        self.T_inj = np.asarray(T_inj, dtype=float)[order]
+
+        # Properties of the injected fluid at each grid point
+        sol = ct.SolutionArray(gas, shape=self.J.shape)
         sol.TDX = self.T_inj, self.rho_inj, self.fuel_def
         self.p_inj = sol.P
-        self.E_inj = sol.int_energy_mass + 0.5 * self.u_inj**2
         self.W_inj = sol.mean_molecular_weight
         self.gamma_inj = sol.cp / sol.cv
         self.c_inj = sol.sound_speed
@@ -150,25 +158,6 @@ class JICModel:
         self.M_inj = 1.0
         self.mdot_inj = self.n_inj * self.rho_inj * self.u_inj * self.A_inj
         self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
-        self.mdot_inj_unique, self.mdot_inj_unique_idx = np.unique(
-            self.mdot_inj, return_index=True
-        )
-        self.mdot_inj_unique_idx = self.mdot_inj_unique_idx[
-            np.argsort(self.mdot_inj_unique)
-        ]
-
-        self.mdot_inj_unique = self.mdot_inj[self.mdot_inj_unique_idx]
-        self.rho_inj_unique = self.rho_inj[self.mdot_inj_unique_idx]
-        self.u_inj_unique = self.u_inj[self.mdot_inj_unique_idx]
-        self.p_inj_unique = self.p_inj[self.mdot_inj_unique_idx]
-
-        # Mass flow rate and equivalence ratio schedules
-        self.mdot_f_interp = interpolate.interp1d(
-            self.t_inj, self.mdot_inj, bounds_error=False, fill_value=0.0
-        )
-        self.phi_f_interp = interpolate.interp1d(
-            self.t_inj, self.phi_inj, bounds_error=False, fill_value=0.0
-        )
 
         # Set up the analytic JICF model
         self.analytic = AnalyticJICF(
@@ -177,16 +166,18 @@ class JICModel:
             h=self.h,
             n_inj=n_inj,
             d_inj=d_inj,
-            rho_inj=self.rho_inj_unique,
-            u_inj=self.u_inj_unique,
+            rho_inj=self.rho_inj,
+            u_inj=self.u_inj,
             rho=rho,
             u=u,
             physics=self.physics,
             theta_inj=theta_inj,
         )
 
-        # Precompute a 3D array of the mixture fraction and generate an interpolator
-        if self._h5_has("Z_3D/Z"):
+        # Precompute a 3D array of the mixture fraction and generate an interpolator.
+        # Only reuse a cached table if it was generated on the same J grid;
+        # otherwise it belongs to a different throttle range and is recomputed.
+        if self._h5_has("Z_3D/Z") and self._cached_J_matches("Z_3D"):
             with h5py.File(self.model_file, "r") as f:
                 group = f["Z_3D"]
                 self.x_3D_data = group["x"][:]
@@ -199,7 +190,7 @@ class JICModel:
 
         # Precompute the axial mean and variance profiles of Z, along with the
         # mesh they were generated on.
-        if self._h5_has("Z_profiles/Z_avg"):
+        if self._h5_has("Z_profiles/Z_avg") and self._cached_J_matches("Z_profiles"):
             with h5py.File(self.model_file, "r") as f:
                 group = f["Z_profiles"]
                 self.x_profile = group["x"][:]
@@ -208,19 +199,19 @@ class JICModel:
         else:
             self.calc_Z_avg_var_profiles(write=True)
 
-        # Map mdot -> Z mean/variance on the *generation* mesh (self.x_profile).
+        # Map J -> Z mean/variance on the *generation* mesh (self.x_profile).
         # Building the interpolators on the stored mesh rather than the current
         # simulation mesh decouples the profiles from the simulation grid, so the
         # model does not need to be regenerated when the mesh changes. Out-of-range
         # query points (e.g. ghost cells) are linearly extrapolated.
         self.Z_avg_profile_interp = interpolate.RegularGridInterpolator(
-            (self.mdot_inj_unique, self.x_profile),
+            (self.J, self.x_profile),
             self.Z_avg_profile,
             bounds_error=False,
             fill_value=None,
         )
         self.Z_var_profile_interp = interpolate.RegularGridInterpolator(
-            (self.mdot_inj_unique, self.x_profile),
+            (self.J, self.x_profile),
             self.Z_var_profile,
             bounds_error=False,
             fill_value=None,
@@ -246,6 +237,20 @@ class JICModel:
             return False
         with h5py.File(self.model_file, "r") as f:
             return key in f
+
+    def _cached_J_matches(self, group: str) -> bool:
+        """Return True if the cached group was generated on the current J grid.
+
+        Guards against silently reusing a table tabulated over a different
+        throttle range (momentum-flux-ratio grid).
+        """
+        if not self.model_file.exists():
+            return False
+        with h5py.File(self.model_file, "r") as f:
+            if group not in f or "J" not in f[group]:
+                return False
+            J_cached = f[group]["J"][:]
+        return J_cached.shape == self.J.shape and np.allclose(J_cached, self.J)
 
     def _h5_write(self, group: str, data: dict[str, Array]) -> None:
         """Write (overwriting if present) a group of named arrays to the model file."""
@@ -277,7 +282,7 @@ class JICModel:
             self.xc[0], self.xc[-1], dx, 1.1, self.x_inj
         )
         Nx = len(self.x_3D_data)
-        self.Z_3D_data = np.zeros([len(self.mdot_inj_unique), Nx, Ny, Nz])
+        self.Z_3D_data = np.zeros([len(self.J), Nx, Ny, Nz])
         for i in tqdm(range(Nx)):
             for j in range(Ny):
                 for k in range(Nz):
@@ -286,12 +291,13 @@ class JICModel:
                         self.y_3D_data[j],
                         self.z_3D_data[k],
                     )
-        self.Z_3D_data[np.isnan(self.rho_inj_unique)] = 0.0
+        self.Z_3D_data[np.isnan(self.rho_inj)] = 0.0
 
         if write:
             self._h5_write(
                 "Z_3D",
                 {
+                    "J": self.J,
                     "x": self.x_3D_data,
                     "y": self.y_3D_data,
                     "z": self.z_3D_data,
@@ -303,7 +309,7 @@ class JICModel:
 
     def _build_Z_3D_interp(self) -> None:
         self.Z_3D_interp = []
-        for i_m in range(len(self.mdot_inj_unique)):
+        for i_m in range(len(self.J)):
             interp = interpolate.RegularGridInterpolator(
                 (self.x_3D_data, self.y_3D_data, self.z_3D_data),
                 self.Z_3D_data[i_m],
@@ -312,17 +318,17 @@ class JICModel:
             self.Z_3D_interp.append(interp)
 
     def eval_Z_3D_interp(self, x, y, z):
-        Z_arr = np.zeros_like(self.mdot_inj_unique)
-        for i_m in range(len(self.mdot_inj_unique)):
+        Z_arr = np.zeros_like(self.J)
+        for i_m in range(len(self.J)):
             Z_arr[i_m] = self.Z_3D_interp[i_m]((x, y, z))
         return Z_arr
 
     def Z_avg_var(self, x):
-        Z_avg = np.zeros_like(self.mdot_inj_unique)
-        Z_var = np.zeros_like(self.mdot_inj_unique)
+        Z_avg = np.zeros_like(self.J)
+        Z_var = np.zeros_like(self.J)
         x_local = x - self.x_inj
-        for i_m in range(len(self.mdot_inj_unique)):
-            if np.isnan(self.rho_inj_unique[i_m]):
+        for i_m in range(len(self.J)):
+            if np.isnan(self.rho_inj[i_m]):
                 Z_avg[i_m] = 0.0
                 Z_var[i_m] = 0.0
                 continue
@@ -351,10 +357,10 @@ class JICModel:
         return Z_avg, Z_var
 
     def Z_avg_var_adjusted(self, x):
-        Z_avg = np.zeros_like(self.mdot_inj_unique)
-        Z_var = np.zeros_like(self.mdot_inj_unique)
-        for i_m in range(len(self.mdot_inj_unique)):
-            if np.isnan(self.rho_inj_unique[i_m]):
+        Z_avg = np.zeros_like(self.J)
+        Z_var = np.zeros_like(self.J)
+        for i_m in range(len(self.J)):
+            if np.isnan(self.rho_inj[i_m]):
                 Z_avg[i_m] = 0.0
                 Z_var[i_m] = 0.0
                 continue
@@ -389,9 +395,9 @@ class JICModel:
         # Record the mesh the profiles are generated on so the interpolators can
         # be rebuilt independently of the simulation mesh.
         self.x_profile = np.asarray(self.xc, dtype=float)
-        n_mdot = len(self.mdot_inj_unique)
-        self.Z_avg_profile = np.zeros([n_mdot, len(self.x_profile)])
-        self.Z_var_profile = np.zeros([n_mdot, len(self.x_profile)])
+        n_J = len(self.J)
+        self.Z_avg_profile = np.zeros([n_J, len(self.x_profile)])
+        self.Z_var_profile = np.zeros([n_J, len(self.x_profile)])
         for i in tqdm(range(len(self.x_profile))):
             if self.x_profile[i] > self.x_noz:
                 # Freeze the profiles in the nozzle
@@ -406,6 +412,7 @@ class JICModel:
             self._h5_write(
                 "Z_profiles",
                 {
+                    "J": self.J,
                     "x": self.x_profile,
                     "Z_avg": self.Z_avg_profile,
                     "Z_var": self.Z_var_profile,

@@ -4,7 +4,7 @@ import numpy as np
 
 from stanshock.models.area_change import AreaChange
 from stanshock.models.boundary_layer import BoundaryLayer
-from stanshock.models.jicf import FuelInjector, JICFChemistrySource, JICModel
+from stanshock.models.jicf import FuelInjector, JICFChemistrySource
 from stanshock.models.pseudoshock import Pseudoshock
 from stanshock.models.wall_models import HeatFlux, SkinFriction
 from stanshock.numerics.boundary_conditions import (
@@ -69,7 +69,7 @@ class Combustor:
         source_terms: RightHandSide
         | list[RightHandSide]
         | None = None,  # Catch-all source term(s)
-        injector: list[JICModel] | JICModel | None = None,  # injector model
+        injector: list[FuelInjector] | FuelInjector | None = None,  # injector model(s)
         flux_function: RiemannSolver = hllc_flux_vectorized,
         inviscid_face_extrapolator: type[FaceExtrapolator] = FifthOrderWeno,
         viscous_face_extrapolator: type[FaceExtrapolator] = FirstOrder,
@@ -98,16 +98,9 @@ class Combustor:
         if injector is None:
             self.injectors: list[FuelInjector] = []
         elif isinstance(injector, list):
-            self.injectors = [
-                FuelInjector(inj, geometry=inj.geometry, physics=inj.physics)
-                for inj in injector
-            ]
+            self.injectors = injector
         else:
-            self.injectors = [
-                FuelInjector(
-                    injector, geometry=injector.geometry, physics=injector.physics
-                )
-            ]
+            self.injectors = [injector]
         self.optimization_iteration = optimization_iteration
         self.physics: FluidPhysics = physics
         self.initialization: Initialization = initialization
