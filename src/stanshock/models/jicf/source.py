@@ -206,16 +206,21 @@ class JICFChemistrySource(RightHandSide):
             np.flip(self.injector.fluid_tips, axis=0)[:, 2],
         )
         Zvar = self.injector.jicf.Z_var_profile_interp((J_inj, self.injector.xc))
-        Zvar = np.maximum(Zvar, 10 ** self.injector.jicf.logsigma2_vec.min())
+
+        # The progress-variable source term is a standalone FPVgen-format table
+        # keyed on (mixture-fraction mean, log10 variance, normalized progress
+        # variable). Clamp log10(variance) to the tabulated range to avoid
+        # extrapolating the variance axis.
+        src_table = self.injector.jicf.src_table
+        log_Zvar = np.clip(np.log10(Zvar), src_table.Q.min(), src_table.Q.max())
 
         return (
             factor
             * state.density
-            * self.injector.jicf.omega_C_int_interp(
-                (
-                    state.mixture_fraction,
-                    state.normalized_progress_variable,
-                    np.log10(Zvar),
-                )
+            * src_table.lookup_direct(
+                "SRC_PROG",
+                state.mixture_fraction,
+                log_Zvar,
+                state.normalized_progress_variable,
             )
         )

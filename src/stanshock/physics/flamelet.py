@@ -367,3 +367,75 @@ class FPVTable(FluidPhysics):
             T0 = self.lookup("T0", state)
             factor *= np.exp(-TA * ((1 / state.temperature) - (1 / T0)))
         return factor
+
+
+class FPVSourceTable:
+    """A tabulated source term stored in the FPVgen HDF5 table format.
+
+    This is a lightweight, thermodynamics-free counterpart to :class:`FPVTable`
+    used to persist and reuse precomputed source terms (e.g. the JICF
+    progress-variable reaction rate convolved over presumed beta-PDFs). It reads
+    and writes the same ``(Z, Q, L)`` coordinate / ``Data`` layout as
+    :class:`FPVTable` and exposes name-based lookups, but carries only the
+    tabulated variables -- not the full flamelet thermodynamic machinery.
+    """
+
+    def __init__(self, filename: Path | str) -> None:
+        with h5py.File(filename, "r") as f:
+            self.P: float = f["Header"]["Doubles"]["Double_0"].attrs["Value"][0]
+            self.Z: Array = f["Coordinates"]["Coor_0"][:]
+            self.Q: Array = f["Coordinates"]["Coor_1"][:]
+            self.L: Array = f["Coordinates"]["Coor_2"][:]
+
+            var_names: list[str] = [
+                var.decode("utf-8") for var in f["Header"]["Variable Names"][:]
+            ]
+            data_raw: Array = f["Data"][:]
+            n_tot = self.Z.size * self.Q.size * self.L.size
+            self.variables: dict[str, TableVariable] = {}
+            for i, var in enumerate(var_names):
+                data = data_raw[i * n_tot : (i + 1) * n_tot].reshape(
+                    self.Z.size, self.Q.size, self.L.size, order="C"
+                )
+                self.variables[var] = TableVariable(var, data, self.Z, self.Q, self.L)
+
+    def lookup_direct(
+        self, var: str, Z: Array | float, Q: Array | float, L: Array | float
+    ) -> Array:
+        """Look up a tabulated variable at the given ``(Z, Q, L)`` coordinates."""
+        if var not in self.variables:
+            msg = f"Variable {var} not found in source table."
+            raise ValueError(msg)
+        return self.variables[var].lookup(Z, Q, L)
+
+    @staticmethod
+    def write(
+        filename: Path | str,
+        P: float,
+        Z: Array,
+        Q: Array,
+        L: Array,
+        variables: dict[str, Array],
+    ) -> None:
+        """Write a source table to ``filename`` in the FPVgen HDF5 table format.
+
+        ``variables`` maps each variable name to a ``(Z, Q, L)``-shaped array.
+        """
+        names = list(variables)
+        data_flat = np.concatenate(
+            [np.asarray(variables[n], dtype=float).reshape(-1, order="C") for n in names]
+        )
+        with h5py.File(filename, "w") as f:
+            header = f.create_group("Header")
+            doubles = header.create_group("Doubles")
+            double_0 = doubles.create_dataset("Double_0", data=np.array([P], dtype=float))
+            double_0.attrs["Value"] = np.array([P], dtype=float)
+            header.create_dataset(
+                "Variable Names",
+                data=np.array([n.encode("utf-8") for n in names]),
+            )
+            coords = f.create_group("Coordinates")
+            coords.create_dataset("Coor_0", data=np.asarray(Z, dtype=float))
+            coords.create_dataset("Coor_1", data=np.asarray(Q, dtype=float))
+            coords.create_dataset("Coor_2", data=np.asarray(L, dtype=float))
+            f.create_dataset("Data", data=data_flat)

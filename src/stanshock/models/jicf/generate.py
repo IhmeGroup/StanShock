@@ -13,7 +13,7 @@ from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
 
 from stanshock.models.jicf.profile import AnalyticJICF
-from stanshock.physics.flamelet import FPVTable
+from stanshock.physics.flamelet import FPVSourceTable, FPVTable
 from stanshock.system.backend import Array
 from stanshock.system.geometry import Box
 
@@ -217,17 +217,14 @@ class JICModel:
             fill_value=None,
         )
 
-        # Precompute and tabulate chemical source terms
-        if self._h5_has("chemical_sources/omega_C_int"):
-            with h5py.File(self.model_file, "r") as f:
-                group = f["chemical_sources"]
-                self.Zbar_vec = group["Zbar"][:]
-                self.Lbar_vec = group["Lbar"][:]
-                self.logsigma2_vec = group["logsigma2"][:]
-                self.omega_C_int = group["omega_C_int"][:]
-            self.omega_C_int_interp = interpolate.RegularGridInterpolator(
-                (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
-            )
+        # Precompute and tabulate the progress-variable chemical source term as a
+        # standalone FPVgen-format table (axes Z = mixture-fraction mean,
+        # Q = log10 mixture-fraction variance, L = normalized progress variable).
+        # It is independent of the throttle/J grid, so it is reused as-is if a
+        # cached file is present.
+        self.src_table_file = self.model_file.with_name("jicf_src_table.h5")
+        if self.src_table_file.exists():
+            self.src_table = FPVSourceTable(self.src_table_file)
         else:
             self.calc_chemical_sources(write=True)
 
@@ -483,7 +480,11 @@ class JICModel:
 
     def calc_chemical_sources(self, write=False):
         """
-        This method precomputes the chemical source terms as a function of x, mdot_f, and L.
+        Precompute the progress-variable source term, convolved over presumed
+        beta-PDFs in mixture fraction and progress variable, as a function of the
+        mixture-fraction mean, the normalized progress-variable mean, and the
+        (log10) mixture-fraction variance. The result is persisted as a
+        standalone FPVgen-format :class:`FPVSourceTable`.
         """
         print("Precomputing chemical sources...")
 
@@ -537,17 +538,18 @@ class JICModel:
         self.omega_C_int[np.isnan(self.omega_C_int)] = 0.0
 
         if write:
-            self._h5_write(
-                "chemical_sources",
-                {
-                    "Zbar": self.Zbar_vec,
-                    "Lbar": self.Lbar_vec,
-                    "logsigma2": self.logsigma2_vec,
-                    "omega_C_int": self.omega_C_int,
-                },
+            # Persist as an FPVgen-format source table with the mixture-fraction
+            # variance on the middle (Q) axis: transpose the tabulated array from
+            # (Zbar, Lbar, logsigma2) to (Zbar, logsigma2, Lbar).
+            src_prog = np.transpose(self.omega_C_int, (0, 2, 1))
+            FPVSourceTable.write(
+                self.src_table_file,
+                P=float(self.p),
+                Z=self.Zbar_vec,
+                Q=self.logsigma2_vec,
+                L=self.Lbar_vec,
+                variables={"SRC_PROG": src_prog},
             )
 
-        # Build 3D table interpolator
-        self.omega_C_int_interp = interpolate.RegularGridInterpolator(
-            (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
-        )
+        # Load the persisted table for source-term lookups
+        self.src_table = FPVSourceTable(self.src_table_file)
