@@ -173,7 +173,7 @@ class TimeIntegrationCase:
 
         if self.analytical_function is None:
             ode_result = solve_ivp(
-                fun=rhs.source,
+                fun=rhs.source_full,
                 t_span=self.t_span,
                 y0=self.y_init,
                 t_eval=t_eval,
