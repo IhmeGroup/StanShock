@@ -353,7 +353,10 @@ class CombinedSource(RightHandSide):
         super().__init__(**precompute_steps)
 
         # Don't modify the shapes, as the sources will handle that internally
-        self.shape_full = max(source.shape_full for source in self.sources)
+        self.shape_full = (
+            max(source.shape_full[0] for source in self.sources),
+            max(source.shape_full[1] for source in self.sources),
+        )
         self.shape_input = self.shape_output = self.shape_full
         self.idx_input = self.idx_output = np.s_[:]
 
@@ -364,21 +367,22 @@ class CombinedSource(RightHandSide):
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
-        rhs: Array = np.zeros_like(state_array_local)
-
-        state_array_local, state, face_states, avg_face_states, face_gradients = (
+        state_array_temp, state, face_states, avg_face_states, face_gradients = (
             self.precompute_for_source(time, state_array_local, gamma_star, e0_star)
         )
+        state_array_temp = np.reshape(state_array_temp, self.shape_input)
+        rhs: Array = np.zeros_like(state_array_temp)
 
         for source in self.sources:
+            rhs_flat = np.ravel(rhs[source.idx_input])
             dydt = source.source_implementation(
                 time=time,
-                state_array_local=state_array_local,
-                state=state,
+                state_array_local=state_array_temp[source.idx_input],
+                state=state[source.idx_input] if state is not None else state,
                 face_states=face_states,
                 avg_face_states=avg_face_states,
                 face_gradients=face_gradients,
             )
-            rhs = source.add_source(rhs, dydt)
+            rhs_flat[:] = source.add_source(rhs_flat, dydt)
 
-        return rhs
+        return np.ravel(rhs)
