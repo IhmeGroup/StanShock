@@ -115,11 +115,18 @@ class JICFChemistrySource(RightHandSide):
         self, injector: FuelInjector, **precompute_steps: Unpack[PrecomputeSteps]
     ) -> None:
         super().__init__(**precompute_steps)
+        assert self.geometry is not None
         self.injector = injector
+        xc = self.geometry.xc
+        idx_inj = np.nonzero(xc > self.injector.jicf.x_inj)[0][0] - 1
+        idx_noz = np.nonzero(xc > self.injector.jicf.x_noz)[0][0] + 1
+        self.idx_input = slice(idx_inj, idx_noz)
+        self.xc = xc[self.idx_input]
 
         # Reactions only directly affect progress variable
         self.idx_source = np.array([4])
-        self.shape_output = (self.shape_output[0], 1)
+        self.shape_input = (idx_noz - idx_inj, -1)
+        self.shape_output = (idx_noz - idx_inj, 1)
 
     def source_implementation(
         self,
@@ -144,8 +151,9 @@ class JICFChemistrySource(RightHandSide):
             np.flip(self.injector.fluid_tips, axis=0)[:, 0],
             np.flip(self.injector.fluid_tips, axis=0)[:, 1],
             k=1,
-        )(self.injector.xc)
-        Zvar = self.injector.jicf.Z_var_profile_interp((mdot_inj, self.injector.xc))
+        )(self.xc)
+
+        Zvar = self.injector.jicf.Z_var_profile_interp((self.xc, mdot_inj))
         Zvar = np.maximum(Zvar, 10 ** self.injector.jicf.logsigma2_vec.min())
 
         return (

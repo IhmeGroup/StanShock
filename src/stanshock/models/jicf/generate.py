@@ -8,7 +8,8 @@ import cantera as ct
 import h5py
 import numpy as np
 from joblib import Parallel, delayed
-from scipy import integrate, special, stats
+from scipy import special, stats
+from scipy.integrate import cubature
 from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 from tqdm import tqdm
 from tqdm_joblib import tqdm_joblib
@@ -288,17 +289,15 @@ class JICModel:
         self.x_3D_data = self.__stretched_grid(
             self.xc[0], self.xc[-1], dx, 1.1, self.x_inj
         )
-        Nx = len(self.x_3D_data)
-        self.Z_3D_data = np.zeros([len(self.mdot_inj_unique), Nx, Ny, Nz])
-        for i in tqdm(range(Nx)):
-            for j in range(Ny):
-                for k in range(Nz):
-                    self.Z_3D_data[:, i, j, k] = self.analytic.Z_3D_adjusted(
-                        self.x_3D_data[i] - self.x_inj,
-                        self.y_3D_data[j],
-                        self.z_3D_data[k],
-                    )
-        self.Z_3D_data[np.isnan(self.rho_inj_unique)] = 0.0
+        self.analytic.i_m = slice(None)
+        self.Z_3D_data = self.analytic.Z_3D_adjusted(
+            self.x_3D_data[:, None, None] - self.x_inj,
+            self.y_3D_data[None, :, None],
+            self.z_3D_data[None, None, :],
+        )
+        self.Z_3D_data[..., np.isnan(self.rho_inj_unique)] = 0.0
+        self.Z_3D_data[..., self.u_inj_unique == 0.0] = 0.0
+        self.Z_3D_data[np.isnan(self.Z_3D_data)] = 0.0
 
         if write:
             self._h5_write(
@@ -318,85 +317,106 @@ class JICModel:
         for i_m in range(len(self.mdot_inj_unique)):
             interp = RegularGridInterpolator(
                 (self.x_3D_data, self.y_3D_data, self.z_3D_data),
-                self.Z_3D_data[i_m],
+                self.Z_3D_data[..., i_m],
                 method="cubic",
             )
             self.Z_3D_interp.append(interp)
 
-    def eval_Z_3D_interp(self, x: Array, y: Array, z: Array) -> Array:
-        Z_arr = np.zeros_like(self.mdot_inj_unique)
-        for i_m in range(len(self.mdot_inj_unique)):
-            Z_arr[i_m] = self.Z_3D_interp[i_m]((x, y, z))
-        return Z_arr
+    def _mu_Z(self, yz: Array, x: Array) -> Array:
+        """Vectorized evaluation of mixture fraction over set of y + z points.
+
+        Returns flattened Z array for all [nyz * nx * nm] points.
+        """
+        y: Array
+        z: Array
+        y, z = yz[:, 0, None], yz[:, 1, None]
+        return np.reshape(self.analytic.Z_3D_adjusted(x, y, z), (y.shape[0], -1))
+
+    def _sigma_Z(self, yz: Array, x: Array, Z_avg: Array) -> Array:
+        """Vectorized evaluation of mixture fraction variance over set of y + z points.
+
+        Returns flattened Z variance array for all [nyz * nx * nm] points.
+        """
+        Z = self._mu_Z(yz, x)
+        return (Z - np.reshape(Z_avg, (1, -1))) ** 2
 
     def Z_avg_var(self, x: Array) -> tuple[Array, Array]:
-        Z_avg = np.zeros_like(self.mdot_inj)
-        Z_var = np.zeros_like(self.mdot_inj)
-        for i_m in range(len(self.mdot_inj)):
-            if np.isnan(self.rho_inj[i_m]):
-                Z_avg[i_m] = 0.0
-                Z_var[i_m] = 0.0
-                continue
+        """Compute the mean and variance of the mixture fraction profiles at given axial locations.
 
-            def mu_Z(z: Array, y: Array, i_m: int = i_m) -> Array:
-                return self.analytic.Z_3D(x, y, z)[i_m]
+        Returns axial mean and variance profiles for all mass flow rates.
+        """
+        res = cubature(
+            self._mu_Z,
+            a=[0.0, 0.0],
+            b=[self.h, 0.5 * self.w],
+            args=(x,),
+            # workers=-1,
+        )
+        Z_avg = (
+            2.0
+            * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
+            / self.A
+        )
 
-            Z_avg[i_m] = (
-                2.0
-                * integrate.dblquad(
-                    mu_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
-                )[0]
-                / (self.w * self.h)
-            )
+        res = cubature(
+            self._sigma_Z,
+            a=[0.0, 0.0],
+            b=[self.h, 0.5 * self.w],
+            args=(x, Z_avg),
+            # workers=-1,
+        )
+        Z_var = (
+            2.0
+            * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
+            / self.A
+        )
 
-            def sigma_Z(
-                z: Array, y: Array, i_m: int = i_m, Z_avg: Array = Z_avg
-            ) -> Array:
-                return (self.analytic.Z_3D(x, y, z)[i_m] - Z_avg[i_m]) ** 2
-
-            Z_var[i_m] = (
-                2.0
-                * integrate.dblquad(
-                    sigma_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
-                )[0]
-                / (self.w * self.h)
-            )
         return Z_avg, Z_var
 
+    def _mu_Z_adjusted(self, yz: Array, x: Array, i_m: int) -> Array:
+        """Vectorized evaluation of mixture fraction over set of y + z points.
+
+        Returns flattened Z array for all [nyz * nx * nm] points.
+        """
+        y: Array
+        z: Array
+        y, z = yz[:, 0, None], yz[:, 1, None]
+        return np.reshape(self.Z_3D_interp[i_m]((x, y, z)), (y.shape[0], -1))
+
+    def _sigma_Z_adjusted(self, yz: Array, x: Array, Z_avg: Array, i_m: int) -> Array:
+        """Vectorized evaluation of mixture fraction variance over set of y + z points.
+
+        Returns flattened Z variance array for all [nyz * nx * nm] points.
+        """
+        Z = self._mu_Z_adjusted(yz, x, i_m)
+        return (Z - np.reshape(Z_avg, (1, -1))) ** 2
+
     def Z_avg_var_adjusted(self, x: Array) -> tuple[Array, Array]:
-        Z_avg = np.zeros_like(self.mdot_inj_unique)
-        Z_var = np.zeros_like(self.mdot_inj_unique)
+        """Compute the mean and variance of the mixture fraction profiles at given axial locations.
+
+        Returns axial mean and variance profiles for all mass flow rates.
+        """
+        Z_avg = np.zeros((*x.shape, len(self.mdot_inj_unique)))
+        Z_var = np.zeros((*x.shape, len(self.mdot_inj_unique)))
         for i_m in range(len(self.mdot_inj_unique)):
-            if np.isnan(self.rho_inj_unique[i_m]):
-                Z_avg[i_m] = 0.0
-                Z_var[i_m] = 0.0
-                continue
-
-            # func = lambda z, y: self.Z_3D_adjusted(x, y, z)[i_m]
-            def mu_Z(z: Array, y: Array, i_m: int = i_m) -> Array:
-                return self.Z_3D_interp[i_m]((x, y, z))
-
-            Z_avg[i_m] = (
-                2.0
-                * integrate.dblquad(
-                    mu_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
-                )[0]
-                / (self.w * self.h)
+            res = cubature(
+                self._mu_Z_adjusted,
+                a=[0.0, 0.0],
+                b=[self.h, 0.5 * self.w],
+                args=(x, i_m),
+                # workers=-1,
             )
+            Z_avg[..., i_m] = 2.0 * res.estimate / self.A
 
-            # func = lambda z, y: (self.Z_3D_adjusted(x, y, z)[i_m] - Z_avg[i_m])**2
-            def sigma_Z(
-                z: Array, y: Array, i_m: int = i_m, Z_avg: Array = Z_avg
-            ) -> Array:
-                return (self.Z_3D_interp[i_m]((x, y, z)) - Z_avg[i_m]) ** 2
-
-            Z_var[i_m] = (
-                2.0
-                * integrate.dblquad(
-                    sigma_Z, 0, self.h, lambda y: 0 * y, lambda y: self.w / 2 + 0 * y
-                )[0]
-                / (self.w * self.h)
+            res = cubature(
+                self._sigma_Z_adjusted,
+                a=[0.0, 0.0],
+                b=[self.h, 0.5 * self.w],
+                args=(x, Z_avg[..., i_m], i_m),
+                # workers=-1,
             )
+            Z_var[..., i_m] = 2.0 * res.estimate / self.A
+
         return Z_avg, Z_var
 
     def calc_Z_avg_var_profiles(self, write: bool = False) -> None:
@@ -408,18 +428,19 @@ class JICModel:
         self.x_profile = (
             self.x_3D_data if self._x_profile_input is None else self._x_profile_input
         )
-        n_mdot = len(self.mdot_inj_unique)
-        self.Z_avg_profile = np.zeros([n_mdot, len(self.x_profile)])
-        self.Z_var_profile = np.zeros([n_mdot, len(self.x_profile)])
-        for i in tqdm(range(len(self.x_profile))):
-            if self.x_profile[i] > self.x_noz:
-                # Freeze the profiles in the nozzle
-                self.Z_avg_profile[:, i] = self.Z_avg_profile[:, i - 1]
-                self.Z_var_profile[:, i] = self.Z_var_profile[:, i - 1]
-            else:
-                self.Z_avg_profile[:, i], self.Z_var_profile[:, i] = (
-                    self.Z_avg_var_adjusted(self.x_profile[i])
-                )
+
+        # Compute profiles between injector and nozzle
+        idx = np.logical_and(self.x_profile > self.x_inj, self.x_profile < self.x_noz)
+        self.Z_avg_profile[:, idx], self.Z_var_profile[:, idx] = (
+            # self.Z_avg_var_adjusted(self.xc[idx])
+            self.Z_avg_var(self.x_profile[idx])
+        )
+
+        # Freeze profiles downstream of the nozzle
+        ifreeze = len(idx) - 1 - np.argmax(idx[::-1])
+        idx = self.x_profile >= self.x_noz
+        self.Z_avg_profile[:, idx] = self.Z_avg_profile[:, ifreeze]
+        self.Z_var_profile[:, idx] = self.Z_var_profile[:, ifreeze]
 
         if write:
             self._h5_write(
