@@ -17,23 +17,22 @@ from inlet_moc.shock_fxns import obl_shock_angle
 ###############################################################################
 
 
-
 ###### GEOMETRY #####
 # (all units m and rad) #
 
-Liso_Hth = 12.7 #isolator/throat ratio
-Lc_Hth = 6.25   #cowl/throat ratio
-H_th = 0.01016  #throat height
+Liso_Hth = 12.7  # isolator/throat ratio
+Lc_Hth = 6.25  # cowl/throat ratio
+H_th = 0.01016  # throat height
 
 # CENTERBODY #
-L_rp = 0.248158 #m
-H_rp = 0.048237 #m
+L_rp = 0.248158  # m
+H_rp = 0.048237  # m
 tan_theta_rp = H_rp / L_rp
 theta_rp = np.arctan(tan_theta_rp)
 
 L_iso = Liso_Hth * H_th
 
-x_final = 1.0 # (L_rp + L_iso normally.)
+x_final = 1.0  # (L_rp + L_iso normally.)
 
 # COWL #
 theta_c = np.radians(2.2)
@@ -41,7 +40,7 @@ L_c = Lc_Hth * H_th  # m
 dy_c = L_c * np.sin(theta_c)
 dx_c = L_c * np.cos(theta_c)
 
-x_cle = L_rp - dx_c #cowl leading edge
+x_cle = L_rp - dx_c  # cowl leading edge
 y_cle = (H_th + H_rp) - dy_c
 
 x_cent = [0.0, L_rp, x_final]
@@ -54,14 +53,18 @@ centerbody = np.column_stack((x_cent, y_cent))
 cowl = np.column_stack((x_cowl, y_cowl))
 
 
-
 def H_cap(tan_beta):
     return (
-    H_rp - dy_c + H_th + ((tan_theta_rp * tan_beta) / (tan_theta_rp - tan_beta))
-    *
-    (L_rp * (1 - (tan_theta_rp / tan_beta)) + L_c * (np.sin(theta_c) / tan_beta - np.cos(theta_c))
-     -H_th / tan_beta)
-)
+        H_rp
+        - dy_c
+        + H_th
+        + ((tan_theta_rp * tan_beta) / (tan_theta_rp - tan_beta))
+        * (
+            L_rp * (1 - (tan_theta_rp / tan_beta))
+            + L_c * (np.sin(theta_c) / tan_beta - np.cos(theta_c))
+            - H_th / tan_beta
+        )
+    )
 
 
 def streamtube_fxn(
@@ -78,11 +81,13 @@ def streamtube_fxn(
     x_cowl_st = np.insert(x_cowl, 0, [0.0, x_si])
     y_cowl_st = np.insert(y_cowl, 0, [H_cap_st, H_cap_st])
 
-    lower = np.column_stack((
-        x_cowl_st,
-        np.interp(x_cowl_st, x_cent, y_cent),
-        np.zeros_like(x_cowl_st),
-    ))
+    lower = np.column_stack(
+        (
+            x_cowl_st,
+            np.interp(x_cowl_st, x_cent, y_cent),
+            np.zeros_like(x_cowl_st),
+        )
+    )
     cowl_st = np.column_stack((x_cowl_st, y_cowl_st, np.zeros_like(x_cowl_st)))
     return cowl_st, lower
 
@@ -96,10 +101,11 @@ inlet = PlanarInlet(centerbody, cowl)
 
 Mach = 4.03
 theta = 0.0
-T_amb = 70.0 
+T_amb = 70.0
 p_amb = 8290.0
 N_idl = 100
 x_stop = 0.35
+
 
 def build_solution(
     N_idl_in: int = N_idl,
@@ -132,14 +138,13 @@ def main() -> None:
     print(f"[main] eta_inlet={result.eta_inlet:.6g}")
     print(f"[main] p0_loss={result.p0_loss:.6g}")
 
-    
     numerical_bounds = get_streamtube_bounds(soln)
     x_num, _, y_cowl_num = numerical_bounds
     cowl_st_a, _ = streamtube_fxn(Mach, soln.gamma, np.radians(theta))
 
     fig, ax = inlet.plot_inlet()
-    ax.plot(cowl_st_a[:, 0], cowl_st_a[:, 1], c='r', ls="--", label="Analytical")
-    ax.plot(x_num, y_cowl_num, c='b', label="Numerical")
+    ax.plot(cowl_st_a[:, 0], cowl_st_a[:, 1], c="r", ls="--", label="Analytical")
+    ax.plot(x_num, y_cowl_num, c="b", label="Numerical")
 
     ax.set_xlim(0.0, 0.25)
     ax.set_ylim(0.0, 0.06)

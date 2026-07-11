@@ -37,8 +37,9 @@ class CharNet:
         self.v = np.full_like(self.x, np.nan)
         self.active = np.zeros((self.N, self.N), dtype=bool)
 
-        self.point_type = np.full_like(self.x, np.nan)  # 0 if field, 1 wall, 2 fluid boundary (shock or IDL)
-
+        self.point_type = np.full_like(
+            self.x, np.nan
+        )  # 0 if field, 1 wall, 2 fluid boundary (shock or IDL)
 
         self.wall = None
         self.idl_kind = None
@@ -109,7 +110,6 @@ class CharNet:
     def is_Cplus(self):
         return self.idl_kind == "cplus"
 
-
     def _resolve_wall_pair(self):
         if self.is_vertical:
             msg = "Vertical-IDL nets do not use a single marching wall pair."
@@ -126,14 +126,6 @@ class CharNet:
             msg = "Could not determine the current wall anchor point for this net."
             raise RuntimeError(msg)
         return self.wall, get_opposite_wall(xy_wall, self.inlet)
-
-
-
-        
-        
-
-
-
 
     def build_cminus_char(
         self,
@@ -218,7 +210,7 @@ class CharNet:
                 "Vertical-IDL nets do not support ordinary C+ characteristic marching."
             )
             raise ValueError(msg)
-        
+
         j_left = fixed_i
         if not self.has_point(fixed_i - 1, j_left):
             return False
@@ -378,13 +370,11 @@ class CharNet:
         ij = np.column_stack((rows, cols))
         xy = np.column_stack((self.x[rows, cols], self.y[rows, cols]))
         return ij, xy
-    
+
     def get_active_points(self) -> np.ndarray:
         """Return active finite-state points as an ``(N, 4)`` [x, y, u, v] array."""
         mask = self.state_mask()
         return np.column_stack((self.x[mask], self.y[mask], self.u[mask], self.v[mask]))
-
-
 
     def has_point(self, i: int, j: int) -> bool:
         if (i < 0) or (j < 0) or (i >= self.N) or (j >= self.N):
@@ -395,10 +385,8 @@ class CharNet:
         self.active[rows, cols] = False
         self.point_type[rows, cols] = np.nan
 
-
     def get_point(self, i: int, j: int):
         return np.array([self.x[i, j], self.y[i, j], self.u[i, j], self.v[i, j]])
-
 
     @staticmethod
     def _merge_point_type(existing_type: float, new_type: int) -> int:
@@ -421,5 +409,7 @@ class CharNet:
         self.u[i, j] = data[2]
         self.v[i, j] = data[3]
         self.active[i, j] = bool(np.all(np.isfinite(data[:2])))
-        self.point_type[i, j] = self._merge_point_type(self.point_type[i, j], point_type)
+        self.point_type[i, j] = self._merge_point_type(
+            self.point_type[i, j], point_type
+        )
         return self

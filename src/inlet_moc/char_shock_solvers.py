@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
-import math
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -36,16 +36,15 @@ class InsufficientCharPtsLError(ValueError):
 
 @dataclass(frozen=True)
 class ShockPoint:
-    pt_pre: np.ndarray      #Pre-shock state. (4,) [x, y, u, v]
-    pt_post: np.ndarray     #Post-shock state.
-    delta: float            #Deflection angle (rad)
-    beta: float             #Shock angle (rad)
+    pt_pre: np.ndarray  # Pre-shock state. (4,) [x, y, u, v]
+    pt_post: np.ndarray  # Post-shock state.
+    delta: float  # Deflection angle (rad)
+    beta: float  # Shock angle (rad)
     reg_pre: RegionState
     reg_post: RegionState
 
     def get_shock_tang(self):
         return get_tang(self.pt_pre[:2], np.tan(self.beta))
-
 
 
 def verify_field_soln(
@@ -94,10 +93,7 @@ def point_thru_shock(pt: np.ndarray, region: RegionState, delta: float, normal: 
     v = pt[3]
     M, theta, _, _ = region.get_static_props(u, v)
     if not math.isfinite(M) or (M <= 1.0):
-        msg = (
-            "Subsonic flow encountered upstream of shock solve: "
-            f"M={M:.6g}."
-        )
+        msg = f"Subsonic flow encountered upstream of shock solve: M={M:.6g}."
         raise SubsonicFlowError(msg)
     beta, M_out, p02p01 = sfx.obl_shock_post_state(
         M,
@@ -145,41 +141,31 @@ def shock_origin(
     if abs(delta) < tol:
         return None
     try:
-        pt_post, reg_post, beta = point_thru_shock(
-            pt_pre, reg_pre, delta, n_wall
-        )
+        pt_post, reg_post, beta = point_thru_shock(pt_pre, reg_pre, delta, n_wall)
     except SubsonicFlowError as err:
-        msg = (
-            "Detached shock not implemented yet. No attached oblique shock soln here."
-        )
+        msg = "Detached shock not implemented yet. No attached oblique shock soln here."
         raise DetachedShockError(msg) from err
 
-    return ShockPoint(pt_pre,
-                            pt_post,
-                            delta,
-                            beta,
-                            reg_pre,
-                            reg_post)
+    return ShockPoint(pt_pre, pt_post, delta, beta, reg_pre, reg_post)
 
 
 def shock_field(
     pt_prior: ShockPoint,
     family: str,
-    char_pts_L: np.ndarray, #requires the most care. (4,N) np array from prior net
+    char_pts_L: np.ndarray,  # requires the most care. (4,N) np array from prior net
     idx_L,
-    char_pts_R: np.ndarray, #this is intended to replace the single mesh_pt. 
+    char_pts_R: np.ndarray,  # this is intended to replace the single mesh_pt.
     idx_R,
     a_fxn: Callable,
     n_wall,
     max_iters=5,
     tol=1e-6,
 ):
-
     xy_tol = 10 * tol
-    reg_pre = pt_prior.reg_pre #upstream region
+    reg_pre = pt_prior.reg_pre  # upstream region
 
-    pt_s_pre= pt_prior.pt_pre #pre-shock state at prior iter (in marching loop)
-    pt_s_post = pt_prior.pt_post #post-shock state at prior iter
+    pt_s_pre = pt_prior.pt_pre  # pre-shock state at prior iter (in marching loop)
+    pt_s_post = pt_prior.pt_post  # post-shock state at prior iter
 
     delta_i = pt_prior.delta
     beta_i = pt_prior.beta
@@ -199,10 +185,11 @@ def shock_field(
 
         for _ in range(iter_limit):
             # Find intersection of prior shock point and LHS char points
-            eqn_shock = get_tang(pt_s_pre, np.tan(beta_iter)) #this can stay
-            hit = intersect_line_polyline(eqn_shock, char_pts_L, tol/10)
+            eqn_shock = get_tang(pt_s_pre, np.tan(beta_iter))  # this can stay
+            hit = intersect_line_polyline(eqn_shock, char_pts_L, tol / 10)
             if hit is None:
-                raise InsufficientCharPtsLError("Insufficient res. for char_pts_L and shock!")
+                msg = "Insufficient res. for char_pts_L and shock!"
+                raise InsufficientCharPtsLError(msg)
             pt_sc_pre, idx_loc_L = hit
             idx_L_m = int(idx_L[idx_loc_L])
 
@@ -213,13 +200,12 @@ def shock_field(
                 pt_sc_pre, reg_pre, delta_iter, n_wall
             )
 
-
             if family == "cplus":
                 lamd = reg_post.get_lamd_plus(pt_sc_post)
             else:
                 lamd = reg_post.get_lamd_minus(pt_sc_post)
 
-            #Get equation of char. from post-shock to constructed char.
+            # Get equation of char. from post-shock to constructed char.
             eqn_1p = get_tang(pt_sc_post, np.tan(lamd))
 
             if family == "cplus":
@@ -284,21 +270,17 @@ def shock_field(
     raise RuntimeError(msg)
 
 
-
-
-
 def shock_to_wall(
-        pt_prior: ShockPoint,
-        family: str,
-        pt1: np.ndarray, #char_pts_L
-        char_pts_R: np.ndarray,
-        idx_R,
-        wall: PiecewiseLinearCurve,
-        a_fxn: Callable,
-        max_iters: int = 5,
-        tol: float = 1e-6,
+    pt_prior: ShockPoint,
+    family: str,
+    pt1: np.ndarray,  # char_pts_L
+    char_pts_R: np.ndarray,
+    idx_R,
+    wall: PiecewiseLinearCurve,
+    a_fxn: Callable,
+    max_iters: int = 5,
+    tol: float = 1e-6,
 ):
-
     reg_pre = pt_prior.reg_pre
     pt_s_pre = pt_prior.pt_pre
     x_s, y_s, _, _ = pt_s_pre
@@ -318,7 +300,7 @@ def shock_to_wall(
 
     def F(x):
         return wall.get_y(x) - (y_s + np.tan(beta) * (x - x_s))
-    
+
     x_sw = brentq(F, wall.x_min, wall.x_max)
     y_sw = wall.get_y(x_sw)
 
@@ -353,18 +335,17 @@ def shock_from_wall(
     max_iters: int = 5,
     tol: float = 1e-6,
 ):
-
-# def shock_from_wall(
-#     char_pts_L,
-#     wall: PiecewiseLinearCurve,
-#     a_fxn: Callable,
-#     shock_origin: ShockPoint,
-#     family: str = "cminus",
-#     max_iters=5,
-#     debug_plots=False,
-#     debug_plotter: Callable[[], tuple[object, object]] | None = None,
-#     tol: float = 1e-6,
-# ):
+    # def shock_from_wall(
+    #     char_pts_L,
+    #     wall: PiecewiseLinearCurve,
+    #     a_fxn: Callable,
+    #     shock_origin: ShockPoint,
+    #     family: str = "cminus",
+    #     max_iters=5,
+    #     debug_plots=False,
+    #     debug_plotter: Callable[[], tuple[object, object]] | None = None,
+    #     tol: float = 1e-6,
+    # ):
     xy_tol = 10 * tol
 
     pt_o_pre = shock_origin.pt_pre
@@ -378,7 +359,8 @@ def shock_from_wall(
         eqn_shock = get_tang(pt_o_pre, np.tan(beta_i))
         hit = intersect_line_polyline(eqn_shock, char_pts_L, tol)
         if hit is None:
-            raise InsufficientCharPtsLError("Insufficient res. for char_pts_L and shock!")
+            msg = "Insufficient res. for char_pts_L and shock!"
+            raise InsufficientCharPtsLError(msg)
         pt_sc_pre, _ = hit
         theta_sc = get_theta(pt_sc_pre)
         pt_sc_post, reg_post, beta_ip1 = point_thru_shock(
@@ -397,7 +379,6 @@ def shock_from_wall(
             pt_sc_recomp = field_point(
                 pt_3pr, pt_pref, a_fxn, max_iters=max_iters, tol=tol
             )
-
 
         delta_ip1 = get_theta(pt_sc_recomp) - theta_sc
 
@@ -421,7 +402,6 @@ def shock_from_wall(
     )
 
     return shock_pair, pt_3pr
-
 
 
 def field_plot(
@@ -527,12 +507,7 @@ def field_plot(
         label=r"$S_{init}$",
     )
 
-    ax.scatter(
-        pt_3pr[0],
-        pt_3pr[1],
-        s=20,
-        c='b',
-        label="Mesh")
+    ax.scatter(pt_3pr[0], pt_3pr[1], s=20, c="b", label="Mesh")
     annotate_segment(
         pt_mesh,
         pt_3pr,
@@ -540,13 +515,7 @@ def field_plot(
         linestyle="--",
         lw=0.5,
     )
-    annotate_segment(
-        pt_s,
-        pt_sc_recomp,
-        color="red",
-        linestyle="--",
-        lw=0.5
-    )
+    annotate_segment(pt_s, pt_sc_recomp, color="red", linestyle="--", lw=0.5)
     annotate_segment(
         pt_sc_recomp,
         pt_ref,

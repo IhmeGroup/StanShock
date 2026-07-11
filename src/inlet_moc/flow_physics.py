@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -77,9 +77,8 @@ class RegionState:
         T = self.ref.static_temp_from_mach(M)
         p = self.p0 / total_pressure(M, self.ref.gamma)
         return M, theta, T, p
-    
 
-    def get_rho_p_a(self, u: np.ndarray, v:np.ndarray):
+    def get_rho_p_a(self, u: np.ndarray, v: np.ndarray):
         u = np.asarray(u, dtype=float)
         v = np.asarray(v, dtype=float)
         M, _ = self.ref.vel_to_mach(u, v)
@@ -88,9 +87,6 @@ class RegionState:
         p = self.p0 / total_pressure(M, self.ref.gamma)
         a = self.ref.sound_speed_from_vel(u, v)
         return rho, p, a
-    
-
-
 
     def get_angles(self, u: float, v: float):
         M, theta = self.ref.vel_to_mach(u, v)
@@ -104,15 +100,16 @@ class RegionState:
             raise SubsonicFlowError(msg)
         alpha = math.asin(1.0 / M)
         return theta, alpha
-    
+
     def get_lamd_plus(self, pt: np.ndarray):
         u, v = pt[2:]
         theta, alpha = self.get_angles(u, v)
-        return (theta + alpha)
+        return theta + alpha
+
     def get_lamd_minus(self, pt: np.ndarray):
         u, v = pt[2:]
         theta, alpha = self.get_angles(u, v)
-        return (theta - alpha)
+        return theta - alpha
 
 
 @dataclass(frozen=True)
@@ -129,18 +126,23 @@ class FlowCell:
         uv[:, 1] = float(self.v)
         return np.column_stack((xy, uv))
 
+
 def total_temperature_ratio(M, gamma: float = 1.4):
-    return (1.0 + 0.5 * (gamma - 1.0) * M * M)
+    return 1.0 + 0.5 * (gamma - 1.0) * M * M
+
 
 def total_temperature(M, gamma: float = 1.4):
     return total_temperature_ratio(M, gamma)
+
 
 def total_pressure_ratio(M: float, gamma: float = 1.4):
     T0_T = total_temperature_ratio(M, gamma)
     return T0_T ** (gamma / (gamma - 1.0))
 
+
 def total_pressure(M, gamma: float = 1.4):
     return total_pressure_ratio(M, gamma)
+
 
 def total_density_ratio(M, gamma: float = 1.4):
     T0_T = total_temperature_ratio(M, gamma)

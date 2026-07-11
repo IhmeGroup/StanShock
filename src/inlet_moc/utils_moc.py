@@ -202,9 +202,6 @@ def interp_pts(pt1: np.ndarray, pt2: np.ndarray, xy_q):
     return np.array([xy_q[0], xy_q[1], u_q, v_q])
 
 
-
-
-
 def intersect_line_polyline(coeffs: np.ndarray, pts: np.ndarray, tol: float = 1e-12):
     """
     coeffs: shape (3,), [a, b, c] for a*x + b*y + c = 0
@@ -219,31 +216,27 @@ def intersect_line_polyline(coeffs: np.ndarray, pts: np.ndarray, tol: float = 1e
     if pts.shape[0] == 0:
         return None
     if pts.shape[0] == 1:
-        scale = np.sqrt(a*a + b*b)
+        scale = np.sqrt(a * a + b * b)
         a, b, c = a / scale, b / scale, c / scale
-        f0 = a*pts[0, 0] + b*pts[0, 1] + c
+        f0 = a * pts[0, 0] + b * pts[0, 1] + c
         if abs(f0) <= tol:
             return pts[0].copy(), 0
         return None
 
-    scale = np.sqrt(a*a + b*b)
+    scale = np.sqrt(a * a + b * b)
     a, b, c = a / scale, b / scale, c / scale
-
-
 
     p0 = pts[:-1]
     p1 = pts[1:]
     dp = p1 - p0
 
-
-    f0 = a*p0[:, 0] + b*p0[:, 1] + c
-    f1 = a*p1[:, 0] + b*p1[:, 1] + c
+    f0 = a * p0[:, 0] + b * p0[:, 1] + c
+    f1 = a * p1[:, 0] + b * p1[:, 1] + c
 
     z0 = np.abs(f0) <= tol
     z1 = np.abs(f1) <= tol
 
- 
-    hit = z0 | ((f0*f1) < 0.0)
+    hit = z0 | ((f0 * f1) < 0.0)
 
     if not np.any(hit):
         if z1[-1]:
@@ -254,4 +247,4 @@ def intersect_line_polyline(coeffs: np.ndarray, pts: np.ndarray, tol: float = 1e
     if z0[i]:
         return p0[i].copy(), int(i)
     r = f0[i] / (f0[i] - f1[i])
-    return p0[i] + r*dp[i], int(i + 1)
+    return p0[i] + r * dp[i], int(i + 1)

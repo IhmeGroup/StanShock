@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cantera as ct
 import matplotlib.pyplot as plt
 import numpy as np
 from ambiance import Atmosphere as atm
@@ -10,7 +9,6 @@ from ambiance import Atmosphere as atm
 from inlet_moc.moc_soln import MOCSolution
 from inlet_moc.planar_inlet import PlanarInlet
 from inlet_moc.processing import process_solution
-from inlet_moc.shock_fxns import obl_shock_angle
 
 datadir = Path(__file__).resolve().parent
 figdir = datadir / "01_figs"
@@ -29,24 +27,22 @@ T_atm_arr = atm(h).temperature
 # sol = ct.SolutionArray(gas, (1,))
 
 
-
-
 alpha_deg = np.array([-5.012, 5.540, -5.081, 4.617])
 
 
 """
 INLET GEOMETRY
-"""          
+"""
 L_c = 103.6
-xy_ramp = np.column_stack(
-    (np.array([-355.4, 0.0, L_c]),
-    np.array([0.0, 115.5, 115.5]))
-) / 1000.0
+xy_ramp = (
+    np.column_stack((np.array([-355.4, 0.0, L_c]), np.array([0.0, 115.5, 115.5])))
+    / 1000.0
+)
 
-xy_cowl = np.column_stack(
-    (np.array([-58.4, 0.0, L_c]),
-    np.array([125.3, 125.3, 125.3]))
-) / 1000.0
+xy_cowl = (
+    np.column_stack((np.array([-58.4, 0.0, L_c]), np.array([125.3, 125.3, 125.3])))
+    / 1000.0
+)
 
 inlet = PlanarInlet(xy_ramp, xy_cowl)
 
@@ -58,7 +54,6 @@ T_amb = T_atm_arr[i]
 p_amb = p_atm_arr[i]
 N_idl = 60
 x_stop = 0.0
-
 
 
 soln = MOCSolution(
@@ -82,4 +77,4 @@ if soln.nets:
 else:
     print("[main] No solved nets available; skipping plot export.")
 plt.show()
-plt.close('all')
+plt.close("all")

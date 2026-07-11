@@ -162,7 +162,6 @@ def check_shock_reflection(
     next_family: str,
     tol: float = 1e-10,
 ):
-
     x_sw, y_sw, u_sw, v_sw = shock_pair.pt_post
 
     theta_flow = np.atan2(v_sw, u_sw)
@@ -197,7 +196,6 @@ def handle_event(
     from inlet_moc.char_shock_solvers import DetachedShockError, SubsonicFlowError
     from inlet_moc.char_solvers import NoWallIntersectionError
     from inlet_moc.net_shock_solver import NetShockSolver
-
 
     solver = NetShockSolver(
         net=net_im1,

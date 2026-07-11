@@ -3,7 +3,9 @@ from __future__ import annotations
 import math
 
 
-def obl_shock_angle(M_in: float, gamma: float, d: float, a: int =1):  # Returns: shock angle (rads) | assumes weak shock.
+def obl_shock_angle(
+    M_in: float, gamma: float, d: float, a: int = 1
+):  # Returns: shock angle (rads) | assumes weak shock.
     # Inputs: gamma, Mach number, flow-turning angle d (rads)
     return _obl_shock_angle_scalar(M_in, gamma, d, a=a)
 
@@ -20,13 +22,9 @@ def _obl_shock_angle_scalar(M_in: float, gamma: float, d: float, a: int = 1) -> 
     M2 = M_in * M_in
     tan_d = math.tan(d)
     tand2 = tan_d * tan_d
-    discr = (
-        (M2 - 1.0) ** 2
-        - 3.0
-        * (1.0 + (0.5 * gm) * M2)
-        * (1.0 + (0.5 * gp) * M2)
-        * tand2
-    )
+    discr = (M2 - 1.0) ** 2 - 3.0 * (1.0 + (0.5 * gm) * M2) * (
+        1.0 + (0.5 * gp) * M2
+    ) * tand2
     if discr < 0.0:
         return math.nan
 
@@ -42,8 +40,10 @@ def _obl_shock_angle_scalar(M_in: float, gamma: float, d: float, a: int = 1) -> 
         * tand2
     )
     chi = min(max(chi, -1.0), 1.0)
-    numerator = M2 - 1.0 + 2.0 * lamb * math.cos(
-        (4.0 * math.pi * int(a) + math.acos(chi)) / 3.0
+    numerator = (
+        M2
+        - 1.0
+        + 2.0 * lamb * math.cos((4.0 * math.pi * int(a) + math.acos(chi)) / 3.0)
     )
     denominator = 3.0 * (1.0 + (0.5 * gm) * M2) * tan_d
     if not math.isfinite(denominator) or math.isclose(denominator, 0.0):
@@ -78,13 +78,9 @@ def _obl_shock_downstream_values(
     f = M2 * sin_beta_2
 
     M_out_num = _sqrt_or_nan(
-        1.0
-        + gm * f
-        + (((0.5 * gp) ** 2 - gamma * sin_beta_2) * M2 * M2 * sin_beta_2)
+        1.0 + gm * f + (((0.5 * gp) ** 2 - gamma * sin_beta_2) * M2 * M2 * sin_beta_2)
     )
-    M_out_den = _sqrt_or_nan(gamma * f - 0.5 * gm) * _sqrt_or_nan(
-        0.5 * gm * f + 1.0
-    )
+    M_out_den = _sqrt_or_nan(gamma * f - 0.5 * gm) * _sqrt_or_nan(0.5 * gm * f + 1.0)
     if not math.isfinite(M_out_den) or math.isclose(M_out_den, 0.0):
         return math.nan, math.nan, math.nan, math.nan
     M_out = M_out_num / M_out_den
@@ -93,11 +89,7 @@ def _obl_shock_downstream_values(
     T2T1_den = f * gp * gp / (2.0 * gm)
     if math.isclose(T2T1_den, 0.0):
         return M_out, math.nan, math.nan, math.nan
-    T2T1 = (
-        (1.0 + 0.5 * gm * f)
-        * ((2.0 * gamma * f / gm) - 1.0)
-        / T2T1_den
-    )
+    T2T1 = (1.0 + 0.5 * gm * f) * ((2.0 * gamma * f / gm) - 1.0) / T2T1_den
     p02p01 = T2T1 ** (-gamma / gm) * p2p1
     return M_out, p2p1, T2T1, p02p01
 

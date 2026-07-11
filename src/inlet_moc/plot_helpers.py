@@ -9,6 +9,7 @@ from matplotlib.ticker import FormatStrFormatter
 if TYPE_CHECKING:
     from inlet_moc.moc_soln import MOCSolution
 
+
 @dataclass(frozen=True)
 class PlotVariable:
     latex_name: str

@@ -87,11 +87,7 @@ class TriangulatedSolution:
             where=valid[:, None],
         )
 
-        c = (
-            self.tri_primitives[:, 0]
-            - a * x0[:, None]
-            - b * y0[:, None]
-        )
+        c = self.tri_primitives[:, 0] - a * x0[:, None] - b * y0[:, None]
 
         return np.stack((a, b, c), axis=1)
 
@@ -118,7 +114,7 @@ class TriangulatedSolution:
 
         xy = self.tri_xy[tri_inds]
 
-        xa = xy[:, self.edge_a, 0]       # (Nc, 3)
+        xa = xy[:, self.edge_a, 0]  # (Nc, 3)
         xb = xy[:, self.edge_b, 0]
         ya = xy[:, self.edge_a, 1]
         yb = xy[:, self.edge_b, 1]
@@ -191,9 +187,8 @@ class TriangulatedSolution:
         y_nonoverlap = []
         for y_lower, y_upper in zip(y0, y1, strict=False):
             y_mid = 0.5 * (y_lower + y_upper)
-            cover = (
-                (y_end[:, 0] <= y_mid + self.tol)
-                & (y_end[:, 1] >= y_mid - self.tol)
+            cover = (y_end[:, 0] <= y_mid + self.tol) & (
+                y_end[:, 1] >= y_mid - self.tol
             )
             if not np.any(cover):
                 continue
@@ -223,11 +218,12 @@ class TriangulatedSolution:
         order = np.argsort(y_end[:, 0], kind="stable")
         return (
             x,
-            y_end[order],       # (Ns, 2)
-            q_end[order],       # (Ns, 2, 5)
-            tri_inds[order],    # (Ns,)
+            y_end[order],  # (Ns, 2)
+            q_end[order],  # (Ns, 2, 5)
+            tri_inds[order],  # (Ns,)
         )
-    
+
+
 def build_tris(soln: MOCSolution) -> tuple[list[Delaunay], list[np.ndarray]]:
     tris: list[Delaunay] = []
     primitives: list[np.ndarray] = []

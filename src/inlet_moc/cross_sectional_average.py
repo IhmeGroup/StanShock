@@ -9,7 +9,6 @@ from scipy.optimize import root
 
 from inlet_moc.triangulated_solution import TriangulatedSolution
 
-
 AVERAGE_COLUMNS = ("x", "rho_st", "u_st", "p_st", "a_st", "T_st", "mach")
 
 
@@ -34,7 +33,8 @@ def flux_avg(
 
     N = len(y)
     if N < 3:
-        raise ValueError("At least three sample points are required.")
+        msg = "At least three sample points are required."
+        raise ValueError(msg)
 
     order = np.argsort(y, kind="stable")
     y = y[order]
@@ -115,7 +115,8 @@ def streamthrust_average(
     y_1 = np.asarray(y_1)
     y_2 = np.asarray(y_2)
     if x.shape != y_1.shape or x.shape != y_2.shape:
-        raise ValueError("x, y_1, and y_2 must have matching shapes.")
+        msg = "x, y_1, and y_2 must have matching shapes."
+        raise ValueError(msg)
 
     avg = np.full((x.size, len(AVERAGE_COLUMNS)), np.nan)
     avg[:, 0] = x

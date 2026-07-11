@@ -33,9 +33,9 @@ def get_angles(u: float, v: float, Vm: float, a: float):
 
 
 def get_QRS(u, v, a, y, delta, L):
-    Q = u*u - a*a
+    Q = u * u - a * a
     R = (2 * u * v) - Q * L
-    S = (delta * a*a * v) / y
+    S = (delta * a * a * v) / y
     return Q, R, S
 
 

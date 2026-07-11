@@ -34,11 +34,15 @@ class ShockStepOverlay:
 def _finite_net_xy(net: CharNet) -> tuple[np.ndarray, np.ndarray]:
     xy_mask = net.xy_mask()
     if np.any(xy_mask):
-        return np.asarray(net.x[xy_mask], dtype=float), np.asarray(net.y[xy_mask], dtype=float)
+        return np.asarray(net.x[xy_mask], dtype=float), np.asarray(
+            net.y[xy_mask], dtype=float
+        )
 
     finite = np.isfinite(net.x) & np.isfinite(net.y)
     if np.any(finite):
-        return np.asarray(net.x[finite], dtype=float), np.asarray(net.y[finite], dtype=float)
+        return np.asarray(net.x[finite], dtype=float), np.asarray(
+            net.y[finite], dtype=float
+        )
 
     return np.array([], dtype=float), np.array([], dtype=float)
 
@@ -310,7 +314,11 @@ class ShockNetPlotter:
             y_parts.append(y_down)
 
         if x_parts:
-            x_min_data = float(np.nanmin(x_prior)) if x_prior.size > 0 else float(np.nanmin(x_parts[0]))
+            x_min_data = (
+                float(np.nanmin(x_prior))
+                if x_prior.size > 0
+                else float(np.nanmin(x_parts[0]))
+            )
             if x_down.size > 0:
                 x_max_data = float(np.nanmax(x_down))
             elif x_prior.size > 0:
@@ -644,7 +652,9 @@ class ShockNetPlotter:
 
         if self.minimal:
             for overlay in self._history:
-                if overlay.shock_pt is not None and np.all(np.isfinite(overlay.shock_pt[:2])):
+                if overlay.shock_pt is not None and np.all(
+                    np.isfinite(overlay.shock_pt[:2])
+                ):
                     self.ax.scatter(
                         float(overlay.shock_pt[0]),
                         float(overlay.shock_pt[1]),
@@ -653,7 +663,9 @@ class ShockNetPlotter:
                         zorder=14,
                     )
                     self._annotate_point(overlay.shock_pt, overlay.shock_idx, color="r")
-                if overlay.mesh_pt is not None and np.all(np.isfinite(overlay.mesh_pt[:2])):
+                if overlay.mesh_pt is not None and np.all(
+                    np.isfinite(overlay.mesh_pt[:2])
+                ):
                     self.ax.scatter(
                         float(overlay.mesh_pt[0]),
                         float(overlay.mesh_pt[1]),

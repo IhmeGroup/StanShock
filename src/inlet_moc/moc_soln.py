@@ -182,7 +182,6 @@ class MOCSolution:
             )
         print(f"[warning] {err}! Solve terminated and processing beginning.")
 
-
     def _register_incomplete_net(self, net: CharNet) -> int:
         self._store_net(net)
         net_num = len(self.nets)
@@ -221,7 +220,9 @@ class MOCSolution:
 
             while next_event is not None:
                 self.events.append(next_event)
-                self._log(f"Handling event {len(self.events)}: family={next_event.family}.")
+                self._log(
+                    f"Handling event {len(self.events)}: family={next_event.family}."
+                )
                 try:
                     active_net, downstream_net, reflected_event = handle_event(
                         inlet=self.inlet,
@@ -256,7 +257,6 @@ class MOCSolution:
             self.next_net = active_net
             self.collect_integration_points()
             return
-        
 
         except (
             NoWallIntersectionError,

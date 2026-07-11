@@ -43,7 +43,11 @@ plt.rcParams.update(
         "figure.titlesize": BIGGER_SIZE,
     }
 )
-def _primitive_values(soln: MOCSolution, primitives: np.ndarray, plot_key: str) -> np.ndarray:
+
+
+def _primitive_values(
+    soln: MOCSolution, primitives: np.ndarray, plot_key: str
+) -> np.ndarray:
     key = str(plot_key).lower()
     rho = primitives[:, 0]
     u = primitives[:, 1]
@@ -92,7 +96,9 @@ def _stream_thrust_profile(data: np.ndarray, var: str) -> np.ndarray:
         if var in {"m", "mach"}:
             if "mach" in data.dtype.names:
                 return np.asarray(data["mach"], dtype=float)
-            return np.asarray(data["u_st"], dtype=float) / np.asarray(data["a_st"], dtype=float)
+            return np.asarray(data["u_st"], dtype=float) / np.asarray(
+                data["a_st"], dtype=float
+            )
 
     columns = {
         "rho": 1,
@@ -134,7 +140,9 @@ def _apply_nice_yaxis(ax, y_values: np.ndarray | None = None) -> None:
 def _refresh_stream_thrust_legends(axes) -> None:
     for ax in np.asarray(axes, dtype=object).ravel():
         handles, labels = ax.get_legend_handles_labels()
-        keep = [idx for idx, label in enumerate(labels) if not str(label).startswith("_")]
+        keep = [
+            idx for idx, label in enumerate(labels) if not str(label).startswith("_")
+        ]
         legend = ax.get_legend()
         if len(keep) <= 1:
             if legend is not None:
@@ -165,10 +173,6 @@ def plot_net_lines(ax, net: CharNet) -> None:
             ax.plot(net.x[rows, j], net.y[rows, j], color="0.55", lw=0.1, zorder=6)
 
 
-
-
-
-
 def plot_net_points(
     ax,
     net: CharNet,
@@ -178,8 +182,10 @@ def plot_net_points(
 ) -> None:
     xy_mask = net.xy_mask()
 
-    if color_by_point_type:#REMOVE THIS ARGUMENT!
-        point_types = np.asarray(getattr(net, "point_type", np.full(net.x.shape, np.nan)))
+    if color_by_point_type:  # REMOVE THIS ARGUMENT!
+        point_types = np.asarray(
+            getattr(net, "point_type", np.full(net.x.shape, np.nan))
+        )
         type_specs = (
             (0, "k", "Internal"),
             (1, "b", "Wall"),
@@ -299,7 +305,6 @@ def _plot_tri_fills(
     return True
 
 
-
 def plot_moc_soln(
     soln: MOCSolution,
     plot_var: str | Sequence[str] | None = None,
@@ -412,8 +417,6 @@ def plot_stream_thrust_average(
     plot_settings = tuple(PlotSettings.get_stream_thrust(var) for var in plot_vars)
     n_plots = len(plot_settings)
     plot_data = dataset if dataset is not None else avg
-    if plot_data is None:
-        raise ValueError("Provide either avg or dataset.")
 
     if bounds is None:
         x_bounds, y_cowl_st, y_cent_st = soln.streamtube
@@ -499,9 +502,7 @@ def _add_h_plot(
     x_bounds, y_lower, y_upper = bounds
     lower_cap = np.interp(x_plot, x_bounds, y_lower)
     upper_cap = np.interp(x_plot, x_bounds, y_upper)
-    x_geom_last = float(
-        min(soln.inlet.centerbody.x_max, soln.inlet.cowl.x_max)
-    )
+    x_geom_last = float(min(soln.inlet.centerbody.x_max, soln.inlet.cowl.x_max))
     y_upper_last = float(soln.inlet.cowl.get_y(x_geom_last))
     y_lower_last = float(soln.inlet.centerbody.get_y(x_geom_last))
     y_marg = 0.5 * abs(y_upper_last - y_lower_last)
@@ -564,7 +565,6 @@ def _draw_completed_x_marker(soln: MOCSolution, axes) -> None:
         return
     y_lower = soln.inlet.centerbody.get_y(float(x_final))
     y_upper = soln.inlet.cowl.get_y(float(x_final))
-
 
     for ax in np.atleast_1d(axes).ravel():
         ax.plot(

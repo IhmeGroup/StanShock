@@ -49,7 +49,6 @@ class NetShockSolver:
         self.output_figdir = None if figdir is None else Path(figdir)
         self.figdir = None if (figdir is None or not self.plot) else self.output_figdir
 
-
         self.wall_from = event.wall_from
         self.wall_to = event.wall_to
 
@@ -63,11 +62,11 @@ class NetShockSolver:
 
         self.shock_pairs: list[ShockPoint] = []
         self.xyuv_shock = np.empty((0, 4), dtype=float)
-        self.xyuv_mesh = np.empty((0,4), dtype=float)
+        self.xyuv_mesh = np.empty((0, 4), dtype=float)
         self.ij_shock_L = np.empty((0, 2), dtype=int)
         self.ij_shock_R = np.empty((0, 2), dtype=int)
         self.ij_mesh_R = np.empty((0, 2), dtype=int)
-    
+
         self.shock_plotter: ShockNetPlotter | None = None
         self.shock_resample_N = self.net_L.N
 
@@ -94,7 +93,7 @@ class NetShockSolver:
         self.ij_shock_L = np.empty((0, 2), dtype=int)
         self.ij_shock_R = np.empty((0, 2), dtype=int)
 
-        self.xyuv_mesh = np.empty((0,4), dtype=float)
+        self.xyuv_mesh = np.empty((0, 4), dtype=float)
         self.ij_mesh_R = np.empty((0, 2), dtype=int)
 
         self.a_fxn = self.net_L.a_fxn
@@ -105,7 +104,7 @@ class NetShockSolver:
             self.net_L,
             family=family,
             wall=self.wall_to,
-            xy_shock=self.xyuv_shock[:,:2],
+            xy_shock=self.xyuv_shock[:, :2],
             ij_shock=self.ij_shock_L,
             tol=self.tol,
             **self._cleanup_debug_kwargs(),
@@ -205,7 +204,7 @@ class NetShockSolver:
         self,
         i_fixed: int,
         start_idx_min: int = 1,
-    ) -> int: #consider relocating/merging with the functions in CharNet?
+    ) -> int:  # consider relocating/merging with the functions in CharNet?
         """
         Extend one post-shock downstream row as a C+ characteristic returning
         to ``wall_from``.
@@ -214,13 +213,11 @@ class NetShockSolver:
         j_active = self._downstream_active_idx(i_fixed, "cminus")
         j_active = j_active[j_active >= int(start_idx_min)]
 
-        if (i_fixed < 1) or (j_active.size==0):
+        if (i_fixed < 1) or (j_active.size == 0):
             return 1
 
-        j_m1= int(j_active[-1])
+        j_m1 = int(j_active[-1])
         j_start = j_m1 + 1
-
-
 
         for j in range(j_start, self.net_R.N):
             has_plus = self.net_R.has_point(i_fixed, j - 1)
@@ -256,65 +253,60 @@ class NetShockSolver:
         j_fixed: int,
         start_idx_min: int = 1,
     ) -> int:
-            """
-            Build cminus char
-            """
-            i_active = self._downstream_active_idx(j_fixed, "cplus")
-            i_active = i_active[i_active >= int(start_idx_min)]
+        """
+        Build cminus char
+        """
+        i_active = self._downstream_active_idx(j_fixed, "cplus")
+        i_active = i_active[i_active >= int(start_idx_min)]
 
-            if (j_fixed < 1) or i_active.size == 0:
-                return 1
-            
+        if (j_fixed < 1) or i_active.size == 0:
+            return 1
 
-            i_m1= int(i_active[-1])
-            i_start = i_m1 + 1
-            
-            for i in range(i_start, self.net_R.N):
-                has_minus = self.net_R.has_point(i - 1, j_fixed)
-                has_plus = self.net_R.has_point(i, j_fixed - 1)
-                if not has_minus:
-                    break
+        i_m1 = int(i_active[-1])
+        i_start = i_m1 + 1
 
-                pt_minus = self.net_R.get_point(i - 1, j_fixed)
-
-                if has_plus:
-                    pt_plus = self.net_R.get_point(i, j_fixed - 1)
-                    pt_out = field_point(pt_plus, pt_minus, self.a_fxn)
-                    if _wall_clearance(pt_out, self.wall_from) <= self.tol:
-                        pt_out = wall_point(self.wall_from, pt_minus, self.a_fxn)
-                        self.net_R.edit_point(i, j_fixed, pt_out, 1)
-                        i_m1 = i
-                        break
-
-                    self.net_R.edit_point(i, j_fixed, pt_out, 0)
-                    i_m1 = i
-                    continue
-
-                pt_wall = wall_point(self.wall_from, pt_minus, self.a_fxn)
-                self.net_R.edit_point(i, j_fixed, pt_wall, 1)
-                i_m1 = i
+        for i in range(i_start, self.net_R.N):
+            has_minus = self.net_R.has_point(i - 1, j_fixed)
+            has_plus = self.net_R.has_point(i, j_fixed - 1)
+            if not has_minus:
                 break
 
-            return i_m1
+            pt_minus = self.net_R.get_point(i - 1, j_fixed)
 
+            if has_plus:
+                pt_plus = self.net_R.get_point(i, j_fixed - 1)
+                pt_out = field_point(pt_plus, pt_minus, self.a_fxn)
+                if _wall_clearance(pt_out, self.wall_from) <= self.tol:
+                    pt_out = wall_point(self.wall_from, pt_minus, self.a_fxn)
+                    self.net_R.edit_point(i, j_fixed, pt_out, 1)
+                    i_m1 = i
+                    break
 
+                self.net_R.edit_point(i, j_fixed, pt_out, 0)
+                i_m1 = i
+                continue
 
+            pt_wall = wall_point(self.wall_from, pt_minus, self.a_fxn)
+            self.net_R.edit_point(i, j_fixed, pt_wall, 1)
+            i_m1 = i
+            break
+
+        return i_m1
 
     def record_cminus_step(
-            self,
-            i_step: int,
-            j_L_s: int, #Pre-shock idx net_L
-            j_R_s: int, #Post-shock idx net_R (usually 0)
-            shock_pair: ShockPoint,
-            pt_type_s: int,
-            j_R_m: int | None = None, #Post-shock idx mesh net_R (>= 1)
-            mesh_pt: np.ndarray | None = None,
-            pt_type_m: None | int = 0):
-        
+        self,
+        i_step: int,
+        j_L_s: int,  # Pre-shock idx net_L
+        j_R_s: int,  # Post-shock idx net_R (usually 0)
+        shock_pair: ShockPoint,
+        pt_type_s: int,
+        j_R_m: int | None = None,  # Post-shock idx mesh net_R (>= 1)
+        mesh_pt: np.ndarray | None = None,
+        pt_type_m: None | int = 0,
+    ):
         self.net_L.edit_point(i_step, j_L_s, shock_pair.pt_pre, pt_type_s)
-        self.net_R.edit_point(i_step, j_R_s, shock_pair.pt_post,
-                              pt_type_s)
-        
+        self.net_R.edit_point(i_step, j_R_s, shock_pair.pt_post, pt_type_s)
+
         self._append_shock_record([i_step, j_L_s], [i_step, j_R_s], shock_pair)
         self.p0_arr.append(shock_pair.reg_post.p0)
         if mesh_pt is not None:
@@ -329,19 +321,18 @@ class NetShockSolver:
                 )
 
     def record_cplus_step(
-            self,
-            j_step: int,
-            i_L_s: int,
-            i_R_s: int,
-            shock_pair: ShockPoint,
-            pt_type_s: int,
-            i_R_m: int | None = None,
-            mesh_pt: np.ndarray | None = None,
-            pt_type_m: int | None = 0
+        self,
+        j_step: int,
+        i_L_s: int,
+        i_R_s: int,
+        shock_pair: ShockPoint,
+        pt_type_s: int,
+        i_R_m: int | None = None,
+        mesh_pt: np.ndarray | None = None,
+        pt_type_m: int | None = 0,
     ):
         self.net_L.edit_point(i_L_s, j_step, shock_pair.pt_pre, pt_type_s)
-        self.net_R.edit_point(i_R_s, j_step, shock_pair.pt_post,
-                              pt_type_s)
+        self.net_R.edit_point(i_R_s, j_step, shock_pair.pt_post, pt_type_s)
         self._append_shock_record([i_L_s, j_step], [i_R_s, j_step], shock_pair)
         self.p0_arr.append(shock_pair.reg_post.p0)
         if mesh_pt is not None:
@@ -355,7 +346,6 @@ class NetShockSolver:
                     mesh_idx=(int(i_R_m), int(j_step)),
                 )
 
-
     def _append_shock_record(
         self,
         ij_L: tuple[int, int],
@@ -368,16 +358,12 @@ class NetShockSolver:
         self.xyuv_shock = np.vstack(
             (self.xyuv_shock, np.asarray(shock_pair.pt_post)[None, :])
         )
-        self.ij_shock_L = np.vstack(
-            (self.ij_shock_L, ij_L))
+        self.ij_shock_L = np.vstack((self.ij_shock_L, ij_L))
 
-        self.ij_shock_R = np.vstack(
-            (self.ij_shock_R, ij_s_R))
+        self.ij_shock_R = np.vstack((self.ij_shock_R, ij_s_R))
         if mesh_pt is not None:
-            self.ij_mesh_R = np.vstack(
-                (self.ij_mesh_R, ij_m_R))
-            self.xyuv_mesh = np.vstack(
-                (self.xyuv_mesh, mesh_pt))
+            self.ij_mesh_R = np.vstack((self.ij_mesh_R, ij_m_R))
+            self.xyuv_mesh = np.vstack((self.xyuv_mesh, mesh_pt))
 
     def _start_shock_plot(self, family: str) -> None:
         if not self.plot:
@@ -463,9 +449,8 @@ class NetShockSolver:
         msg = f"Unsupported downstream family '{family}'."
         raise ValueError(msg)
 
-
     def solve_cminus(self):
-        #j_L = ind on left net.
+        # j_L = ind on left net.
         family = "cminus"
         i_L, j_L_s = self.event.point_idx
 
@@ -474,67 +459,46 @@ class NetShockSolver:
 
         L_stencil = self.L_stencil_max
 
-
         self._reset_common_state()
         self.net_R.idl_kind = family
         self._start_shock_plot(family)
 
         shock_pt = shock_origin(
-            self.net_L.get_point(i_L, j_L_s),
-            self.wall_from,
-            self.net_L.region)
-        
-        self.record_cminus_step(
-            i_L, j_L_s, j_R_s, shock_pt, 3)
-    
+            self.net_L.get_point(i_L, j_L_s), self.wall_from, self.net_L.region
+        )
+
+        self.record_cminus_step(i_L, j_L_s, j_R_s, shock_pt, 3)
+
         i_L = self._get_from_wall_solve_idx(
             event_idx=self.event.point_idx[0],
             fixed_idx=j_L_s,
             family=family,
         )
 
-        #NOTE: right net shock always gets j = 0
+        # NOTE: right net shock always gets j = 0
         char_pts_L, _ = get_char_interp_segment(
-            self.net_L,
-            i_L,
-            j_L_s,
-            "cplus",
-            L_stencil,
-            "upstream"
+            self.net_L, i_L, j_L_s, "cplus", L_stencil, "upstream"
         )
 
         shock_pair, mesh_pt = shock_from_wall(
-                self.shock_pairs[-1],
-                family,
-                char_pts_L,
-                self.wall_from,
-                self.a_fxn,
-                **self._cminus_solver_kwargs(),
-            )
-        
+            self.shock_pairs[-1],
+            family,
+            char_pts_L,
+            self.wall_from,
+            self.a_fxn,
+            **self._cminus_solver_kwargs(),
+        )
 
-
-        self.record_cminus_step(
-                i_L,
-                j_L_s,
-                j_R_s,
-                shock_pair,
-                2,
-                j_R_m,
-                mesh_pt,
-                1)
-        
-
-
+        self.record_cminus_step(i_L, j_L_s, j_R_s, shock_pair, 2, j_R_m, mesh_pt, 1)
 
         pt_type_s = 2
-        pt_type_m = 0 
+        pt_type_m = 0
 
         active_i = _active_free_indices(self.net_L, j_L_s, family)
         terminal_offset = min(i_L + 1, int(active_i.size))
         i_stop = int(active_i[-terminal_offset])
 
-        i_L+=1
+        i_L += 1
 
         for i in range(i_L, i_stop + 1):
             L_stencil = self._field_stencil_length(
@@ -546,13 +510,9 @@ class NetShockSolver:
                 self.L_stencil_max,
             )
             char_pts_L, idx_L = get_char_interp_segment(
-                self.net_L,
-                i,
-                j_L_s,
-                "cplus",
-                L_stencil,
-                "upstream")
-            
+                self.net_L, i, j_L_s, "cplus", L_stencil, "upstream"
+            )
+
             R_stencil = self._field_stencil_length(
                 self.net_R,
                 i - 1,
@@ -562,17 +522,15 @@ class NetShockSolver:
                 self.R_stencil_max,
             )
             char_pts_R, idx_R = get_char_interp_segment(
-                self.net_R,
-                i - 1,
-                j_R_m,
-                "cplus",
-                R_stencil,
-                "downstream")
-            
+                self.net_R, i - 1, j_R_m, "cplus", R_stencil, "downstream"
+            )
+
             shock_im1 = self.shock_pairs[-1]
 
             left_intersects = self._field_left_intersects(char_pts_L, shock_im1)
-            terminal_step = (char_pts_L.shape[0] == 1) or (not left_intersects) or (i == i_stop)
+            terminal_step = (
+                (char_pts_L.shape[0] == 1) or (not left_intersects) or (i == i_stop)
+            )
 
             if terminal_step:
                 shock_pair, mesh_pt, j_R_m = shock_to_wall(
@@ -583,7 +541,7 @@ class NetShockSolver:
                     idx_R,
                     self.wall_to,
                     self.a_fxn,
-                    **self._cminus_solver_kwargs()
+                    **self._cminus_solver_kwargs(),
                 )
                 pt_type_s = 3
             else:
@@ -599,23 +557,14 @@ class NetShockSolver:
                     **self._cminus_solver_kwargs(),
                 )
 
-                
-
             self.record_cminus_step(
-                i,
-                j_L_s,
-                j_R_s,
-                shock_pair,
-                pt_type_s,
-                j_R_m,
-                mesh_pt,
-                pt_type_m)
+                i, j_L_s, j_R_s, shock_pair, pt_type_s, j_R_m, mesh_pt, pt_type_m
+            )
 
             self._build_downstream_cplus(i)
 
             if terminal_step:
                 break
-            
 
         self._finalize_downstream_region()
         restored = self._restore_and_propagate_downstream(family)
@@ -631,7 +580,6 @@ class NetShockSolver:
         )
         return self.net_L, self.net_R, reflected_event
 
-
     def solve_cplus(self):
         family = "cplus"
         i_L_s, j_L = self.event.point_idx
@@ -646,13 +594,11 @@ class NetShockSolver:
         self._start_shock_plot(family)
 
         shock_pt = shock_origin(
-            self.net_L.get_point(i_L_s, j_L),
-            self.wall_from,
-            self.net_L.region)
-        
-        self.record_cplus_step(
-            j_L, i_L_s, i_R_s, shock_pt, 3)
-        
+            self.net_L.get_point(i_L_s, j_L), self.wall_from, self.net_L.region
+        )
+
+        self.record_cplus_step(j_L, i_L_s, i_R_s, shock_pt, 3)
+
         j_L = self._get_from_wall_solve_idx(
             event_idx=self.event.point_idx[1],
             fixed_idx=i_L_s,
@@ -660,12 +606,7 @@ class NetShockSolver:
         )
 
         char_pts_L, _ = get_char_interp_segment(
-            self.net_L,
-            j_L,
-            i_L_s,
-            "cminus",
-            L_stencil,
-            "upstream"
+            self.net_L, j_L, i_L_s, "cminus", L_stencil, "upstream"
         )
 
         shock_pair, mesh_pt = shock_from_wall(
@@ -677,17 +618,7 @@ class NetShockSolver:
             **self._cplus_solver_kwargs(),
         )
 
-        self.record_cplus_step(
-            j_L,
-            i_L_s,
-            i_R_s,
-            shock_pair,
-            2,
-            i_R_m,
-            mesh_pt,
-            1)
-        
-
+        self.record_cplus_step(j_L, i_L_s, i_R_s, shock_pair, 2, i_R_m, mesh_pt, 1)
 
         pt_type_s = 2
         pt_type_m = 0
@@ -696,7 +627,7 @@ class NetShockSolver:
         terminal_offset = min(j_L + 1, int(active_j.size))
         j_stop = int(active_j[-terminal_offset])
 
-        j_L+=1
+        j_L += 1
 
         for j in range(j_L, j_stop + 1):
             L_stencil = self._field_stencil_length(
@@ -708,13 +639,9 @@ class NetShockSolver:
                 self.L_stencil_max,
             )
             char_pts_L, idx_L = get_char_interp_segment(
-                self.net_L,
-                j,
-                i_L_s,
-                "cminus",
-                L_stencil,
-                "upstream")
-            
+                self.net_L, j, i_L_s, "cminus", L_stencil, "upstream"
+            )
+
             R_stencil = self._field_stencil_length(
                 self.net_R,
                 j - 1,
@@ -724,17 +651,15 @@ class NetShockSolver:
                 self.R_stencil_max,
             )
             char_pts_R, idx_R = get_char_interp_segment(
-                self.net_R,
-                j - 1,
-                i_R_m,
-                "cminus",
-                R_stencil,
-                "downstream")
-            
+                self.net_R, j - 1, i_R_m, "cminus", R_stencil, "downstream"
+            )
+
             shock_im1 = self.shock_pairs[-1]
 
             left_intersects = self._field_left_intersects(char_pts_L, shock_im1)
-            terminal_step = (char_pts_L.shape[0] == 1) or (not left_intersects) or (j == j_stop)
+            terminal_step = (
+                (char_pts_L.shape[0] == 1) or (not left_intersects) or (j == j_stop)
+            )
 
             if terminal_step:
                 shock_pair, mesh_pt, i_R_m = shock_to_wall(
@@ -745,7 +670,7 @@ class NetShockSolver:
                     idx_R,
                     self.wall_to,
                     self.a_fxn,
-                    **self._cplus_solver_kwargs()
+                    **self._cplus_solver_kwargs(),
                 )
                 pt_type_s = 3
             else:
@@ -762,20 +687,14 @@ class NetShockSolver:
                 )
 
             self.record_cplus_step(
-                j,
-                i_L_s,
-                i_R_s,
-                shock_pair,
-                pt_type_s,
-                i_R_m,
-                mesh_pt,
-                pt_type_m)
-            
+                j, i_L_s, i_R_s, shock_pair, pt_type_s, i_R_m, mesh_pt, pt_type_m
+            )
+
             self._build_downstream_cminus(j)
 
             if terminal_step:
                 break
-        
+
         self._finalize_downstream_region()
         restored = self._restore_and_propagate_downstream(family)
         self.clip_and_clean_nets(family=family)
@@ -795,7 +714,6 @@ class NetShockSolver:
             "debug_plots": False,
             "debug_plotter": self._net_shock_plot_axes,
         }
-
 
     def _cminus_solver_kwargs(self) -> dict[str, object]:
         return {

@@ -62,9 +62,6 @@ def _char_index_arrays(
     return rows[finite], cols[finite]
 
 
-
-
-
 def get_char_interp_segment(
     net: CharNet,
     idx_fixed: int,
@@ -109,7 +106,6 @@ def get_char_interp_segment(
             return empty_pts, np.empty((0,), dtype=int)
         free_tail = np.asarray(free_inds[start_pos : start_pos + count], dtype=int)
 
-
     pts = np.asarray(
         [
             _get_family_point(net, int(idx_fixed), int(free_idx), family)
@@ -118,8 +114,6 @@ def get_char_interp_segment(
         dtype=float,
     )
     return pts, free_tail
-
-
 
 
 def clip_char(
@@ -314,7 +308,9 @@ def resample_shock(
 
     if s_total <= 0.0:
         xyuv_q = np.repeat(xyuv_shock[:1], int(N_res), axis=0)
-        ij_q = _resampled_shock_indices(int(N_res), fixed_axis, changing_axis, fixed_idx)
+        ij_q = _resampled_shock_indices(
+            int(N_res), fixed_axis, changing_axis, fixed_idx
+        )
         return xyuv_q, ij_q, fixed_axis, changing_axis
 
     r_pts = [s_val / s_total for s_val in s_pts]
@@ -323,7 +319,6 @@ def resample_shock(
 
     seg_idx = 0
     for q_idx, r_val in enumerate(r_q):
-        r_val = float(r_val)
         if r_val <= 0.0:
             xyuv_q[q_idx] = xyuv_pts[0]
             continue
@@ -426,13 +421,14 @@ def _point_on_wall(
     return on_wall
 
 
-def build_net_boundary(net: CharNet,
-                       family: str, #downstream/shock family
-                       main_wall: PiecewiseLinearCurve,
-                       xy_shock: np.ndarray,
-                       ij_shock: np.ndarray,
-                       tol: float = 1.0e-10):
-
+def build_net_boundary(
+    net: CharNet,
+    family: str,  # downstream/shock family
+    main_wall: PiecewiseLinearCurve,
+    xy_shock: np.ndarray,
+    ij_shock: np.ndarray,
+    tol: float = 1.0e-10,
+):
     _, xy_wall = net.point_ij_xy("wall")
     ij_fluid, xy_fluid = net.point_ij_xy("fluid")
     ij_corner, xy_corner = net.point_ij_xy("corner")
@@ -440,29 +436,38 @@ def build_net_boundary(net: CharNet,
     shock_corner_mask = (ij_corner[:, None] == ij_shock).all(axis=2).any(axis=1)
     corner_wall_mask = _point_on_wall(xy_corner, main_wall, tol)
 
-    if family == "cminus": #find first cplus char (i=0)
-        upstream_mask = ij_fluid[:,0] == 0 
-        corner_le_mask = (ij_corner[:,0] == 0) & corner_wall_mask #leading edge corner
+    if family == "cminus":  # find first cplus char (i=0)
+        upstream_mask = ij_fluid[:, 0] == 0
+        corner_le_mask = (
+            ij_corner[:, 0] == 0
+        ) & corner_wall_mask  # leading edge corner
         corner_te_mask = shock_corner_mask & corner_wall_mask
         shock_order = np.argsort(ij_shock[:, 0])[::-1]
     else:
-        upstream_mask = ij_fluid[:,1] == 0
-        corner_le_mask = (ij_corner[:,1] == 0) & corner_wall_mask
+        upstream_mask = ij_fluid[:, 1] == 0
+        corner_le_mask = (ij_corner[:, 1] == 0) & corner_wall_mask
         corner_te_mask = shock_corner_mask & corner_wall_mask
         shock_order = np.argsort(ij_shock[:, 1])[::-1]
 
-    xy_upstream = xy_fluid[upstream_mask][np.argsort(xy_fluid[upstream_mask][:,0])[::-1]] # Assemble points on first characteristic (EXCLUDES CORNERS!)
+    xy_upstream = xy_fluid[upstream_mask][
+        np.argsort(xy_fluid[upstream_mask][:, 0])[::-1]
+    ]  # Assemble points on first characteristic (EXCLUDES CORNERS!)
 
-    xy_corner_le = xy_corner[corner_le_mask][:1] 
+    xy_corner_le = xy_corner[corner_le_mask][:1]
     xy_corner_te = xy_corner[corner_te_mask][:1]
 
-    x_wall_mask = (xy_wall[:,0] > xy_corner_le[0, 0]) & (xy_wall[:,0] < xy_corner_te[0, 0])
+    x_wall_mask = (xy_wall[:, 0] > xy_corner_le[0, 0]) & (
+        xy_wall[:, 0] < xy_corner_te[0, 0]
+    )
     xy_wall = xy_wall[x_wall_mask]
-    
-    xy_wall = xy_wall[np.argsort(xy_wall[:,0])]
+
+    xy_wall = xy_wall[np.argsort(xy_wall[:, 0])]
     xy_shock = xy_shock[shock_order]
 
-    return np.vstack((xy_corner_le, xy_wall, xy_shock, xy_upstream, xy_corner_le)) #this should form closed loop, counterclockwise
+    return np.vstack(
+        (xy_corner_le, xy_wall, xy_shock, xy_upstream, xy_corner_le)
+    )  # this should form closed loop, counterclockwise
+
 
 def _points_on_polyline(
     pts: np.ndarray, polyline: np.ndarray, tol: float
