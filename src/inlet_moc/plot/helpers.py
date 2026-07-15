@@ -7,7 +7,7 @@ import numpy as np
 from matplotlib.ticker import FormatStrFormatter
 
 if TYPE_CHECKING:
-    from inlet_moc.moc_soln import MOCSolution
+    from inlet_moc.moc_solution import MOCSolution
 
 
 @dataclass(frozen=True)
@@ -94,7 +94,7 @@ class PlotSettings:
         r"$a$",
         r"$a\ \left[\mathrm{m/s}\right]$",
         (0.0, 400.0),
-        cmap_wave,
+        cmap_mag,
         key="a",
     )
     u = PlotVariable(
@@ -136,7 +136,7 @@ class PlotSettings:
         r"$a_{st}$",
         r"$a_{st}\ [\mathrm{m/s}]$",
         a.ylims,
-        cmap_wave,
+        cmap_mag,
         key="a",
     )
     T_st = PlotVariable(

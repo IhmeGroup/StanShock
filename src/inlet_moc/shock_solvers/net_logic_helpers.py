@@ -6,9 +6,8 @@ from itertools import pairwise
 import numpy as np
 from matplotlib.path import Path
 
-from inlet_moc.charnet import CharNet
+from inlet_moc.char_net import CharNet
 from inlet_moc.planar_inlet import PiecewiseLinearCurve
-from inlet_moc.plot_net_shock import _plot_cleanup_candidates, _plot_coalescing_cleanup
 from inlet_moc.utils_moc import (
     get_intersection_vectorized,
     get_tang_from_pts_vectorized,
@@ -85,7 +84,7 @@ def get_char_interp_segment(
     """
     free_inds = _active_free_indices(net, int(idx_fixed), family)
     if free_inds is None or free_inds.size == 0:
-        empty_pts = np.empty((0, 4), dtype=float)
+        empty_pts = np.empty((0, 6), dtype=float)
         return empty_pts, np.empty((0,), dtype=int)
 
     free_inds = np.asarray(free_inds, dtype=int)
@@ -95,14 +94,14 @@ def get_char_interp_segment(
     if mode == "upstream":
         end_pos = np.searchsorted(free_inds, pt_idx)
         if end_pos >= free_inds.size or free_inds[end_pos] != pt_idx:
-            empty_pts = np.empty((0, 4), dtype=float)
+            empty_pts = np.empty((0, 6), dtype=float)
             return empty_pts, np.empty((0,), dtype=int)
         start_pos = max(0, end_pos - count + 1)
         free_tail = np.asarray(free_inds[start_pos : end_pos + 1], dtype=int)
     else:
         start_pos = np.searchsorted(free_inds, pt_idx, side="left")
         if start_pos >= free_inds.size:
-            empty_pts = np.empty((0, 4), dtype=float)
+            empty_pts = np.empty((0, 6), dtype=float)
             return empty_pts, np.empty((0,), dtype=int)
         free_tail = np.asarray(free_inds[start_pos : start_pos + count], dtype=int)
 
@@ -136,14 +135,14 @@ def clip_char(
 def remove_spurious_preshock_pts(
     net: CharNet,
     family: str,
-    xyuv_shock: np.ndarray,
+    xy_shock_state: np.ndarray,
     tol: float = 1.0e-10,
 ) -> int:
     """
     Remove restored-net points on the pre-shock side of a shock polyline.
 
     The test is strictly geometric. Each active net point is projected onto
-    the nearest segment of ``xyuv_shock[:, :2]``. For a restored C+ family,
+    the nearest segment of ``xy_shock_state[:, :2]``. For a restored C+ family,
     points with ``dx < 0`` and ``dy > 0`` relative to that nearest shock point
     are removed. For C-, points with ``dx < 0`` and ``dy < 0`` are removed.
     """
@@ -152,13 +151,13 @@ def remove_spurious_preshock_pts(
         msg = "family must be either 'cplus' or 'cminus'."
         raise ValueError(msg)
 
-    xyuv_shock = np.asarray(xyuv_shock, dtype=float)
-    if xyuv_shock.ndim != 2 or xyuv_shock.shape[1] < 2:
+    xy_shock_state = np.asarray(xy_shock_state, dtype=float)
+    if xy_shock_state.ndim != 2 or xy_shock_state.shape[1] < 2:
         return 0
-    if xyuv_shock.shape[0] < 2:
+    if xy_shock_state.shape[0] < 2:
         return 0
 
-    shock_xy = np.asarray(xyuv_shock[:, :2], dtype=float)
+    shock_xy = np.asarray(xy_shock_state[:, :2], dtype=float)
     finite_shock = np.all(np.isfinite(shock_xy), axis=1)
     shock_xy = shock_xy[finite_shock]
     if shock_xy.shape[0] < 2:
@@ -224,14 +223,15 @@ def remove_spurious_preshock_pts(
 
 def restore_resolution(
     net: CharNet,
-    xyuv_shock: np.ndarray,
+    xy_shock_state: np.ndarray,
     ij_shock_R: np.ndarray,
     N_res: int,
 ) -> tuple[np.ndarray, np.ndarray, CharNet, np.ndarray]:
     """
     Resample ordered shock points and seed a fresh downstream net.
 
-    ``xyuv_shock`` contains post-shock states ``[x, y, u, v]``. ``ij_shock_R``
+    ``xy_shock_state`` contains post-shock states ``[x, y, V, theta, p, rho]``.
+    ``ij_shock_R``
     identifies whether those states live on a fixed downstream ``i`` or ``j``
     boundary. The restored net is seeded by direct point edits; no IDL machinery
     is used.
@@ -241,89 +241,90 @@ def restore_resolution(
         msg = "N_res must be at least 2."
         raise ValueError(msg)
 
-    xyuv_q, ij_q, _, _ = resample_shock(
-        xyuv_shock,
+    state_q, ij_q, _, _ = resample_shock(
+        xy_shock_state,
         ij_shock_R,
         N_res,
     )
-    net_R = _make_restored_net(net, xyuv_q, ij_q)
+
+    net_R = _make_restored_net(net, state_q, ij_q)
     iter_idx = np.arange(1, N_res, dtype=int)
-    return xyuv_q, ij_q, net_R, iter_idx
+    return state_q, ij_q, net_R, iter_idx
 
 
 def resample_shock(
-    xyuv_shock: np.ndarray,
+    xy_shock_state: np.ndarray,
     ij_shock_R: np.ndarray,
     N_res: int,
 ) -> tuple[np.ndarray, np.ndarray, int, int]:
-    xyuv_shock = np.asarray(xyuv_shock, dtype=float)
-    if xyuv_shock.ndim != 2 or xyuv_shock.shape[1] < 4:
-        msg = "xyuv_shock must be a 2D array with at least four columns: [x, y, u, v]."
+    xy_shock_state = np.asarray(xy_shock_state, dtype=float)
+    if xy_shock_state.ndim != 2 or xy_shock_state.shape[1] < 6:
+        msg = "xy_shock_state must be a 2D array with columns [x, y, V, theta, p, rho]."
         raise ValueError(msg)
-    if xyuv_shock.shape[0] == 0:
-        msg = "xyuv_shock must contain at least one point."
+    if xy_shock_state.shape[0] == 0:
+        msg = "xy_shock_state must contain at least one point."
         raise ValueError(msg)
 
     ij_shock_R = np.asarray(ij_shock_R, dtype=int)
     if ij_shock_R.ndim != 2 or ij_shock_R.shape[1] != 2:
         msg = "ij_shock_R must be a 2D integer array with columns [i, j]."
         raise ValueError(msg)
-    if ij_shock_R.shape[0] != xyuv_shock.shape[0]:
+    if ij_shock_R.shape[0] != xy_shock_state.shape[0]:
         msg = "ij_shock_R must have one row for each shock point."
         raise ValueError(msg)
 
-    xyuv_shock = xyuv_shock[:, :4]
-    finite_mask = np.all(np.isfinite(xyuv_shock), axis=1)
+    xy_shock_state = xy_shock_state[:, :6]
+    finite_mask = np.all(np.isfinite(xy_shock_state), axis=1)
     finite_mask &= np.all(ij_shock_R >= 0, axis=1)
-    xyuv_shock = xyuv_shock[finite_mask]
+    xy_shock_state = xy_shock_state[finite_mask]
     ij_shock_R = ij_shock_R[finite_mask]
-    if xyuv_shock.shape[0] == 0:
-        msg = "xyuv_shock has no finite points after filtering."
+    if xy_shock_state.shape[0] == 0:
+        msg = "xy_shock_state has no finite points after filtering."
         raise ValueError(msg)
 
     fixed_axis, changing_axis = _shock_index_axes(ij_shock_R)
     order = np.argsort(ij_shock_R[:, changing_axis])
-    xyuv_shock = xyuv_shock[order]
+    xy_shock_state = xy_shock_state[order]
     ij_shock_R = ij_shock_R[order]
 
     _, unique_idx = np.unique(ij_shock_R[:, changing_axis], return_index=True)
     unique_idx = np.sort(unique_idx)
-    xyuv_shock = xyuv_shock[unique_idx]
+    xy_shock_state = xy_shock_state[unique_idx]
     ij_shock_R = ij_shock_R[unique_idx]
 
     fixed_idx = int(ij_shock_R[0, fixed_axis])
     s_pts = [0.0]
-    xyuv_pts = [xyuv_shock[0]]
+    state_pts = [xy_shock_state[0]]
 
     s_total = 0.0
-    for idx in range(1, xyuv_shock.shape[0]):
-        pt_prev = xyuv_pts[-1]
-        pt_next = xyuv_shock[idx]
+    for idx in range(1, xy_shock_state.shape[0]):
+        pt_prev = state_pts[-1]
+        pt_next = xy_shock_state[idx]
         ds = float(np.hypot(pt_next[0] - pt_prev[0], pt_next[1] - pt_prev[1]))
         if ds <= 0.0:
             continue
         s_total += ds
         s_pts.append(s_total)
-        xyuv_pts.append(pt_next)
+        state_pts.append(pt_next)
 
     if s_total <= 0.0:
-        xyuv_q = np.repeat(xyuv_shock[:1], int(N_res), axis=0)
+        state_q = np.repeat(xy_shock_state[:1], int(N_res), axis=0)
         ij_q = _resampled_shock_indices(
             int(N_res), fixed_axis, changing_axis, fixed_idx
         )
-        return xyuv_q, ij_q, fixed_axis, changing_axis
+        return state_q, ij_q, fixed_axis, changing_axis
 
     r_pts = [s_val / s_total for s_val in s_pts]
     r_q = np.linspace(0.0, 1.0, int(N_res))
-    xyuv_q = np.empty((int(N_res), 4), dtype=float)
+    state_q = np.empty((int(N_res), 6), dtype=float)
 
     seg_idx = 0
     for q_idx, r_val in enumerate(r_q):
         if r_val <= 0.0:
-            xyuv_q[q_idx] = xyuv_pts[0]
+            state_q[q_idx] = state_pts[0]
             continue
         if r_val >= 1.0:
-            xyuv_q[q_idx] = xyuv_pts[-1]
+            state_q[q_idx] = state_pts[-1]
             continue
 
         while seg_idx < (len(r_pts) - 2) and r_val > r_pts[seg_idx + 1]:
@@ -332,12 +333,12 @@ def resample_shock(
         r0 = r_pts[seg_idx]
         r1 = r_pts[seg_idx + 1]
         frac = (r_val - r0) / (r1 - r0)
-        xyuv_q[q_idx] = xyuv_pts[seg_idx] + frac * (
-            xyuv_pts[seg_idx + 1] - xyuv_pts[seg_idx]
+        state_q[q_idx] = state_pts[seg_idx] + frac * (
+            state_pts[seg_idx + 1] - state_pts[seg_idx]
         )
 
     ij_q = _resampled_shock_indices(int(N_res), fixed_axis, changing_axis, fixed_idx)
-    return xyuv_q, ij_q, fixed_axis, changing_axis
+    return state_q, ij_q, fixed_axis, changing_axis
 
 
 def _shock_index_axes(ij_shock_R: np.ndarray) -> tuple[int, int]:
@@ -383,13 +384,13 @@ def _resampled_shock_indices(
 
 def _make_restored_net(
     net: CharNet,
-    xyuv_q: np.ndarray,
+    state_q: np.ndarray,
     ij_q: np.ndarray,
 ) -> CharNet:
     net_R = CharNet(
-        xyuv_q.shape[0],
+        state_q.shape[0],
         net.inlet,
-        net.region,
+        net.gamma,
         max_iters=net.max_iters,
         tol=net.tol,
     )
@@ -397,9 +398,9 @@ def _make_restored_net(
     net_R.idl_kind = net.idl_kind
     net_R.prepared_j_stop = net.prepared_j_stop
 
-    for q_idx, pt in enumerate(xyuv_q):
+    for q_idx, pt in enumerate(state_q):
         i_q, j_q = ij_q[q_idx]
-        point_type = 3 if q_idx in (0, xyuv_q.shape[0] - 1) else 2
+        point_type = 3 if q_idx in (0, state_q.shape[0] - 1) else 2
         net_R.edit_point(int(i_q), int(j_q), pt, point_type)
 
     return net_R
@@ -551,14 +552,17 @@ def enforce_net_bounds(
 
     rows_delete = active_rows[~keep]
     cols_delete = active_cols[~keep]
-    _plot_cleanup_candidates(
-        net,
-        rows_delete,
-        cols_delete,
-        debug_plots=debug_plots,
-        debug_plotter=debug_plotter,
-        boundary_xy=boundary_xy,
-    )
+    if debug_plots:
+        from inlet_moc.plot.net_shock import _plot_cleanup_candidates
+
+        _plot_cleanup_candidates(
+            net,
+            rows_delete,
+            cols_delete,
+            debug_plots=debug_plots,
+            debug_plotter=debug_plotter,
+            boundary_xy=boundary_xy,
+        )
 
     net.deactivate_points(rows_delete, cols_delete)
     return
@@ -671,21 +675,36 @@ def clip_coalescing_same_family_chars(
                 & (tol < t_keep)
                 & (t_keep < 1.0 - tol)
             )
+            if family == "cminus":
+                clip_rows = clip_free_hi
+                clip_cols = np.full_like(clip_rows, int(clip_idx))
+            else:
+                clip_rows = np.full_like(clip_free_hi, int(clip_idx))
+                clip_cols = clip_free_hi
+            clip_endpoint_is_field = np.isclose(
+                net.point_type[clip_rows, clip_cols],
+                0,
+                equal_nan=False,
+            )
+            valid &= clip_endpoint_is_field[:, None]
             row_hits = np.any(valid, axis=1)
             if not np.any(row_hits):
                 continue
 
             clip_start = int(clip_free_hi[np.flatnonzero(row_hits)[0]])
-            _plot_coalescing_cleanup(
-                net,
-                family=family,
-                clip_idx=int(clip_idx),
-                keep_idx=int(keep_idx),
-                clip_start=clip_start,
-                intersection_xy=xy_hit[valid],
-                debug_plots=debug_plots,
-                debug_plotter=debug_plotter,
-            )
+            if debug_plots:
+                from inlet_moc.plot.net_shock import _plot_coalescing_cleanup
+
+                _plot_coalescing_cleanup(
+                    net,
+                    family=family,
+                    clip_idx=int(clip_idx),
+                    keep_idx=int(keep_idx),
+                    clip_start=clip_start,
+                    intersection_xy=xy_hit[valid],
+                    debug_plots=debug_plots,
+                    debug_plotter=debug_plotter,
+                )
 
             clip_char(
                 net,

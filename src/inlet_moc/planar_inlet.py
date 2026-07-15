@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from inlet_moc import utils_moc
@@ -109,6 +108,8 @@ class PlanarInlet:
 
     def plot_inlet(self, fig=None, ax=None):
         if ax is None:
+            import matplotlib.pyplot as plt
+
             fig, ax = plt.subplots(figsize=(6, 3))
         elif fig is None:
             fig = ax.figure

@@ -6,7 +6,7 @@ import numpy as np
 from scipy.spatial import Delaunay
 
 if TYPE_CHECKING:
-    from inlet_moc.moc_soln import MOCSolution
+    from inlet_moc.moc_solution import MOCSolution
 
 
 class TriangulatedSolution:
@@ -229,29 +229,41 @@ def build_tris(soln: MOCSolution) -> tuple[list[Delaunay], list[np.ndarray]]:
     primitives: list[np.ndarray] = []
 
     for cell in soln.cells:
-        xyuv = cell.xyuv_points()
-        if xyuv.shape[0] < 3:
+        pts = cell.state_points()
+        if pts.shape[0] < 3:
             continue
 
-        tri = Delaunay(xyuv[:, :2])
-        u = xyuv[:, 2]
-        v = xyuv[:, 3]
-        rho, p, a = cell.region.get_rho_p_a(u, v)
+        tri = Delaunay(pts[:, :2])
+        V = pts[:, 2]
+        theta = pts[:, 3]
+        p = pts[:, 4]
+        rho = pts[:, 5]
+        u = V * np.cos(theta)
+        v = V * np.sin(theta)
+        a = np.sqrt(soln.gamma * p / rho)
 
         tris.append(tri)
+        # Stored states are [x, y, V, theta, p, rho]; derived primitives are
+        # [rho, u, v, p, a] for plotting and stream-thrust integration.
         primitives.append(np.column_stack((rho, u, v, p, a)))
 
     for net in soln.nets:
-        xyuv = net.get_active_points()
-        if xyuv.shape[0] < 3:
+        pts = net.get_active_points()
+        if pts.shape[0] < 3:
             continue
 
-        tri = Delaunay(xyuv[:, :2])
-        u = xyuv[:, 2]
-        v = xyuv[:, 3]
-        rho, p, a = net.region.get_rho_p_a(u, v)
+        tri = Delaunay(pts[:, :2])
+        V = pts[:, 2]
+        theta = pts[:, 3]
+        p = pts[:, 4]
+        rho = pts[:, 5]
+        u = V * np.cos(theta)
+        v = V * np.sin(theta)
+        a = np.sqrt(soln.gamma * p / rho)
 
         tris.append(tri)
+        # Stored states are [x, y, V, theta, p, rho]; derived primitives are
+        # [rho, u, v, p, a] for plotting and stream-thrust integration.
         primitives.append(np.column_stack((rho, u, v, p, a)))
 
     return tris, primitives

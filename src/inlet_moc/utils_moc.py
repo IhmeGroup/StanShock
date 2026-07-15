@@ -41,7 +41,7 @@ def get_intersection(coeffs1, coeffs2):
 
 
 def get_theta(pt: np.ndarray):
-    return np.atan2(pt[3], pt[2])
+    return pt[3]
 
 
 def get_tang_from_pts(pt0: np.ndarray, pt1: np.ndarray):
@@ -188,24 +188,31 @@ def order_cell_vertices(verts: np.ndarray) -> np.ndarray:
     return verts[np.argsort(angles)]
 
 
-def interp_pts(pt1: np.ndarray, pt2: np.ndarray, xy_q):
+def interp_pts(pt1: np.ndarray, pt2: np.ndarray, xy_q, clip: bool = False):
     pt1 = np.asarray(pt1, dtype=float).reshape(-1)
     pt2 = np.asarray(pt2, dtype=float).reshape(-1)
     xy_q = np.asarray(xy_q, dtype=float)
+    if pt1.shape != pt2.shape:
+        msg = "Interpolation endpoints must have matching state shapes."
+        raise ValueError(msg)
+    if pt1.size < 2:
+        msg = "Interpolation endpoints must include at least x and y."
+        raise ValueError(msg)
     dxy = pt2[:2] - pt1[:2]
     seg_len2 = float(np.dot(dxy, dxy))
 
     r_frac = 0.0 if seg_len2 <= 0.0 else float(np.dot(xy_q - pt1[:2], dxy) / seg_len2)
+    if clip:
+        r_frac = float(np.clip(r_frac, 0.0, 1.0))
 
-    u_q = pt1[2] + r_frac * (pt2[2] - pt1[2])
-    v_q = pt1[3] + r_frac * (pt2[3] - pt1[3])
-    return np.array([xy_q[0], xy_q[1], u_q, v_q])
+    state_q = pt1[2:] + r_frac * (pt2[2:] - pt1[2:])
+    return np.concatenate((xy_q[:2], state_q))
 
 
 def intersect_line_polyline(coeffs: np.ndarray, pts: np.ndarray, tol: float = 1e-12):
     """
     coeffs: shape (3,), [a, b, c] for a*x + b*y + c = 0
-    pts:    shape (N, 4), rows are [x, y, u, v]
+    pts:    shape (N, 6), rows are [x, y, V, theta, p, rho]
 
     returns:
         ``(pt, idx)`` when an intersection is found, otherwise ``None``.
@@ -226,11 +233,11 @@ def intersect_line_polyline(coeffs: np.ndarray, pts: np.ndarray, tol: float = 1e
     scale = np.sqrt(a * a + b * b)
     a, b, c = a / scale, b / scale, c / scale
 
-    p0 = pts[:-1]
+    pts0 = pts[:-1]
     p1 = pts[1:]
-    dp = p1 - p0
+    dp = p1 - pts0
 
-    f0 = a * p0[:, 0] + b * p0[:, 1] + c
+    f0 = a * pts0[:, 0] + b * pts0[:, 1] + c
     f1 = a * p1[:, 0] + b * p1[:, 1] + c
 
     z0 = np.abs(f0) <= tol
@@ -245,6 +252,6 @@ def intersect_line_polyline(coeffs: np.ndarray, pts: np.ndarray, tol: float = 1e
 
     i = np.argmax(hit)
     if z0[i]:
-        return p0[i].copy(), int(i)
+        return pts0[i].copy(), int(i)
     r = f0[i] / (f0[i] - f1[i])
-    return p0[i] + r * dp[i], int(i + 1)
+    return pts0[i] + r * dp[i], int(i + 1)

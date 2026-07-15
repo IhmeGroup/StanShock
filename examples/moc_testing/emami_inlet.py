@@ -5,12 +5,11 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from inlet_moc.get_streamtube_bounds import get_streamtube_bounds
-from inlet_moc.moc_soln import MOCSolution
+from inlet_moc.moc_solution import MOCSolution
 from inlet_moc.planar_inlet import PlanarInlet
-from inlet_moc.plot_soln import plot_stream_thrust_average
-from inlet_moc.processing import process_solution
-from inlet_moc.shock_fxns import obl_shock_angle
+from inlet_moc.plot.solution import plot_stream_thrust_average
+from inlet_moc.processing.processing import process_solution
+from inlet_moc.shock_solvers.char_shock import obl_shock_angle
 
 ###############################################################################
 #              Emami, 1995, NASA Technical Paper 3502                         #
@@ -95,7 +94,10 @@ def streamtube_fxn(
 datadir = Path(__file__).resolve().parent
 figdir = datadir / "01_figs"
 figdir.mkdir(parents=True, exist_ok=True)
-su2_st_file = datadir / "00_data" / "euler_streamthrust_avg.csv"
+su2_st_file = datadir / "00_data" / "emami_streamthrust_su2.csv"
+irrotational_st_file = (
+    datadir / "00_data" / "irrotational_stream_thrust_average_100_IDL.csv"
+)
 
 inlet = PlanarInlet(centerbody, cowl)
 
@@ -112,7 +114,6 @@ def build_solution(
     *,
     x_stop_in: float = x_stop,
     verbose: bool = False,
-    solution_mode: str = "analytical",
 ) -> MOCSolution:
     return MOCSolution(
         inlet=inlet,
@@ -122,7 +123,6 @@ def build_solution(
         p_amb=p_amb,
         N_idl=N_idl_in,
         x_stop=x_stop_in,
-        solution_mode=solution_mode,
         verbose=verbose,
         plot_during_solve=False,
         figdir=figdir,
@@ -133,13 +133,18 @@ def main() -> None:
     soln = build_solution()
     soln.solve_inlet()
 
-    result = process_solution(soln, figdir=figdir, plot_vars=("rho", "p", "M", "T"))
+    result = process_solution(
+        soln,
+        mode="analytical",
+        nx=200,
+        figdir=figdir,
+        plot_vars=("rho", "p", "M", "T"),
+    )
     print(f"[main] final_state={result.final_state}")
     print(f"[main] eta_inlet={result.eta_inlet:.6g}")
     print(f"[main] p0_loss={result.p0_loss:.6g}")
 
-    numerical_bounds = get_streamtube_bounds(soln)
-    x_num, _, y_cowl_num = numerical_bounds
+    x_num, y_cowl_num, y_cent_num = soln.streamtube
     cowl_st_a, _ = streamtube_fxn(Mach, soln.gamma, np.radians(theta))
 
     fig, ax = inlet.plot_inlet()
@@ -162,21 +167,36 @@ def main() -> None:
 
     su2 = np.genfromtxt(su2_st_file, delimiter=",", names=True)
     su2 = su2[su2["x"] <= x_stop]
+    irrotational = np.genfromtxt(irrotational_st_file, delimiter=",", names=True)
+    irrotational = irrotational[irrotational["x"] <= x_stop]
 
     fig, axes = plot_stream_thrust_average(
-        soln,
-        result.average_profile,
+        inlet,
         plot_vars=("rho", "u", "p", "mach", "t"),
-        global_legend=f"MOC ({soln.N_idl} IDL)",
-    )
-    fig, axes = plot_stream_thrust_average(
-        soln,
-        plot_vars=("rho", "u", "p", "mach", "t"),
-        fig=fig,
-        axes=axes,
+        bounds=(x_num, y_cent_num, y_cowl_num),
         dataset=su2,
         global_legend="SU2 Euler",
         color="k",
+    )
+    fig, axes = plot_stream_thrust_average(
+        inlet,
+        plot_vars=("rho", "u", "p", "mach", "t"),
+        fig=fig,
+        axes=axes,
+        bounds=(x_num, y_cent_num, y_cowl_num),
+        dataset=irrotational,
+        global_legend="Irrotational (100 IDL)",
+        color="tab:blue",
+    )
+    fig, axes = plot_stream_thrust_average(
+        inlet,
+        result.average_profile,
+        plot_vars=("rho", "u", "p", "mach", "t"),
+        fig=fig,
+        axes=axes,
+        bounds=(x_num, y_cent_num, y_cowl_num),
+        global_legend=f"Rotational ({soln.N_idl} IDL)",
+        color="tab:red",
     )
     streamthrust_path = figdir / f"stream_thrust_overlay_{soln.N_idl}_IDL.png"
     fig.savefig(streamthrust_path, dpi=500, bbox_inches="tight")

@@ -8,23 +8,18 @@ from typing import TYPE_CHECKING
 import matplotlib.pyplot as plt
 import numpy as np
 
-from inlet_moc.plot_helpers import PlotBounds, _format_solution_axis
+from inlet_moc.plot.helpers import PlotBounds, _format_solution_axis
 
 if TYPE_CHECKING:
-    from inlet_moc.charnet import CharNet
+    from inlet_moc.char_net import CharNet
 
 
 @dataclass(frozen=True)
 class ShockStepOverlay:
-    step_kind: str
-    step_rejected: bool = False
     shock_pt: np.ndarray | None = None
     shock_idx: tuple[int, int] | None = None
-    tangent_pt: np.ndarray | None = None
-    tangent_angle: float | None = None
     mesh_pt: np.ndarray | None = None
     mesh_idx: tuple[int, int] | None = None
-    mesh_deleted: bool = False
     left_interp: np.ndarray | None = None
     left_idx: tuple[int, int] | None = None
     right_interp: np.ndarray | None = None
@@ -47,7 +42,14 @@ def _finite_net_xy(net: CharNet) -> tuple[np.ndarray, np.ndarray]:
     return np.array([], dtype=float), np.array([], dtype=float)
 
 
-def _plot_net_lines(ax, net: CharNet, *, color: str, lw: float, label: str) -> None:
+def _plot_net_lines(
+    ax,
+    net: CharNet,
+    *,
+    color: str,
+    lw: float,
+    label: str,
+) -> None:
     xy_mask = net.xy_mask()
     first = True
     for i in range(net.N):
@@ -275,22 +277,23 @@ def _plot_coalescing_cleanup(
 class ShockNetPlotter:
     def __init__(
         self,
-        prior_net: CharNet,
-        downstream_net: CharNet,
+        net_L: CharNet,
+        net_R: CharNet,
         *,
         family: str,
         minimal: bool = False,
         output_path: str | Path | None = None,
     ) -> None:
-        self.prior_net = prior_net
-        self.downstream_net = downstream_net
+        self.net_L = net_L
+        self.net_R = net_R
         self.family = str(family)
         self.minimal = bool(minimal)
         self.output_path = None if output_path is None else Path(output_path)
         self._history: list[ShockStepOverlay] = []
+        self._resampled_shock_state = np.empty((0, 6), dtype=float)
 
         plt.ion()
-        self.fig, self.ax = self.prior_net.inlet.plot_inlet()
+        self.fig, self.ax = self.net_L.inlet.plot_inlet()
         manager = getattr(self.fig.canvas, "manager", None)
         if manager is not None:
             manager.set_window_title(f"net_shock: {self.family}")
@@ -298,57 +301,55 @@ class ShockNetPlotter:
         self.redraw()
 
     def _x_limits_data(self) -> tuple[float, float]:
-        x_prior, y_prior = _finite_net_xy(self.prior_net)
-        x_down, y_down = _finite_net_xy(self.downstream_net)
+        x_L, y_L = _finite_net_xy(self.net_L)
+        x_R, y_R = _finite_net_xy(self.net_R)
 
         x_parts = []
         y_parts = [
-            np.asarray(self.prior_net.inlet.centerbody.y, dtype=float),
-            np.asarray(self.prior_net.inlet.cowl.y, dtype=float),
+            np.asarray(self.net_L.inlet.centerbody.y, dtype=float),
+            np.asarray(self.net_L.inlet.cowl.y, dtype=float),
         ]
-        if x_prior.size > 0:
-            x_parts.append(x_prior)
-            y_parts.append(y_prior)
-        if x_down.size > 0:
-            x_parts.append(x_down)
-            y_parts.append(y_down)
+        if x_L.size > 0:
+            x_parts.append(x_L)
+            y_parts.append(y_L)
+        if x_R.size > 0:
+            x_parts.append(x_R)
+            y_parts.append(y_R)
 
         if x_parts:
             x_min_data = (
-                float(np.nanmin(x_prior))
-                if x_prior.size > 0
-                else float(np.nanmin(x_parts[0]))
+                float(np.nanmin(x_L)) if x_L.size > 0 else float(np.nanmin(x_parts[0]))
             )
-            if x_down.size > 0:
-                x_max_data = float(np.nanmax(x_down))
-            elif x_prior.size > 0:
-                x_max_data = float(np.nanmax(x_prior))
+            if x_R.size > 0:
+                x_max_data = float(np.nanmax(x_R))
+            elif x_L.size > 0:
+                x_max_data = float(np.nanmax(x_L))
             else:
                 x_max_data = x_min_data + 1.0e-6
 
         else:
             x_min_data = min(
-                float(self.prior_net.inlet.centerbody.x_min),
-                float(self.prior_net.inlet.cowl.x_min),
+                float(self.net_L.inlet.centerbody.x_min),
+                float(self.net_L.inlet.cowl.x_min),
             )
             x_max_data = max(
-                float(self.prior_net.inlet.centerbody.x_max),
-                float(self.prior_net.inlet.cowl.x_max),
+                float(self.net_L.inlet.centerbody.x_max),
+                float(self.net_L.inlet.cowl.x_max),
             )
 
         return float(x_min_data), float(x_max_data)
 
     def _fallback_y_limits(self) -> tuple[float, float]:
-        _, y_prior = _finite_net_xy(self.prior_net)
-        _, y_down = _finite_net_xy(self.downstream_net)
+        _, y_L = _finite_net_xy(self.net_L)
+        _, y_R = _finite_net_xy(self.net_R)
         y_parts = [
-            np.asarray(self.prior_net.inlet.centerbody.y, dtype=float),
-            np.asarray(self.prior_net.inlet.cowl.y, dtype=float),
+            np.asarray(self.net_L.inlet.centerbody.y, dtype=float),
+            np.asarray(self.net_L.inlet.cowl.y, dtype=float),
         ]
-        if y_prior.size > 0:
-            y_parts.append(y_prior)
-        if y_down.size > 0:
-            y_parts.append(y_down)
+        if y_L.size > 0:
+            y_parts.append(y_L)
+        if y_R.size > 0:
+            y_parts.append(y_R)
         y_all = np.concatenate(y_parts)
         y_min = float(np.nanmin(y_all))
         y_max = float(np.nanmax(y_all))
@@ -363,8 +364,8 @@ class ShockNetPlotter:
 
         wall_y = []
         for wall in (
-            self.prior_net.inlet.centerbody,
-            self.prior_net.inlet.cowl,
+            self.net_L.inlet.centerbody,
+            self.net_L.inlet.cowl,
         ):
             for x_val in (x_min_data, x_max_data):
                 try:
@@ -403,15 +404,10 @@ class ShockNetPlotter:
     def add_step(
         self,
         *,
-        step_kind: str,
-        step_rejected: bool = False,
         shock_pt: np.ndarray | None = None,
         shock_idx: tuple[int, int] | None = None,
-        tangent_pt: np.ndarray | None = None,
-        tangent_angle: float | None = None,
         mesh_pt: np.ndarray | None = None,
         mesh_idx: tuple[int, int] | None = None,
-        mesh_deleted: bool = False,
         left_interp: np.ndarray | None = None,
         left_idx: tuple[int, int] | None = None,
         right_interp: np.ndarray | None = None,
@@ -419,21 +415,26 @@ class ShockNetPlotter:
     ) -> None:
         self._history.append(
             ShockStepOverlay(
-                step_kind=str(step_kind),
-                step_rejected=bool(step_rejected),
                 shock_pt=shock_pt,
                 shock_idx=shock_idx,
-                tangent_pt=tangent_pt,
-                tangent_angle=None if tangent_angle is None else float(tangent_angle),
                 mesh_pt=mesh_pt,
                 mesh_idx=mesh_idx,
-                mesh_deleted=bool(mesh_deleted),
                 left_interp=left_interp,
                 left_idx=left_idx,
                 right_interp=right_interp,
                 right_idx=right_idx,
             )
         )
+        self.redraw()
+
+    def set_resampled_points(self, shock_state: np.ndarray) -> None:
+        shock_state = np.asarray(shock_state, dtype=float)
+        if shock_state.ndim == 1:
+            shock_state = shock_state.reshape(1, -1)
+        if shock_state.size == 0:
+            self._resampled_shock_state = np.empty((0, 6), dtype=float)
+        else:
+            self._resampled_shock_state = shock_state[:, :6]
         self.redraw()
 
     def _annotate_point(
@@ -496,97 +497,25 @@ class ShockNetPlotter:
         self._annotate_point(pt, idx, color=edgecolor)
 
     @staticmethod
-    def _shock_style(overlay: ShockStepOverlay) -> dict[str, object]:
-        if overlay.step_kind == "origin":
-            return {
-                "marker": "D",
-                "edgecolor": "r",
-                "facecolor": "r",
-                "label": "Org.",
-                "linewidth": 1.0,
-                "size": 3.0,
-            }
-        if overlay.step_kind == "from_wall":
-            return {
-                "marker": "o",
-                "edgecolor": "r",
-                "facecolor": "r",
-                "label": "From wall",
-                "linewidth": 1.0,
-                "size": 3.0,
-            }
-        if overlay.step_kind == "field":
-            return {
-                "marker": "o",
-                "edgecolor": "r",
-                "facecolor": "none",
-                "label": "Field",
-                "linewidth": 1.1,
-                "size": 3.0,
-            }
-        if overlay.step_kind == "to_wall":
-            return {
-                "marker": "s",
-                "edgecolor": "r",
-                "facecolor": "r",
-                "label": "To wall",
-                "linewidth": 1.0,
-                "size": 3.0,
-            }
+    def _shock_style() -> dict[str, object]:
         return {
             "marker": "o",
             "edgecolor": "r",
             "facecolor": "r",
-            "label": None,
+            "label": "shock",
             "linewidth": 1.0,
-            "size": 24.0,
+            "size": 3.0,
         }
 
     @staticmethod
-    def _mesh_style(overlay: ShockStepOverlay) -> dict[str, object]:
-        if overlay.mesh_deleted:
-            return {
-                "marker": "x",
-                "edgecolor": "b",
-                "facecolor": None,
-                "label": "Field Mesh (DEL)",
-                "linewidth": 1.2,
-                "size": 32.0,
-            }
-        if overlay.step_kind == "from_wall":
-            return {
-                "marker": "o",
-                "edgecolor": "b",
-                "facecolor": "b",
-                "label": "From wall mesh",
-                "linewidth": 1.0,
-                "size": 26.0,
-            }
-        if overlay.step_kind == "field":
-            return {
-                "marker": "o",
-                "edgecolor": "b",
-                "facecolor": "none",
-                "label": "Field Mesh",
-                "linewidth": 1.1,
-                "size": 26.0,
-            }
-        if overlay.step_kind == "to_wall":
-            return {
-                "marker": "s",
-                "edgecolor": "b",
-                "facecolor": "b",
-                "label": "To wall mesh",
-                "linewidth": 1.0,
-                "size": 28.0,
-            }
+    def _mesh_style() -> dict[str, object]:
         return {
             "marker": "o",
             "edgecolor": "b",
             "facecolor": "b",
-            "label": None,
+            "label": "mesh",
             "linewidth": 1.0,
-            "size": 24.0,
+            "size": 6.0,
         }
 
     @staticmethod
@@ -601,50 +530,48 @@ class ShockNetPlotter:
             "size": 22.0,
         }
 
-    def _plot_shock_tangent(
-        self,
-        pt: np.ndarray | None,
-        beta: float | None,
-        *,
-        label: str,
-        seen_labels: set[str],
-    ) -> None:
-        if pt is None or beta is None:
+    def _plot_resampled_points(self, seen_labels: set[str] | None = None) -> None:
+        if self._resampled_shock_state.size == 0:
             return
-        if not (np.all(np.isfinite(pt[:2])) and np.isfinite(beta)):
+        pts = self._resampled_shock_state
+        finite = np.all(np.isfinite(pts[:, :2]), axis=1)
+        if not np.any(finite):
             return
-        _, x_max = self.ax.get_xlim()
-        x0 = float(pt[0])
-        x_line = np.array([x0, x_max], dtype=float)
-        y_line = float(pt[1]) + np.tan(float(beta)) * (x_line - float(pt[0]))
-        self.ax.plot(
-            x_line,
-            y_line,
-            color="r",
-            linestyle="--",
-            lw=0.8,
-            alpha=0.75,
-            zorder=10,
-            label=None if label in seen_labels else label,
+
+        label = None
+        if seen_labels is not None and "resampled" not in seen_labels:
+            label = "resampled"
+
+        self.ax.scatter(
+            pts[finite, 0],
+            pts[finite, 1],
+            s=3,
+            marker="o",
+            edgecolors="r",
+            facecolors="none",
+            linewidths=0.7,
+            zorder=16,
+            label=label,
         )
-        seen_labels.add(label)
+        if seen_labels is not None:
+            seen_labels.add("resampled")
 
     def redraw(self) -> None:
         self.ax.clear()
-        self.prior_net.inlet.plot_inlet(fig=self.fig, ax=self.ax)
+        self.net_L.inlet.plot_inlet(fig=self.fig, ax=self.ax)
         _format_solution_axis(self.ax, self._bounds())
         self.ax.set_title(f"{self.family} shock solve")
 
         _plot_net_lines(
             self.ax,
-            self.prior_net,
+            self.net_L,
             color="0.55",
             lw=0.30,
             label="_nolegend_",
         )
         _plot_net_lines(
             self.ax,
-            self.downstream_net,
+            self.net_R,
             color="k",
             lw=0.30,
             label="_nolegend_",
@@ -675,6 +602,7 @@ class ShockNetPlotter:
                     )
                     self._annotate_point(overlay.mesh_pt, overlay.mesh_idx, color="b")
 
+            self._plot_resampled_points()
             self.fig.tight_layout()
             self.fig.canvas.draw_idle()
             self.fig.canvas.flush_events()
@@ -686,8 +614,8 @@ class ShockNetPlotter:
         seen_labels = set()
         accepted_mesh_indices: set[tuple[int, int]] = set()
         for overlay in self._history:
-            shock_style = self._shock_style(overlay)
-            mesh_style = self._mesh_style(overlay)
+            shock_style = self._shock_style()
+            mesh_style = self._mesh_style()
             left_style = self._interp_style("left")
             right_style = self._interp_style("right")
             self._scatter_role(
@@ -702,7 +630,7 @@ class ShockNetPlotter:
                 **mesh_style,
                 seen_labels=seen_labels,
             )
-            if (overlay.mesh_idx is not None) and (not overlay.mesh_deleted):
+            if overlay.mesh_idx is not None:
                 accepted_mesh_indices.add(tuple(map(int, overlay.mesh_idx)))
 
             left_is_reused_mesh = (
@@ -728,6 +656,8 @@ class ShockNetPlotter:
                     **right_style,
                     seen_labels=seen_labels,
                 )
+
+        self._plot_resampled_points(seen_labels)
 
         handles, labels = self.ax.get_legend_handles_labels()
         if handles:

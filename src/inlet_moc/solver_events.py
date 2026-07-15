@@ -5,13 +5,13 @@ from pathlib import Path
 
 import numpy as np
 
-from inlet_moc.char_shock_solvers import ShockPoint
-from inlet_moc.charnet import CharNet
+from inlet_moc.char_net import CharNet
 from inlet_moc.planar_inlet import (
     PiecewiseLinearCurve,
     PlanarInlet,
     get_opposite_wall,
 )
+from inlet_moc.shock_solvers.char_shock import ShockPoint
 
 
 @dataclass(frozen=True)
@@ -51,8 +51,7 @@ def _wall_event_arrays(
 
     x = np.asarray(prior_net.x[rows, cols], dtype=float)
     y = np.asarray(prior_net.y[rows, cols], dtype=float)
-    u = np.asarray(prior_net.u[rows, cols], dtype=float)
-    v = np.asarray(prior_net.v[rows, cols], dtype=float)
+    theta = np.asarray(prior_net.theta[rows, cols], dtype=float)
 
     y_cowl = np.asarray([inlet.cowl.get_y(float(xv)) for xv in x], dtype=float)
     y_cent = np.asarray([inlet.centerbody.get_y(float(xv)) for xv in x], dtype=float)
@@ -70,8 +69,7 @@ def _wall_event_arrays(
         "cols": cols,
         "x": x,
         "y": y,
-        "u": u,
-        "v": v,
+        "theta": theta,
         "on_cowl": on_cowl,
         "on_cent": on_cent,
     }
@@ -96,7 +94,7 @@ def get_next_event(
         if not np.any(on_wall):
             continue
 
-        theta_flow = np.atan2(wall_data["v"][on_wall], wall_data["u"][on_wall])
+        theta_flow = wall_data["theta"][on_wall]
         theta_wall = np.atan(
             np.asarray(
                 [wall.get_dydx(float(xv)) for xv in wall_data["x"][on_wall]],
@@ -162,9 +160,8 @@ def check_shock_reflection(
     next_family: str,
     tol: float = 1e-10,
 ):
-    x_sw, y_sw, u_sw, v_sw = shock_pair.pt_post
+    x_sw, y_sw, _, theta_flow, _, _ = shock_pair.pt_post
 
-    theta_flow = np.atan2(v_sw, u_sw)
     theta_wall = np.atan(wall_from.get_dydx(x_sw))
     delta = theta_wall - theta_flow
     signed_turn = delta * wall_from.normal_sign
@@ -193,9 +190,9 @@ def handle_event(
     if event_i is None:
         return None
 
-    from inlet_moc.char_shock_solvers import DetachedShockError, SubsonicFlowError
-    from inlet_moc.char_solvers import NoWallIntersectionError
-    from inlet_moc.net_shock_solver import NetShockSolver
+    from inlet_moc.rotational_solvers import NoWallIntersectionError
+    from inlet_moc.shock_solvers.char_shock import DetachedShockError, SubsonicFlowError
+    from inlet_moc.shock_solvers.net_shock import NetShockSolver
 
     solver = NetShockSolver(
         net=net_im1,

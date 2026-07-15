@@ -11,7 +11,7 @@ from matplotlib.colors import Normalize
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.tri import Triangulation
 
-from inlet_moc.plot_helpers import (
+from inlet_moc.plot.helpers import (
     PlotBounds,
     PlotSettings,
     _format_solution_axis,
@@ -19,8 +19,8 @@ from inlet_moc.plot_helpers import (
 )
 
 if TYPE_CHECKING:
-    from inlet_moc.charnet import CharNet
-    from inlet_moc.moc_soln import MOCSolution
+    from inlet_moc.char_net import CharNet
+    from inlet_moc.moc_solution import MOCSolution
 
 XSMALL_SIZE = 10
 SMALL_SIZE = 12
@@ -49,11 +49,12 @@ def _primitive_values(
     soln: MOCSolution, primitives: np.ndarray, plot_key: str
 ) -> np.ndarray:
     key = str(plot_key).lower()
+    # primitives are [rho, u, v, p, a], derived from rotational states.
     rho = primitives[:, 0]
     u = primitives[:, 1]
     v = primitives[:, 2]
     p = primitives[:, 3]
-    a = primitives[:, 4]
+    a = np.sqrt(soln.gamma * p / rho)
     if key == "rho":
         return rho
     if key == "u":
@@ -67,7 +68,7 @@ def _primitive_values(
     if key in {"m", "mach"}:
         return np.hypot(u, v) / a
     if key in {"t", "temperature"}:
-        return (a * a) / (soln.gamma * soln.R)
+        return p / (rho * soln.R)
     msg = f"Unsupported plot variable: {plot_key}"
     raise KeyError(msg)
 
@@ -312,6 +313,7 @@ def plot_moc_soln(
     show_nets: bool = False,
     show_point_ids: bool = False,
     bounds: PlotBounds | None = None,
+    point_mesh=None,
     plot_tri_edges: bool = False,
 ):
     if plot_var is None:
@@ -343,7 +345,11 @@ def plot_moc_soln(
         return fig, ax
 
     plot_settings = [PlotSettings.get(name) for name in plot_vars]
-    soln_tri = soln.collect_integration_points()
+    if point_mesh is None:
+        point_mesh = getattr(soln, "point_mesh", None)
+    if point_mesh is None:
+        msg = "point_mesh is required to plot solution fields."
+        raise RuntimeError(msg)
     fig = plt.figure(figsize=(fig_width, row_height * len(plot_settings)))
     gs = fig.add_gridspec(
         nrows=len(plot_settings),
@@ -369,9 +375,9 @@ def plot_moc_soln(
         if _plot_tri_fills(
             ax,
             plot_cfg.key,
-            soln_tri.points,
-            soln_tri.triangles,
-            soln_tri.primitives,
+            point_mesh.points,
+            point_mesh.triangles,
+            point_mesh.primitives,
             soln,
             plot_cfg.cmap,
             norm,
@@ -403,12 +409,13 @@ def plot_moc_soln(
 
 
 def plot_stream_thrust_average(
-    soln: MOCSolution,
+    inlet,
     avg: np.ndarray | None = None,
     plot_vars: Sequence[str] = ("rho", "u", "p", "mach", "t"),
     bounds=None,
     global_legend: str | None = None,
     *,
+    n_idl: int | None = None,
     fig=None,
     axes=None,
     dataset: np.ndarray | None = None,
@@ -418,12 +425,14 @@ def plot_stream_thrust_average(
     n_plots = len(plot_settings)
     plot_data = dataset if dataset is not None else avg
 
+    if plot_data is None:
+        msg = "avg or dataset is required for stream-thrust plotting."
+        raise ValueError(msg)
     if bounds is None:
-        x_bounds, y_cowl_st, y_cent_st = soln.streamtube
-        bounds_for_h = (x_bounds, y_cent_st, y_cowl_st)
-    else:
-        x_bounds, y_cent_st, y_cowl_st = bounds
-        bounds_for_h = bounds
+        msg = "bounds are required for stream-thrust plotting."
+        raise ValueError(msg)
+
+    x_bounds, y_cent_st, y_cowl_st = bounds
 
     y_all = np.concatenate((y_cent_st, y_cowl_st))
     x_all = x_bounds
@@ -451,7 +460,12 @@ def plot_stream_thrust_average(
     x_plot = _stream_thrust_x(plot_data)
     label = global_legend
     if label is None:
-        label = "Dataset" if dataset is not None else f"MOC ({soln.N_idl} IDL)"
+        if dataset is not None:
+            label = "Dataset"
+        elif n_idl is None:
+            label = "MOC"
+        else:
+            label = f"MOC ({n_idl} IDL)"
 
     for idx, (ax, plot_cfg) in enumerate(zip(axes_flat, plot_settings, strict=False)):
         var = plot_cfg.key
@@ -463,10 +477,10 @@ def plot_stream_thrust_average(
         _apply_nice_yaxis(ax)
         if draw_streamtube:
             _add_h_plot(
-                soln,
+                inlet,
                 ax,
                 x_plot,
-                bounds=bounds_for_h,
+                bounds=bounds,
                 show_ylabel=(idx == 0),
             )
 
@@ -479,7 +493,7 @@ def plot_stream_thrust_average(
 
 
 def _add_h_plot(
-    soln: MOCSolution,
+    inlet,
     ax,
     x_plot: np.ndarray,
     *,
@@ -492,31 +506,31 @@ def _add_h_plot(
 
     x_plot = np.asarray(x_plot, dtype=float)
     lower_wall = np.asarray(
-        [soln.inlet.centerbody.get_y(float(x_q)) for x_q in x_plot],
+        [inlet.centerbody.get_y(float(x_q)) for x_q in x_plot],
         dtype=float,
     )
     upper_wall = np.asarray(
-        [soln.inlet.cowl.get_y(float(x_q)) for x_q in x_plot],
+        [inlet.cowl.get_y(float(x_q)) for x_q in x_plot],
         dtype=float,
     )
     x_bounds, y_lower, y_upper = bounds
     lower_cap = np.interp(x_plot, x_bounds, y_lower)
     upper_cap = np.interp(x_plot, x_bounds, y_upper)
-    x_geom_last = float(min(soln.inlet.centerbody.x_max, soln.inlet.cowl.x_max))
-    y_upper_last = float(soln.inlet.cowl.get_y(x_geom_last))
-    y_lower_last = float(soln.inlet.centerbody.get_y(x_geom_last))
+    x_geom_last = float(min(inlet.centerbody.x_max, inlet.cowl.x_max))
+    y_upper_last = float(inlet.cowl.get_y(x_geom_last))
+    y_lower_last = float(inlet.centerbody.get_y(x_geom_last))
     y_marg = 0.5 * abs(y_upper_last - y_lower_last)
 
     y_geom_max = float(
         max(
-            soln.inlet.centerbody.y_max,
-            soln.inlet.cowl.y_max,
+            inlet.centerbody.y_max,
+            inlet.cowl.y_max,
         )
     )
     y_geom_min = float(
         min(
-            soln.inlet.centerbody.y_min,
-            soln.inlet.cowl.y_min,
+            inlet.centerbody.y_min,
+            inlet.cowl.y_min,
         )
     )
     y_anchor_top = y_geom_max + y_marg
