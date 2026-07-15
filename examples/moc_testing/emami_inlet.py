@@ -180,16 +180,6 @@ def main() -> None:
     )
     fig, axes = plot_stream_thrust_average(
         inlet,
-        plot_vars=("rho", "u", "p", "mach", "t"),
-        fig=fig,
-        axes=axes,
-        bounds=(x_num, y_cent_num, y_cowl_num),
-        dataset=irrotational,
-        global_legend="Irrotational (100 IDL)",
-        color="tab:blue",
-    )
-    fig, axes = plot_stream_thrust_average(
-        inlet,
         result.average_profile,
         plot_vars=("rho", "u", "p", "mach", "t"),
         fig=fig,
