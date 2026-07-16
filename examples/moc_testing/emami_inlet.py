@@ -165,7 +165,6 @@ def main() -> None:
     su2 = np.genfromtxt(su2_st_file, delimiter=",", names=True)
     su2 = su2[su2["x"] <= x_stop]
 
-
     fig, axes = plot_stream_thrust_average(
         inlet,
         plot_vars=("rho", "u", "p", "mach", "t"),

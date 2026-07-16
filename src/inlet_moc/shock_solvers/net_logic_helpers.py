@@ -69,7 +69,6 @@ def get_char_interp_segment(
     stencil_length: int = 10,
     mode: str = "upstream",
 ):
-
     free_inds = _active_free_indices(net, int(idx_fixed), family)
     if free_inds is None or free_inds.size == 0:
         empty_pts = np.empty((0, 6), dtype=float)
