@@ -69,19 +69,7 @@ def get_char_interp_segment(
     stencil_length: int = 10,
     mode: str = "upstream",
 ):
-    """
-    Return an interpolation stencil from one characteristic row/col.
 
-    ``idx_fixed`` is the fixed row/column index and ``pt_idx`` sets the
-    starting point of the returned stencil.
-
-    In ``mode="upstream"``, returned points are ordered monotonically along
-    the characteristic, include ``pt_idx``, and extend upstream from there.
-
-    In ``mode="downstream"``, returned points are ordered monotonically along
-    the characteristic, begin at the first active point with free index
-    ``>= pt_idx``, and extend downstream from there.
-    """
     free_inds = _active_free_indices(net, int(idx_fixed), family)
     if free_inds is None or free_inds.size == 0:
         empty_pts = np.empty((0, 6), dtype=float)

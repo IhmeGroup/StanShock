@@ -95,9 +95,6 @@ datadir = Path(__file__).resolve().parent
 figdir = datadir / "01_figs"
 figdir.mkdir(parents=True, exist_ok=True)
 su2_st_file = datadir / "00_data" / "emami_streamthrust_su2.csv"
-irrotational_st_file = (
-    datadir / "00_data" / "irrotational_stream_thrust_average_100_IDL.csv"
-)
 
 inlet = PlanarInlet(centerbody, cowl)
 
@@ -167,8 +164,7 @@ def main() -> None:
 
     su2 = np.genfromtxt(su2_st_file, delimiter=",", names=True)
     su2 = su2[su2["x"] <= x_stop]
-    irrotational = np.genfromtxt(irrotational_st_file, delimiter=",", names=True)
-    irrotational = irrotational[irrotational["x"] <= x_stop]
+
 
     fig, axes = plot_stream_thrust_average(
         inlet,

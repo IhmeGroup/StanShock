@@ -19,11 +19,11 @@ from inlet_moc.utils_moc import (
 
 
 class DetachedShockError(ValueError):
-    """Raised when the requested shock is detached and unsupported."""
+    pass
 
 
 class SubsonicFlowError(ValueError):
-    """Raised when the MOC march encounters sonic or subsonic flow."""
+    pass
 
 
 class InsufficientCharPtsLError(ValueError):
@@ -585,145 +585,3 @@ def shock_from_wall(
     )
 
     return shock_pair, pt_3pr
-
-
-def field_plot(
-    char_pts_L: np.ndarray,
-    char_pts_R: np.ndarray,
-    pt_s: np.ndarray,
-    pt_sc: np.ndarray,
-    pt_mesh: np.ndarray,
-    pt_ref: np.ndarray,
-    pt_3pr: np.ndarray,
-    pt_sc_recomp: np.ndarray,
-    *,
-    iteration: int,
-    debug_plots: bool = False,
-    debug_plotter: Callable[[], tuple[object, object]] | None = None,
-):
-    if not debug_plots or debug_plotter is None:
-        return
-    import matplotlib.pyplot as plt
-
-    fig, ax = debug_plotter()
-    if ax is None:
-        return
-
-    def char_label(pt0: np.ndarray, pt1: np.ndarray) -> str:
-        if pt0[0] <= pt1[0]:
-            pt_left = pt0
-            pt_right = pt1
-        else:
-            pt_left = pt1
-            pt_right = pt0
-        dx = float(pt_right[0] - pt_left[0])
-        dy = float(pt_right[1] - pt_left[1])
-        if np.isclose(dx, 0.0):
-            return "C+" if dy < 0.0 else "C-"
-        slope = dy / dx
-        return "C+" if slope < 0.0 else "C-"
-
-    def annotate_segment(
-        pt0: np.ndarray,
-        pt1: np.ndarray,
-        *,
-        color: str,
-        linestyle: str,
-        lw: float,
-    ) -> None:
-        ax.plot(
-            [pt0[0], pt1[0]],
-            [pt0[1], pt1[1]],
-            color=color,
-            linestyle=linestyle,
-            lw=lw,
-            zorder=14,
-        )
-        xy_mid = 0.5 * (pt0[:2] + pt1[:2])
-        ax.annotate(
-            char_label(pt0, pt1),
-            (float(xy_mid[0]), float(xy_mid[1])),
-            color=color,
-            fontsize=6,
-            xytext=(2.0, 2.0),
-            textcoords="offset points",
-            zorder=15,
-        )
-
-    ax.plot(
-        char_pts_L[:, 0],
-        char_pts_L[:, 1],
-        color="0.5",
-        marker="o",
-        markersize=3,
-        markerfacecolor="0.5",
-        markeredgecolor="0.5",
-        lw=1.0,
-        zorder=10,
-    )
-    ax.plot(
-        char_pts_R[:, 0],
-        char_pts_R[:, 1],
-        color="k",
-        marker="o",
-        markersize=3,
-        markerfacecolor="k",
-        markeredgecolor="k",
-        lw=1.0,
-        zorder=11,
-    )
-    ax.scatter(
-        float(pt_ref[0]),
-        float(pt_ref[1]),
-        s=20,
-        c="g",
-        label="Ref",
-        zorder=100,
-    )
-    ax.scatter(
-        float(pt_s[0]),
-        float(pt_s[1]),
-        s=20,
-        facecolors="none",
-        edgecolors="red",
-        linewidths=1.0,
-        zorder=16,
-        label=r"$S_{init}$",
-    )
-
-    ax.scatter(pt_3pr[0], pt_3pr[1], s=20, c="b", label="Mesh")
-    annotate_segment(
-        pt_mesh,
-        pt_3pr,
-        color="blue",
-        linestyle="--",
-        lw=0.5,
-    )
-    annotate_segment(pt_s, pt_sc_recomp, color="red", linestyle="--", lw=0.5)
-    annotate_segment(
-        pt_sc_recomp,
-        pt_ref,
-        color="green",
-        linestyle="--",
-        lw=0.5,
-    )
-    annotate_segment(
-        pt_sc_recomp,
-        pt_3pr,
-        color="green",
-        linestyle="--",
-        lw=0.5,
-    )
-    ax.scatter(
-        float(pt_sc_recomp[0]),
-        float(pt_sc_recomp[1]),
-        s=36,
-        c="red",
-        zorder=17,
-        label=r"$S_{final}$",
-    )
-    ax.set_title(f"Field iteration {int(iteration)}", fontsize=8)
-    # ax.set_xlim(0.225, 0.235)
-    ax.legend(fontsize=6)
-    fig.show()
-    plt.close(fig)
