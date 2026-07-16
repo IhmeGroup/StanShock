@@ -27,8 +27,8 @@ def _segment_parameter_array(
     delta = pt1_xy - pt0_xy
     seg_len2 = np.sum(delta * delta, axis=-1)
     with np.errstate(divide="ignore", invalid="ignore"):
-        numer = np.sum((xy - pt0_xy) * delta, axis=-1)
-        t = numer / seg_len2
+        numerator = np.sum((xy - pt0_xy) * delta, axis=-1)
+        t = numerator / seg_len2
     return np.where(seg_len2 > tol, t, np.nan)
 
 
@@ -472,12 +472,12 @@ def _points_on_polyline(
 
     pts_finite = pts[finite_pts]
     diff = pts_finite[:, None, :] - seg0[None, :, :]
-    numer = np.sum(diff * delta[None, :, :], axis=2)
+    numerator = np.sum(diff * delta[None, :, :], axis=2)
 
     t = np.divide(
-        numer,
+        numerator,
         seg_len2[None, :],
-        out=np.full(numer.shape, np.nan),
+        out=np.full(numerator.shape, np.nan),
         where=seg_len2[None, :] > tol,
     )
     t = np.clip(t, 0.0, 1.0)
