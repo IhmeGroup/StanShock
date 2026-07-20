@@ -5,10 +5,10 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from ambiance import Atmosphere as atm
-from inlet_moc.moc_soln import MOCSolution
 
+from inlet_moc.moc_solution import MOCSolution
 from inlet_moc.planar_inlet import PlanarInlet
-from inlet_moc.processing.processing import process_solution
+from inlet_moc.processing import process_solution
 
 datadir = Path(__file__).resolve().parent
 figdir = datadir / "01_figs"

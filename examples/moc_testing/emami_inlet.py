@@ -8,7 +8,7 @@ import numpy as np
 from inlet_moc.moc_solution import MOCSolution
 from inlet_moc.planar_inlet import PlanarInlet
 from inlet_moc.plot.solution import plot_stream_thrust_average
-from inlet_moc.processing.processing import process_solution
+from inlet_moc.processing import process_solution
 from inlet_moc.shock_solvers.char_shock import obl_shock_angle
 
 ###############################################################################
