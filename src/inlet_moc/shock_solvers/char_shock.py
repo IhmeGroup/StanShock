@@ -135,13 +135,13 @@ class ShockPoint:
     beta: float  # Shock angle, rad
     gamma: float
 
-    def get_shock_tang(self):
+    def get_shock_tang(self) -> np.ndarray:
         return get_tang(self.pt_pre[:2], np.tan(self.beta))
 
 
 def verify_field_soln(
     shock_pair: ShockPoint,
-    p3_pt: np.ndarray | None,
+    p3_pt: np.ndarray,
     tol: float = 1e-6,
 ) -> bool:
     if not (np.all(np.isfinite(shock_pair.pt_post)) and np.all(np.isfinite(p3_pt))):
@@ -202,7 +202,9 @@ def _lambda_from_point(pt: np.ndarray, gamma: float, family: str) -> float:
     return pt[3] + sign * alpha
 
 
-def point_thru_shock(pt: np.ndarray, gamma: float, delta: float, normal: float):
+def point_thru_shock(
+    pt: np.ndarray, gamma: float, delta: float, normal: float
+) -> tuple[np.ndarray, np.ndarray]:
     x, y, _, theta, p, rho = pt
     M = _mach_from_point(pt, gamma)
     if not math.isfinite(M) or (M <= 1.0):
@@ -243,7 +245,7 @@ def shock_origin(
     wall: PiecewiseLinearCurve,
     gamma: float,
     tol: float = 1e-6,
-):
+) -> ShockPoint | None:
     """
     Bookkeeping function to get post-shock state immediately at the solved delta
     """
@@ -282,9 +284,13 @@ def shock_field(
     idx_R,
     gamma: float,
     n_wall,
-    max_iters=5,
-    tol=1e-6,
+    max_iters: int = 5,
+    tol: float = 1e-6,
     idx_R_min: int = 0,
+) -> (
+    tuple[ShockPoint, int, np.ndarray | None, int]
+    | tuple[ShockPoint, int, np.ndarray, int]
+    | None
 ):
     xy_tol = 10 * tol
     idx_R = np.asarray(idx_R, dtype=int)
@@ -423,7 +429,7 @@ def shock_to_wall(
     max_iters: int = 5,
     tol: float = 1e-6,
     idx_R_min: int = 0,
-):
+) -> tuple[ShockPoint, np.ndarray, int]:
     pt_s_pre = pt_prior.pt_pre
     x_s, y_s = pt_s_pre[:2]
     beta = pt_prior.beta
@@ -493,7 +499,7 @@ def shock_from_wall(
     gamma: float,
     max_iters: int = 5,
     tol: float = 1e-6,
-):
+) -> tuple[ShockPoint, np.ndarray]:
     xy_tol = 10 * tol
 
     pt_o_pre = shock_origin.pt_pre

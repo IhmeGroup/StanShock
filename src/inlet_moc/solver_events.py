@@ -159,7 +159,7 @@ def check_shock_reflection(
     inlet: PlanarInlet,
     next_family: str,
     tol: float = 1e-10,
-):
+) -> SolverEvent | None:
     x_sw, y_sw, _, theta_flow, _, _ = shock_pair.pt_post
 
     theta_wall = np.atan(wall_from.get_dydx(x_sw))

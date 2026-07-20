@@ -1,12 +1,18 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
 from inlet_moc import utils_moc
 
+if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
 
 class PiecewiseLinearCurve:
-    def __init__(self, xy: np.ndarray, normal_sign: float):
+    def __init__(self, xy: np.ndarray, normal_sign: float) -> None:
         """
         xy : (N,2) array, strictly increasing in x
         normal_sign : +1 or -1 to control normal direction
@@ -37,7 +43,7 @@ class PiecewiseLinearCurve:
         self.y_min = min(self.y)
         self.y_max = max(self.y)
 
-    def interval_index(self, x):
+    def interval_index(self, x: np.ndarray) -> int | None:
         """
         Returns interval index i such that
         x in [x_i, x_{i+1}]
@@ -45,31 +51,31 @@ class PiecewiseLinearCurve:
         if x < self.x_min or x > self.x_max:
             return None
 
-        i = np.searchsorted(self.x, x) - 1
+        i = int(np.searchsorted(self.x, x)) - 1
         if i == len(self.slopes):
             i -= 1
         return max(i, 0)
 
-    def get_y(self, x):
+    def get_y(self, x: np.ndarray) -> np.ndarray | None:
         i = self.interval_index(x)
         if i is None:
             return None
 
         return self.y[i] + self.slopes[i] * (x - self.x[i])
 
-    def get_dydx(self, x):
+    def get_dydx(self, x: np.ndarray) -> np.ndarray | None:
         i = self.interval_index(x)
         if i is None:
             return None
         return self.slopes[i]
 
-    def get_angle(self, x):
+    def get_angle(self, x: np.ndarray) -> np.ndarray | None:
         i = self.interval_index(x)
         if i is None:
             return None
         return np.atan(self.slopes[i])
 
-    def normal_of(self, x):
+    def normal_of(self, x: np.ndarray) -> np.ndarray | None:
         """
         Returns outward unit normal.
         For tangent (1, m), normal is (-m, 1).
@@ -83,7 +89,7 @@ class PiecewiseLinearCurve:
         n /= np.linalg.norm(n)
         return n
 
-    def slope_change_points(self, include_first=False):
+    def slope_change_points(self, include_first: bool = False) -> np.ndarray:
         internal = self.x[1:-1]
 
         if include_first:
@@ -98,7 +104,7 @@ class PlanarInlet:
     - cowl
     """
 
-    def __init__(self, xy_cent, xy_cowl):
+    def __init__(self, xy_cent, xy_cowl) -> None:
         if max(xy_cent[:, 1]) > max(xy_cowl[:, 1]):
             n_cent, n_cowl = +1.0, -1.0
         else:
@@ -106,13 +112,18 @@ class PlanarInlet:
         self.centerbody = PiecewiseLinearCurve(xy_cent, normal_sign=n_cent)
         self.cowl = PiecewiseLinearCurve(xy_cowl, normal_sign=n_cowl)
 
-    def plot_inlet(self, fig=None, ax=None):
+    def plot_inlet(
+        self, fig: Figure | None = None, ax: Axes | None = None
+    ) -> tuple[Figure, Axes]:
         if ax is None:
             import matplotlib.pyplot as plt
 
             fig, ax = plt.subplots(figsize=(6, 3))
         elif fig is None:
-            fig = ax.figure
+            # Annoying: ax.figure returns Figure | SubFigure
+            # assert isinstance(ax.figure, Figure)
+            fig = ax.figure  # type: ignore[assignment]
+            assert fig is not None
 
         ax.fill_between(
             self.centerbody.x,
@@ -172,7 +183,9 @@ class PlanarInlet:
         return idl_pts[order]
 
 
-def identify_wall(xy_p: np.ndarray, inlet: PlanarInlet, tol=1e-8):
+def identify_wall(
+    xy_p: np.ndarray, inlet: PlanarInlet, tol: float = 1e-8
+) -> PiecewiseLinearCurve:
     """
     Determine whether (xp, yp) lies on cowl or centerbody.
 
@@ -196,7 +209,9 @@ def identify_wall(xy_p: np.ndarray, inlet: PlanarInlet, tol=1e-8):
     raise RuntimeError(msg)
 
 
-def get_opposite_wall(xy_p: np.ndarray, inlet: PlanarInlet, tol=1e-8):
+def get_opposite_wall(
+    xy_p: np.ndarray, inlet: PlanarInlet, tol: float = 1e-8
+) -> PiecewiseLinearCurve:
     xp, yp = xy_p
 
     yc = inlet.cowl.get_y(xp)

@@ -105,7 +105,7 @@ def _segment_line_intersection_x(
     y_fix: float,
     m_char: float,
     tol: float,
-):
+) -> float | None:
     if math.isinf(m_char):
         x_hit = x_fix
     else:

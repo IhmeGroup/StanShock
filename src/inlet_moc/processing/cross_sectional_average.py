@@ -152,7 +152,7 @@ def flux_avg(
     x0 = np.clip(x0, lower, upper)
     scale = np.maximum(np.abs(np.array([mass, momentum, energy])), 1.0)
 
-    sol = least_squares(
+    opt = least_squares(
         _streamthrust_residual,
         x0,
         args=(mass, momentum, energy, gas, Y_st, scale),
@@ -162,10 +162,10 @@ def flux_avg(
         max_nfev=500,
     )
 
-    if verbose and not sol.success:
-        print(sol.message)
+    if verbose and not opt.success:
+        print(opt.message)
 
-    T_st, u_st, p_st = sol.x
+    T_st, u_st, p_st = opt.x
     gas.TPY = T_st, p_st, Y_st
     rho_st = gas.density_mass
     a_st = np.sqrt(gas.cp / gas.cv * p_st / rho_st)

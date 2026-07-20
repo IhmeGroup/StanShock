@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 from inlet_moc.char_net import CharNet, _wall_clearance
 from inlet_moc.planar_inlet import PlanarInlet
+from inlet_moc.plot.net_shock import ShockNetPlotter
 from inlet_moc.rotational_solvers import field_point_rot, wall_point_rot
 from inlet_moc.shock_solvers.char_shock import (
     ShockPoint,
@@ -52,8 +54,8 @@ class NetShockSolver:
         self.L_stencil_max = 10
         self.R_stencil_max = 10
 
-        self.net_R: CharNet | None = None
-        self.net_R_test: CharNet | None = None
+        self.net_R: CharNet
+        self.net_R_test: CharNet
         self.gamma = self.net_L.gamma
 
         self.shock_pairs: list[ShockPoint] = []
@@ -63,7 +65,7 @@ class NetShockSolver:
         self.ij_shock_R = np.empty((0, 2), dtype=int)
         self.ij_mesh_R = np.empty((0, 2), dtype=int)
 
-        self.shock_plotter: object | None = None
+        self.shock_plotter: ShockNetPlotter | None = None
         self.shock_resample_N = self.net_L.N
 
     def _reset_common_state(self) -> None:
@@ -86,7 +88,7 @@ class NetShockSolver:
         self.ij_mesh_R = np.empty((0, 2), dtype=int)
         self.gamma = self.net_L.gamma
 
-    def clip_and_clean_nets(self, family: str):
+    def clip_and_clean_nets(self, family: str) -> None:
         downstream_family = "cplus" if family == "cminus" else "cminus"
         enforce_net_bounds(
             self.net_L,
@@ -379,7 +381,7 @@ class NetShockSolver:
         j_R_m: int | None = None,  # Post-shock idx mesh net_R (>= 1)
         mesh_pt: np.ndarray | None = None,
         pt_type_m: None | int = 0,
-    ):
+    ) -> None:
         self.net_L.edit_point(
             i_step,
             j_L_s,
@@ -419,7 +421,7 @@ class NetShockSolver:
         i_R_m: int | None = None,
         mesh_pt: np.ndarray | None = None,
         pt_type_m: int | None = 0,
-    ):
+    ) -> None:
         self.net_L.edit_point(
             i_L_s,
             j_step,
@@ -471,9 +473,6 @@ class NetShockSolver:
         if not self.plot:
             self.shock_plotter = None
             return
-        import matplotlib.pyplot as plt
-
-        from inlet_moc.plot.net_shock import ShockNetPlotter
 
         plt.close("all")
         self.shock_plotter = ShockNetPlotter(
@@ -558,7 +557,7 @@ class NetShockSolver:
         msg = f"Unsupported downstream family '{family}'."
         raise ValueError(msg)
 
-    def solve_cminus(self):
+    def solve_cminus(self) -> tuple[CharNet, CharNet, SolverEvent | None]:
         # j_L = ind on left net.
         family = "cminus"
         i_L, j_L_s = self.event.point_idx
@@ -692,7 +691,7 @@ class NetShockSolver:
         )
         return self.net_L, self.net_R, reflected_event
 
-    def solve_cplus(self):
+    def solve_cplus(self) -> tuple[CharNet, CharNet, SolverEvent | None]:
         family = "cplus"
         i_L_s, j_L = self.event.point_idx
 

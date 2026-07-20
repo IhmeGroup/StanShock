@@ -36,7 +36,7 @@ class MOCSolution:
         verbose: bool = False,
         plot_during_solve: bool = False,
         figdir: str | Path = "./01_figs",
-    ):
+    ) -> None:
         self.inlet = inlet
         self.x_prog = float(self.inlet.get_infl0()[1][0])
         self.M_init = Mach
@@ -150,7 +150,7 @@ class MOCSolution:
         print(f"[warning] Net {net_num} not fully solved; proceeding to next event.")
         return net_num
 
-    def solve_inlet(self):
+    def solve_inlet(self) -> None:
         try:
             self._log("Building and solving initial net.")
             active_net = self.initialize_domain()
@@ -227,7 +227,7 @@ class MOCSolution:
         except Exception:
             raise
 
-    def initialize_domain(self):
+    def initialize_domain(self) -> CharNet:
         domain = initialize_domain(
             self.inlet,
             self.M_init,

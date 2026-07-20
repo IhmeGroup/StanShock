@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 
 class TriangulatedSolution:
-    def __init__(self, soln: MOCSolution):
+    def __init__(self, soln: MOCSolution) -> None:
         self.tol = soln.tol
         tris, primitives = build_tris(soln)
         self.points, self.triangles, self.primitives, self.region_id = merge_tris(
@@ -22,7 +22,7 @@ class TriangulatedSolution:
 
         self.process_tris()
 
-    def process_tris(self):
+    def process_tris(self) -> None:
         if self.triangles.shape[0] == 0:
             self.tri_xy = np.empty((0, 3, 2), dtype=float)
             self.tri_primitives = np.empty(

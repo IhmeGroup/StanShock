@@ -57,7 +57,7 @@ class PlotBounds:
         )
 
 
-def scatter_point(ax, pt, label=None, c="k"):
+def scatter_point(ax, pt, label=None, c: str = "k") -> None:
     if label is None:
         ax.scatter(pt[0], pt[1], s=2, c=c)
     else:
@@ -179,11 +179,11 @@ class PlotSettings:
     }
 
     @classmethod
-    def get(cls, key):
+    def get(cls, key) -> PlotVariable:
         return cls.registry[str(key).lower()]
 
     @classmethod
-    def get_stream_thrust(cls, key):
+    def get_stream_thrust(cls, key) -> PlotVariable:
         return cls.stream_thrust_registry[str(key).lower()]
 
 

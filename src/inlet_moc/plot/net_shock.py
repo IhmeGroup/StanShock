@@ -11,6 +11,9 @@ import numpy as np
 from inlet_moc.plot.helpers import PlotBounds, _format_solution_axis
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
     from inlet_moc.char_net import CharNet
 
 
@@ -80,8 +83,8 @@ def _plot_net_lines(
 
 def _get_debug_axes(
     debug_plots: bool,
-    debug_plotter: Callable[[], tuple[object, object]] | None,
-):
+    debug_plotter: Callable[[], tuple[Figure, Axes]] | None,
+) -> tuple[Figure, Axes] | tuple[None, None]:
     if not debug_plots or debug_plotter is None:
         return None, None
     return debug_plotter()
@@ -133,14 +136,14 @@ def _plot_cleanup_candidates(
     cols: np.ndarray,
     *,
     debug_plots: bool,
-    debug_plotter: Callable[[], tuple[object, object]] | None,
+    debug_plotter: Callable[[], tuple[Figure, Axes]] | None,
     boundary_xy: np.ndarray | None = None,
 ) -> None:
     if rows.size == 0:
         return
 
     fig, ax = _get_debug_axes(debug_plots, debug_plotter)
-    if ax is None:
+    if fig is None or ax is None:
         return
 
     x_delete = net.x[rows, cols]
@@ -172,7 +175,7 @@ def _plot_cleanup_candidates(
 
 
 def _plot_characteristic(
-    ax,
+    ax: Axes,
     net: CharNet,
     *,
     fixed_idx: int,
@@ -216,7 +219,7 @@ def _plot_coalescing_cleanup(
     clip_start: int,
     intersection_xy: np.ndarray,
     debug_plots: bool,
-    debug_plotter: Callable[[], tuple[object, object]] | None,
+    debug_plotter: Callable[[], tuple[Figure, Axes]] | None,
 ) -> None:
     free_inds_delete = np.arange(int(clip_start), net.N, dtype=int)
     rows_delete, cols_delete = _cleanup_char_index_arrays(
@@ -497,7 +500,7 @@ class ShockNetPlotter:
         self._annotate_point(pt, idx, color=edgecolor)
 
     @staticmethod
-    def _shock_style() -> dict[str, object]:
+    def _shock_style() -> dict[str, str | float | None]:
         return {
             "marker": "o",
             "edgecolor": "r",
@@ -508,7 +511,7 @@ class ShockNetPlotter:
         }
 
     @staticmethod
-    def _mesh_style() -> dict[str, object]:
+    def _mesh_style() -> dict[str, str | float | None]:
         return {
             "marker": "o",
             "edgecolor": "b",
@@ -519,7 +522,7 @@ class ShockNetPlotter:
         }
 
     @staticmethod
-    def _interp_style(side: str) -> dict[str, object]:
+    def _interp_style(side: str) -> dict[str, str | float | None]:
         color = "0.55" if side == "left" else "k"
         return {
             "marker": "o",

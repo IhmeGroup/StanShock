@@ -19,7 +19,9 @@ class InitialDomain:
     x_start: float
 
 
-def build_freestream_cell(inlet: PlanarInlet, leading_shock: ShockPoint):
+def build_freestream_cell(
+    inlet: PlanarInlet, leading_shock: ShockPoint
+) -> tuple[FlowCell, np.ndarray | None]:
     xy_bot = leading_shock.pt_pre[:2]
     shock_tang = leading_shock.get_shock_tang()
     wall_opp = get_opposite_wall(xy_bot, inlet)
@@ -38,7 +40,9 @@ def build_freestream_cell(inlet: PlanarInlet, leading_shock: ShockPoint):
     return cell, xy_r
 
 
-def build_idl_cell(leading_shock: ShockPoint, xy_r: np.ndarray, idl_pts: np.ndarray):
+def build_idl_cell(
+    leading_shock: ShockPoint, xy_r: np.ndarray, idl_pts: np.ndarray
+) -> FlowCell:
     verts = inlet_moc.utils_moc.order_cell_vertices(
         np.vstack((leading_shock.pt_pre[:2], xy_r, idl_pts[-1], idl_pts[0]))
     )

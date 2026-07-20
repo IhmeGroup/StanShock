@@ -4,11 +4,11 @@ import numpy as np
 import pandas as pd
 
 
-def cleaner(array):
+def cleaner(array: np.ndarray[tuple[int]]):
     return array[~np.isnan(array)]
 
 
-def get_tang(pt0: np.ndarray, m0: float):
+def get_tang(pt0: np.ndarray, m0: float) -> np.ndarray:
     """
     converts point coordinates (pt0, up to 4, first two args are x and y)
     and slope of line to coefficient form
@@ -16,7 +16,7 @@ def get_tang(pt0: np.ndarray, m0: float):
     return np.array([m0, -1, (pt0[1] - m0 * pt0[0])])
 
 
-def get_norm(pt0: np.ndarray, m0: float):
+def get_norm(pt0: np.ndarray, m0: float) -> np.ndarray:
     m_n = -1 / m0
     return np.array([m_n, -1, (pt0[1] - m_n * pt0[0])])
 
@@ -25,7 +25,7 @@ def get_slope(pt0: np.ndarray, pt1: np.ndarray):
     return (pt1[1] - pt0[1]) / (pt1[0] - pt0[0])
 
 
-def get_intersection(coeffs1, coeffs2):
+def get_intersection(coeffs1, coeffs2) -> np.ndarray | None:
     """
     coeffs = [a, b, c] s.t. a * x + b * y + c = 0
     returns (2,) array, with (x,y)_intersect
@@ -44,12 +44,12 @@ def get_theta(pt: np.ndarray):
     return pt[3]
 
 
-def get_tang_from_pts(pt0: np.ndarray, pt1: np.ndarray):
+def get_tang_from_pts(pt0: np.ndarray, pt1: np.ndarray) -> np.ndarray:
     m = get_slope(pt0, pt1)
     return get_tang(pt0, m)
 
 
-def get_tang_from_pts_vectorized(point_set0, point_set1):
+def get_tang_from_pts_vectorized(point_set0, point_set1) -> np.ndarray:
     """
     Vectorized tangent-line coefficients for paired point sets.
 
@@ -141,7 +141,7 @@ def get_intersection_vectorized(coeffs1, coeffs2):
     return xy
 
 
-def pt_to_plotvec(x0, y0, beta, L=1.0):
+def pt_to_plotvec(x0, y0, beta, L: float = 1.0) -> tuple[np.ndarray, np.ndarray]:
     dx = np.cos(beta)
     dy = np.sin(beta)
     mag = np.hypot(dx, dy)
@@ -159,7 +159,7 @@ def pts_to_plotseg(p1, p2):
     return x_pts, y_pts
 
 
-def geo_reader(filepath):
+def geo_reader(filepath) -> list[np.ndarray]:
     first_row = pd.read_csv(filepath, nrows=1, header=None).iloc[0]
 
     skip_first = any(pd.to_numeric(first_row, errors="coerce").isna())
@@ -188,7 +188,9 @@ def order_cell_vertices(verts: np.ndarray) -> np.ndarray:
     return verts[np.argsort(angles)]
 
 
-def interp_pts(pt1: np.ndarray, pt2: np.ndarray, xy_q, clip: bool = False):
+def interp_pts(
+    pt1: np.ndarray, pt2: np.ndarray, xy_q, clip: bool = False
+) -> np.ndarray:
     pt1 = np.asarray(pt1, dtype=float).reshape(-1)
     pt2 = np.asarray(pt2, dtype=float).reshape(-1)
     xy_q = np.asarray(xy_q, dtype=float)

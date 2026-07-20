@@ -19,30 +19,14 @@ from inlet_moc.plot.helpers import (
 )
 
 if TYPE_CHECKING:
+    from matplotlib.axes import Axes
+    from matplotlib.figure import Figure
+
     from inlet_moc.char_net import CharNet
     from inlet_moc.moc_solution import MOCSolution
 
-XSMALL_SIZE = 10
-SMALL_SIZE = 12
-MEDIUM_SIZE = 14
-BIGGER_SIZE = 18
-
-plt.rcParams.update(
-    {
-        "text.usetex": True,
-        "font.family": "serif",
-        "font.serif": ["Computer Modern Roman"],
-        "axes.xmargin": 0,
-        "axes.ymargin": 0,
-        "font.size": SMALL_SIZE,
-        "axes.titlesize": SMALL_SIZE,
-        "axes.labelsize": MEDIUM_SIZE,
-        "xtick.labelsize": SMALL_SIZE,
-        "ytick.labelsize": SMALL_SIZE,
-        "legend.fontsize": XSMALL_SIZE,
-        "figure.titlesize": BIGGER_SIZE,
-    }
-)
+datadir = Path(__file__).parent / "../../../data"
+plt.style.use(datadir / "stylelib/publication.mplstyle")
 
 
 def _primitive_values(
@@ -55,22 +39,24 @@ def _primitive_values(
     v = primitives[:, 2]
     p = primitives[:, 3]
     a = np.sqrt(soln.gamma * p / rho)
-    if key == "rho":
-        return rho
-    if key == "u":
-        return u
-    if key == "v":
-        return v
-    if key == "p":
-        return p / 1000.0
-    if key in {"a", "c"}:
-        return a
-    if key in {"m", "mach"}:
-        return np.hypot(u, v) / a
-    if key in {"t", "temperature"}:
-        return p / (rho * soln.R)
-    msg = f"Unsupported plot variable: {plot_key}"
-    raise KeyError(msg)
+    match key:
+        case "rho":
+            return rho
+        case "u":
+            return u
+        case "v":
+            return v
+        case "p":
+            return p / 1000.0
+        case "a" | "c":
+            return a
+        case "m" | "mach":
+            return np.hypot(u, v) / a
+        case "t" | "temperature":
+            return p / (rho * soln.R)
+        case _:
+            msg = f"Unsupported plot variable: {plot_key}"
+            raise KeyError(msg)
 
 
 def _stream_thrust_x(data: np.ndarray) -> np.ndarray:
@@ -138,7 +124,7 @@ def _apply_nice_yaxis(ax, y_values: np.ndarray | None = None) -> None:
     ax.yaxis.set_major_formatter(FormatStrFormatter(y_fmt))
 
 
-def _refresh_stream_thrust_legends(axes) -> None:
+def _refresh_stream_thrust_legends(axes: np.ndarray) -> None:
     for ax in np.asarray(axes, dtype=object).ravel():
         handles, labels = ax.get_legend_handles_labels()
         keep = [
@@ -237,13 +223,13 @@ def plot_net_points(
 
 def debug_plot(
     net: CharNet,
-    fig=None,
-    ax=None,
+    fig: Figure | None = None,
+    ax: Axes | None = None,
     show_point_types: bool = False,
     show_point_ids: bool = True,
     point_size: float = 3.0,
-):
-    if fig is None and ax is None:
+) -> tuple[Figure, Axes]:
+    if fig is None or ax is None:
         xy_mask = net.xy_mask()
         if not np.any(xy_mask):
             xy_mask = np.isfinite(net.x) & np.isfinite(net.y)
@@ -272,7 +258,7 @@ def debug_plot(
 
 
 def _plot_tri_fills(
-    ax,
+    ax: Axes,
     plot_key: str,
     points: np.ndarray,
     triangles: np.ndarray,
@@ -315,9 +301,9 @@ def plot_moc_soln(
     bounds: PlotBounds | None = None,
     point_mesh=None,
     plot_tri_edges: bool = False,
-):
+) -> tuple[Figure, Axes]:
     if plot_var is None:
-        plot_vars = []
+        plot_vars: list[str] = []
     elif isinstance(plot_var, str):
         plot_vars = [plot_var] if plot_var.strip() else []
     else:
@@ -573,7 +559,7 @@ def _add_h_plot(
     return ax1
 
 
-def _draw_completed_x_marker(soln: MOCSolution, axes) -> None:
+def _draw_completed_x_marker(soln: MOCSolution, axes: Axes | list[Axes]) -> None:
     x_final = soln.x_final()
     if x_final is None:
         return

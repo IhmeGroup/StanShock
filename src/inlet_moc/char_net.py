@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import math
+from typing import Self
 
 import numpy as np
 
@@ -141,7 +141,9 @@ class CharNet:
             raise RuntimeError(msg)
         return self.wall, get_opposite_wall(xy_wall, self.inlet)
 
-    def _wall_point_from_cminus_char(self, i: int, j: int, wall, tol: float):
+    def _wall_point_from_cminus_char(
+        self, i: int, j: int, wall, tol: float
+    ) -> np.ndarray:
         return wall_point_rot(
             self.get_point(i - 1, j),
             self.get_point(i - 1, j - 1),
@@ -152,7 +154,9 @@ class CharNet:
             tol=tol,
         )
 
-    def _wall_point_from_cplus_char(self, i: int, j: int, wall, tol: float):
+    def _wall_point_from_cplus_char(
+        self, i: int, j: int, wall, tol: float
+    ) -> np.ndarray:
         return wall_point_rot(
             self.get_point(i, j - 1),
             self.get_point(i - 1, j - 1),
@@ -163,7 +167,7 @@ class CharNet:
             tol=tol,
         )
 
-    def _wall_point_from_cminus(self, i: int, j: int, wall, tol: float):
+    def _wall_point_from_cminus(self, i: int, j: int, wall, tol: float) -> np.ndarray:
         return wall_point_rot(
             self.get_point(i - 1, j),
             self.get_point(i, j - 1),
@@ -282,7 +286,7 @@ class CharNet:
 
         return True
 
-    def _solve_vertical_net(self):
+    def _solve_vertical_net(self) -> None:
         top_wall = self.inlet.cowl
         bottom_wall = self.inlet.centerbody
 
@@ -338,7 +342,7 @@ class CharNet:
             )
             self.edit_point(bot_i, self.N - 1, bot_pt, 1)
 
-    def solve_net(self):
+    def solve_net(self) -> None:
         if self.is_vertical:
             self._solve_vertical_net()
             return
@@ -366,19 +370,21 @@ class CharNet:
             & np.isfinite(self.rho)
         )
 
-    def point_mask(self, point_type: str) -> np.ndarray:
+    def point_mask(self, point_type: str) -> np.ndarray | None:
         xy_mask = self.xy_mask()
-        if point_type == "field":
-            return xy_mask & (self.point_type == 0)
-        if point_type == "wall":
-            return xy_mask & (self.point_type == 1)
-        if point_type == "boundary":
-            return xy_mask & ((self.point_type == 2) | (self.point_type == 3))
-        if point_type == "fluid":
-            return xy_mask & (self.point_type == 2)
-        if point_type == "corner":
-            return xy_mask & (self.point_type == 3)
-        return None
+        match point_type:
+            case "field":
+                return xy_mask & (self.point_type == 0)
+            case "wall":
+                return xy_mask & (self.point_type == 1)
+            case "boundary":
+                return xy_mask & ((self.point_type == 2) | (self.point_type == 3))
+            case "fluid":
+                return xy_mask & (self.point_type == 2)
+            case "corner":
+                return xy_mask & (self.point_type == 3)
+            case _:
+                return None
 
     def point_ij_xy(self, point_type: str) -> tuple[np.ndarray, np.ndarray]:
         mask = self.point_mask(point_type)
@@ -406,21 +412,21 @@ class CharNet:
     def has_point(self, i: int, j: int) -> bool:
         if (i < 0) or (j < 0) or (i >= self.N) or (j >= self.N):
             return False
-        return bool(
-            self.active[i, j]
-            and math.isfinite(self.x[i, j])
-            and math.isfinite(self.y[i, j])
-            and math.isfinite(self.V[i, j])
-            and math.isfinite(self.theta[i, j])
-            and math.isfinite(self.p[i, j])
-            and math.isfinite(self.rho[i, j])
-        )
+        vals = [
+            self.x[i, j],
+            self.y[i, j],
+            self.V[i, j],
+            self.theta[i, j],
+            self.p[i, j],
+            self.rho[i, j],
+        ]
+        return bool(self.active[i, j] and np.all(np.isfinite(vals)))
 
     def deactivate_points(self, rows: np.ndarray, cols: np.ndarray) -> None:
         self.active[rows, cols] = False
         self.point_type[rows, cols] = np.nan
 
-    def get_point(self, i: int, j: int):
+    def get_point(self, i: int, j: int) -> np.ndarray:
         return np.array(
             [
                 self.x[i, j],
@@ -452,7 +458,7 @@ class CharNet:
         j: int,
         new_data: np.ndarray,
         point_type: int,
-    ):
+    ) -> Self:
         data = new_data.copy()
         self.x[i, j] = data[0]
         self.y[i, j] = data[1]

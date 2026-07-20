@@ -1,33 +1,30 @@
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
+from typing import TypeAlias
 
 import numpy as np
 
+_State: TypeAlias = tuple[float, float, float, float]
+
 
 def static_state_from_mach(
-    M: float,
-    theta: float,
-    T: float,
-    p: float,
-    gamma: float,
-    R: float,
-) -> tuple[float, float, float, float]:
-    a = math.sqrt(gamma * R * T)
+    M: float, theta: float, T: float, p: float, gamma: float, R: float
+) -> _State:
+    a = np.sqrt(gamma * R * T)
     V = M * a
     rho = p / (R * T)
     return V, theta, p, rho
 
 
-def sound_speed_from_state(pt: np.ndarray, gamma: float):
-    _, _, _, _, p, rho = pt
-    return math.sqrt(gamma * p / rho)
+def sound_speed_from_state(pt: _State, gamma: float) -> float:
+    _, _, p, rho = pt
+    return np.sqrt(gamma * p / rho)
 
 
-def mach_from_state(pt: np.ndarray, gamma: float):
-    _, _, V, _, p, rho = pt
-    return V / math.sqrt(gamma * p / rho)
+def mach_from_state(pt: _State, gamma: float) -> float:
+    V, _, p, rho = pt
+    return V / np.sqrt(gamma * p / rho)
 
 
 @dataclass(frozen=True)
@@ -56,23 +53,23 @@ class FlowCell:
         return np.column_stack((xy_state[:, :2], u, v))
 
 
-def total_temperature_ratio(M, gamma: float = 1.4):
+def total_temperature_ratio(M: float, gamma: float = 1.4) -> float:
     return 1.0 + 0.5 * (gamma - 1.0) * M * M
 
 
-def total_temperature(M, gamma: float = 1.4):
+def total_temperature(M, gamma: float = 1.4) -> float:
     return total_temperature_ratio(M, gamma)
 
 
-def total_pressure_ratio(M: float, gamma: float = 1.4):
+def total_pressure_ratio(M: float, gamma: float = 1.4) -> float:
     T0_T = total_temperature_ratio(M, gamma)
     return T0_T ** (gamma / (gamma - 1.0))
 
 
-def total_pressure(M, gamma: float = 1.4):
+def total_pressure(M, gamma: float = 1.4) -> float:
     return total_pressure_ratio(M, gamma)
 
 
-def total_density_ratio(M, gamma: float = 1.4):
+def total_density_ratio(M, gamma: float = 1.4) -> float:
     T0_T = total_temperature_ratio(M, gamma)
     return T0_T ** (1 / (gamma - 1.0))
