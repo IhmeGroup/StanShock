@@ -398,16 +398,9 @@ class JICModel:
         # be rebuilt independently of the simulation mesh. Use the caller-supplied
         # mesh if given, otherwise the stretched 3D grid (which spans the same
         # [xc[0], xc[-1]] interval as the simulation mesh).
-        if self._x_profile_input is not None:
-            self.x_profile = np.asarray(self._x_profile_input, dtype=float)
-        else:
-            if not hasattr(self, "x_3D_data"):
-                msg = (
-                    "x_3D_data is unavailable: the 3D mixture-fraction field must "
-                    "be computed or loaded before generating the Z profiles."
-                )
-                raise RuntimeError(msg)
-            self.x_profile = np.asarray(self.x_3D_data, dtype=float)
+        self.x_profile = (
+            self.x_3D_data if self._x_profile_input is None else self._x_profile_input
+        )
         n_mdot = len(self.mdot_inj_unique)
         self.Z_avg_profile = np.zeros([n_mdot, len(self.x_profile)])
         self.Z_var_profile = np.zeros([n_mdot, len(self.x_profile)])
