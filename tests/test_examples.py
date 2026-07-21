@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from examples import laminar_flame, optimization
-from examples.validation import case1, case2, case3, case4
+from examples.legacy_validation import case1, case2, case3, case4
 
 _directory_prefix = Path("tests/resources")
 

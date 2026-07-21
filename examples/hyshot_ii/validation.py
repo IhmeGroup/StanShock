@@ -265,7 +265,9 @@ def plot_phi_sweep(
         linestyle="-.",
         label=r"StanShock (1D), $\phi=0.5$",
     )
-    ax.plot(*ctr["0.3"], color=COLOR_BODY, linewidth=1, label=r"CTR (3D RANS), $\phi=0.3$")
+    ax.plot(
+        *ctr["0.3"], color=COLOR_BODY, linewidth=1, label=r"CTR (3D RANS), $\phi=0.3$"
+    )
     ax.plot(
         *ctr["0.5"],
         color=COLOR_BODY,
@@ -346,7 +348,9 @@ if __name__ == "__main__":
     if args.inert_csv is not None:
         inert = load_stanshock_result(args.inert_csv)
         plot_pressure_and_heat_flux(
-            inert, reacting=False, output_path=args.output_dir / "hyshot_ii_fuel_off.png"
+            inert,
+            reacting=False,
+            output_path=args.output_dir / "hyshot_ii_fuel_off.png",
         )
         report_error_metrics(inert, reacting=False)
 
