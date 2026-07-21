@@ -27,9 +27,9 @@ produced, reproducing the project reference figures:
 2. **Fuel-off (inert)** wall pressure and heat flux
 3. **Equivalence-ratio sweep** — fuel-on body pressure at phi = 0.3 vs 0.5
 
-The reference CSVs store *nondimensional* quantities; `validation.py`
-redimensionalizes them using the freestream reference dynamic pressure
-(`17.7e6` Pa) and reference heat flux (`12.37e9` W/m^2).
+The reference CSVs store _nondimensional_ quantities; `validation.py`
+redimensionalizes them using the freestream reference dynamic pressure (`17.7e6`
+Pa) and reference heat flux (`12.37e9` W/m^2).
 
 ## Layout
 
@@ -37,7 +37,7 @@ redimensionalizes them using the freestream reference dynamic pressure
   conditions, injector, and `Combustor` assembly
 - `injector_models.py` — choked-flow fuel property calculations
 - `hyshot_ii_jic.py` — FPV (flamelet/progress-variable) driver case
-- `hyshot_ii_frc.py` — finite-rate-chemistry variant *(work in progress)*
+- `hyshot_ii_frc.py` — finite-rate-chemistry variant _(work in progress)_
 - `validation.py` — reference-data parsing, comparison plots, error metrics
 - `reference_data/` — experimental + CTR RANS wall pressure/heat-flux CSVs
 
@@ -60,8 +60,8 @@ cd examples/hyshot_ii
 python hyshot_ii_jic.py
 ```
 
-The validation plots can also be regenerated from existing StanShock result
-CSVs without re-running the simulation:
+The validation plots can also be regenerated from existing StanShock result CSVs
+without re-running the simulation:
 
 ```bash
 python validation.py --reacting-csv <reacting.csv> \
