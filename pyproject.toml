@@ -41,12 +41,9 @@ dependencies = [
   "cantera",
   "joblib",
   "tqdm",
-  "tqdm_joblib",
-  # "types-tqdm",
   "h5py",
   "imageio",
   # Conditional:
-  "scipy-stubs>=1.18.0; python_version>='3.12'",
   "cantera>=3.2.0; python_version>='3.14'",
   "numba>=0.63.0rc1; python_version>='3.14'",
 ]
@@ -67,8 +64,16 @@ test = [
   "pytest >=6",
   "pytest-cov >=3",
 ]
+type-check = [
+  "mypy",
+  "h5py-stubs",
+  "scipy-stubs>=1.18.0; python_version>='3.12'",
+  "types-tqdm",
+  "joblib-stubs",
+]
 dev = [
   { include-group = "test" },
+  { include-group = "type-check" },
 ]
 docs = [
   "sphinx>=7.0",
@@ -88,15 +93,12 @@ build.hooks.vcs.version-file = "src/stanshock/_version.py"
 dependencies = [
   "numpy",
   "scipy",
-  # "scipy-stubs",
   "scikit-learn",
   "matplotlib",
   "numba",
   "cantera",
   "joblib",
   "tqdm",
-  "tqdm_joblib",
-  # "types-tqdm",
   "h5py",
   "imageio",
 ]

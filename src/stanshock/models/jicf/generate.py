@@ -12,7 +12,6 @@ from scipy import special, stats
 from scipy.integrate import cubature
 from scipy.interpolate import RegularGridInterpolator, make_interp_spline
 from tqdm import tqdm
-from tqdm_joblib import tqdm_joblib
 
 from stanshock.models.jicf.profile import AnalyticJICF
 from stanshock.physics.flamelet import FPVTable
@@ -150,7 +149,7 @@ class JICModel:
         self.t_inj = t_inj
         self.phi_inj = phi_inj
         sol = ct.SolutionArray(gas, shape=self.t_inj.shape)
-        sol.TDX = self.T_inj, self.rho_inj, self.fuel_def
+        sol.TDX = self.T_inj, self.rho_inj, self.fuel_def  # type: ignore[assignment]
         self.p_inj = sol.P
         self.E_inj = sol.int_energy_mass + 0.5 * self.u_inj**2
         self.W_inj = sol.mean_molecular_weight
@@ -193,12 +192,13 @@ class JICModel:
 
         # Precompute a 3D array of the mixture fraction and generate an interpolator
         if self._h5_has("Z_3D/Z"):
-            with h5py.File(self.model_file, "r") as f:
+            with h5py.File(str(self.model_file), "r") as f:
                 group = f["Z_3D"]
-                self.x_3D_data = group["x"][:]
-                self.y_3D_data = group["y"][:]
-                self.z_3D_data = group["z"][:]
-                self.Z_3D_data = group["Z"][:]
+                assert isinstance(group, h5py.Group)
+                self.x_3D_data = self._h5_getarray(group, "x")
+                self.y_3D_data = self._h5_getarray(group, "y")
+                self.z_3D_data = self._h5_getarray(group, "z")
+                self.Z_3D_data = self._h5_getarray(group, "Z")
             self._build_Z_3D_interp()
         else:
             self.calc_Z_3D_interp(write=True)
@@ -206,11 +206,12 @@ class JICModel:
         # Precompute the axial mean and variance profiles of Z, along with the
         # mesh they were generated on.
         if self._h5_has("Z_profiles/Z_avg"):
-            with h5py.File(self.model_file, "r") as f:
+            with h5py.File(str(self.model_file), "r") as f:
                 group = f["Z_profiles"]
-                self.x_profile = group["x"][:]
-                self.Z_avg_profile = group["Z_avg"][:]
-                self.Z_var_profile = group["Z_var"][:]
+                assert isinstance(group, h5py.Group)
+                self.x_profile = self._h5_getarray(group, "x")
+                self.Z_avg_profile = self._h5_getarray(group, "Z_avg")
+                self.Z_var_profile = self._h5_getarray(group, "Z_var")
         else:
             self.calc_Z_avg_var_profiles(write=True)
 
@@ -220,13 +221,13 @@ class JICModel:
         # model does not need to be regenerated when the mesh changes. Out-of-range
         # query points (e.g. ghost cells) are linearly extrapolated.
         self.Z_avg_profile_interp = RegularGridInterpolator(
-            (self.mdot_inj_unique, self.x_profile),
+            (self.x_profile, self.mdot_inj_unique),
             self.Z_avg_profile,
             bounds_error=False,
             fill_value=None,
         )
         self.Z_var_profile_interp = RegularGridInterpolator(
-            (self.mdot_inj_unique, self.x_profile),
+            (self.x_profile, self.mdot_inj_unique),
             self.Z_var_profile,
             bounds_error=False,
             fill_value=None,
@@ -234,12 +235,13 @@ class JICModel:
 
         # Precompute and tabulate chemical source terms
         if self._h5_has("chemical_sources/omega_C_int"):
-            with h5py.File(self.model_file, "r") as f:
+            with h5py.File(str(self.model_file), "r") as f:
                 group = f["chemical_sources"]
-                self.Zbar_vec = group["Zbar"][:]
-                self.Lbar_vec = group["Lbar"][:]
-                self.logsigma2_vec = group["logsigma2"][:]
-                self.omega_C_int = group["omega_C_int"][:]
+                assert isinstance(group, h5py.Group)
+                self.Zbar_vec = self._h5_getarray(group, "Zbar")
+                self.Lbar_vec = self._h5_getarray(group, "Lbar")
+                self.logsigma2_vec = self._h5_getarray(group, "logsigma2")
+                self.omega_C_int = self._h5_getarray(group, "omega_C_int")
             self.omega_C_int_interp = RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
@@ -250,12 +252,18 @@ class JICModel:
         """Return True if the model file exists and contains the given dataset."""
         if not self.model_file.exists():
             return False
-        with h5py.File(self.model_file, "r") as f:
+        with h5py.File(str(self.model_file), "r") as f:
             return key in f
+
+    def _h5_getarray(self, h: h5py.File | h5py.Group, key: str) -> Array:
+        """Load array data from h5 file in a way that respects type checking."""
+        data_handle = h[key]
+        assert isinstance(data_handle, h5py.Dataset)
+        return np.asarray(data_handle[...], dtype=float)
 
     def _h5_write(self, group: str, data: dict[str, Array]) -> None:
         """Write (overwriting if present) a group of named arrays to the model file."""
-        with h5py.File(self.model_file, "a") as f:
+        with h5py.File(str(self.model_file), "a") as f:
             grp = f.require_group(group)
             for name, array in data.items():
                 if name in grp:
@@ -313,7 +321,7 @@ class JICModel:
         self._build_Z_3D_interp()
 
     def _build_Z_3D_interp(self) -> None:
-        self.Z_3D_interp = []
+        self.Z_3D_interp: list[RegularGridInterpolator[np.float64]] = []
         for i_m in range(len(self.mdot_inj_unique)):
             interp = RegularGridInterpolator(
                 (self.x_3D_data, self.y_3D_data, self.z_3D_data),
@@ -352,10 +360,11 @@ class JICModel:
             args=(x,),
             # workers=-1,
         )
-        Z_avg = (
+        Z_avg: Array = np.asarray(
             2.0
             * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
-            / self.A
+            / self.A,
+            dtype=float,
         )
 
         res = cubature(
@@ -365,10 +374,11 @@ class JICModel:
             args=(x, Z_avg),
             # workers=-1,
         )
-        Z_var = (
+        Z_var: Array = np.asarray(
             2.0
             * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
-            / self.A
+            / self.A,
+            dtype=float,
         )
 
         return Z_avg, Z_var
@@ -558,11 +568,10 @@ class JICModel:
         ]
 
         # Parallel version
-        with tqdm_joblib(tqdm(desc="Assembling table", total=len(tasks))):
-            results = Parallel(n_jobs=-1)(
-                delayed(compute_func)(i_Zbar, i_Lbar, i_S)
-                for i_Zbar, i_Lbar, i_S in tasks
-            )
+        gen = Parallel(n_jobs=-1, return_as="generator")(
+            delayed(compute_func)(i_Zbar, i_Lbar, i_S) for i_Zbar, i_Lbar, i_S in tasks
+        )
+        results = list(tqdm(gen, total=len(tasks)))
 
         for i_Zbar, i_Lbar, i_S, value in results:
             self.omega_C_int[i_Zbar, i_Lbar, i_S] = value
