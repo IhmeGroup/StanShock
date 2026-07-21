@@ -42,7 +42,8 @@ class JICModel:
         physics: FPVTable,
         datadir: Path | str = "./data",
         theta_inj: float = 0.0,
-        model_file: Path | str | None = None,
+        model_file: str = "jicf_model.h5",
+        x_profile: Array | None = None,
     ) -> None:
         """
         This method initializes the Jet-in-Crossflow model with the following
@@ -77,10 +78,17 @@ class JICModel:
             The relaxation parameter (used here only for storage)
         datadir: str
             Where to access or store tables written for this injector
-        model_file: Path | str | None
-            Path to the HDF5 file caching the generated model tables. Defaults
-            to ``<datadir>/jicf_model.h5``. Tables already present in the file
-            are loaded; any that are missing are computed and written to it.
+        model_file: str
+            Name of the HDF5 file caching the generated model tables, resolved
+            relative to ``datadir`` (i.e. ``<datadir>/<model_file>``). Tables
+            already present in the file are loaded; any that are missing are
+            computed and written to it.
+        x_profile: np.ndarray | None
+            Axial mesh on which to generate the stored Z mean/variance profiles.
+            When ``None`` (default), the stretched grid ``self.x_3D_data`` used
+            for the 3D field is reused. When supplied, it is used verbatim.
+            Ignored when the profiles are loaded from an existing model file
+            (the stored mesh is used instead).
         geometry: Box
             The geometry object describing the mesh and cross-section
         physics: FPVTable
@@ -115,11 +123,11 @@ class JICModel:
         self.alpha = alpha if alpha is not None else 1e6
         self.datadir = Path(datadir)
         self.datadir.mkdir(exist_ok=True)
-        self.model_file = (
-            Path(model_file)
-            if model_file is not None
-            else self.datadir / "jicf_model.h5"
-        )
+        self.model_file = self.datadir / model_file
+
+        # Optional user-supplied mesh for the stored Z profiles; when None the
+        # stretched 3D grid (self.x_3D_data) is used (see calc_Z_avg_var_profiles).
+        self._x_profile_input = x_profile
 
         # Geometry parameters
         self.A = self.w * self.h
@@ -387,8 +395,19 @@ class JICModel:
     def calc_Z_avg_var_profiles(self, write=False):
         print("Computing Z average and variance profiles...")
         # Record the mesh the profiles are generated on so the interpolators can
-        # be rebuilt independently of the simulation mesh.
-        self.x_profile = np.asarray(self.xc, dtype=float)
+        # be rebuilt independently of the simulation mesh. Use the caller-supplied
+        # mesh if given, otherwise the stretched 3D grid (which spans the same
+        # [xc[0], xc[-1]] interval as the simulation mesh).
+        if self._x_profile_input is not None:
+            self.x_profile = np.asarray(self._x_profile_input, dtype=float)
+        else:
+            if not hasattr(self, "x_3D_data"):
+                msg = (
+                    "x_3D_data is unavailable: the 3D mixture-fraction field must "
+                    "be computed or loaded before generating the Z profiles."
+                )
+                raise RuntimeError(msg)
+            self.x_profile = np.asarray(self.x_3D_data, dtype=float)
         n_mdot = len(self.mdot_inj_unique)
         self.Z_avg_profile = np.zeros([n_mdot, len(self.x_profile)])
         self.Z_var_profile = np.zeros([n_mdot, len(self.x_profile)])
