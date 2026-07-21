@@ -108,34 +108,6 @@ class FuelInjector(RightHandSide):
 
         return np.ravel(rhs / self.cell_volumes)
 
-    def get_MIB_profiles(self):
-        """
-        This method returns the MIB profiles for the progress variable and chemical
-        energy.
-        """
-        C = np.zeros(len(self.xc))
-        E_CHEM = np.zeros(len(self.xc))
-        mdot_inj = np.interp(
-            self.xc,
-            np.flip(self.fluid_tips, axis=0)[:, 0],
-            np.flip(self.fluid_tips, axis=0)[:, 1],
-        )
-
-        for i_x in range(len(self.xc)):
-            if self.xc[i_x] < self.jicf.x_inj:
-                continue
-            # Interpolate into fluid tip positions to get the mass flow rate
-            C[i_x] = np.interp(
-                mdot_inj[i_x], self.jicf.mdot_inj_unique, self.jicf.C_profile[:, i_x]
-            )
-            E_CHEM[i_x] = np.interp(
-                mdot_inj[i_x],
-                self.jicf.mdot_inj_unique,
-                self.jicf.E_CHEM_profile[:, i_x],
-            )
-
-        return C, E_CHEM
-
 
 class JICFChemistrySource(RightHandSide):
     def __init__(
