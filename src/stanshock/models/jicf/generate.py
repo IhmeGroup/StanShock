@@ -170,6 +170,7 @@ class JICModel:
         self.rho_inj_unique = self.rho_inj[self.mdot_inj_unique_idx]
         self.u_inj_unique = self.u_inj[self.mdot_inj_unique_idx]
         self.p_inj_unique = self.p_inj[self.mdot_inj_unique_idx]
+        self.nJ = len(self.mdot_inj_unique)
 
         # Mass flow rate and equivalence ratio schedules
         self.mdot_f_interp = make_interp_spline(self.t_inj, self.mdot_inj, k=1)
@@ -322,7 +323,7 @@ class JICModel:
 
     def _build_Z_3D_interp(self) -> None:
         self.Z_3D_interp: list[RegularGridInterpolator[np.float64]] = []
-        for i_m in range(len(self.mdot_inj_unique)):
+        for i_m in range(self.nJ):
             interp = RegularGridInterpolator(
                 (self.x_3D_data, self.y_3D_data, self.z_3D_data),
                 self.Z_3D_data[..., i_m],
@@ -353,33 +354,43 @@ class JICModel:
 
         Returns axial mean and variance profiles for all mass flow rates.
         """
-        res = cubature(
-            self._mu_Z,
-            a=[0.0, 0.0],
-            b=[self.h, 0.5 * self.w],
-            args=(x,),
-            # workers=-1,
-        )
-        Z_avg: Array = np.asarray(
-            2.0
-            * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
-            / self.A,
-            dtype=float,
-        )
+        # res = cubature(
+        #     self._mu_Z,
+        #     a=[0.0, 0.0],
+        #     b=[self.h, 0.5 * self.w],
+        #     args=(x,),
+        #     # workers=-1,
+        # )
+        # Z_avg: Array = np.asarray(
+        #     2.0
+        #     * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
+        #     / self.A,
+        #     dtype=float,
+        # )
+        #
+        # res = cubature(
+        #     self._sigma_Z,
+        #     a=[0.0, 0.0],
+        #     b=[self.h, 0.5 * self.w],
+        #     args=(x, Z_avg),
+        #     # workers=-1,
+        # )
+        # Z_var: Array = np.asarray(
+        #     2.0
+        #     * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
+        #     / self.A,
+        #     dtype=float,
+        # )
 
-        res = cubature(
-            self._sigma_Z,
-            a=[0.0, 0.0],
-            b=[self.h, 0.5 * self.w],
-            args=(x, Z_avg),
-            # workers=-1,
-        )
-        Z_var: Array = np.asarray(
-            2.0
-            * np.reshape(res.estimate, (*x.shape, *self.mdot_inj_unique.shape))
-            / self.A,
-            dtype=float,
-        )
+        dx = 5.0e-4
+        Ny = int(np.ceil(self.h / dx))
+        Nz = int(np.ceil(self.w / dx))
+        y = np.linspace(0.0, self.h, Ny)[None, :, None]
+        z = np.linspace(0.0, 0.5 * self.w, Nz)[None, None, :]
+        self.analytic.i_m = slice(None)
+        Z = self.analytic.Z_3D_adjusted(x[:, None, None] - self.x_inj, y, z)
+        Z_avg = np.mean(Z, axis=(1, 2))
+        Z_var = np.mean((Z - Z_avg[:, None, None, :]) ** 2, axis=(1, 2))
 
         return Z_avg, Z_var
 
@@ -406,9 +417,9 @@ class JICModel:
 
         Returns axial mean and variance profiles for all mass flow rates.
         """
-        Z_avg = np.zeros((*x.shape, len(self.mdot_inj_unique)))
-        Z_var = np.zeros((*x.shape, len(self.mdot_inj_unique)))
-        for i_m in range(len(self.mdot_inj_unique)):
+        Z_avg = np.zeros((*x.shape, self.nJ))
+        Z_var = np.zeros((*x.shape, self.nJ))
+        for i_m in range(self.nJ):
             res = cubature(
                 self._mu_Z_adjusted,
                 a=[0.0, 0.0],
@@ -438,19 +449,21 @@ class JICModel:
         self.x_profile = (
             self.x_3D_data if self._x_profile_input is None else self._x_profile_input
         )
+        self.Z_avg_profile = np.zeros((self.x_profile.shape[0], self.nJ))
+        self.Z_var_profile = np.zeros((self.x_profile.shape[0], self.nJ))
 
         # Compute profiles between injector and nozzle
         idx = np.logical_and(self.x_profile > self.x_inj, self.x_profile < self.x_noz)
-        self.Z_avg_profile[:, idx], self.Z_var_profile[:, idx] = (
-            # self.Z_avg_var_adjusted(self.xc[idx])
+        self.Z_avg_profile[idx, :], self.Z_var_profile[idx, :] = (
+            # self.Z_avg_var_adjusted(self.x_profile[idx])
             self.Z_avg_var(self.x_profile[idx])
         )
 
         # Freeze profiles downstream of the nozzle
         ifreeze = len(idx) - 1 - np.argmax(idx[::-1])
         idx = self.x_profile >= self.x_noz
-        self.Z_avg_profile[:, idx] = self.Z_avg_profile[:, ifreeze]
-        self.Z_var_profile[:, idx] = self.Z_var_profile[:, ifreeze]
+        self.Z_avg_profile[idx, :] = self.Z_avg_profile[ifreeze, :]
+        self.Z_var_profile[idx, :] = self.Z_var_profile[ifreeze, :]
 
         if write:
             self._h5_write(
