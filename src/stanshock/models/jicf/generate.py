@@ -3,6 +3,7 @@ from __future__ import annotations
 import functools
 import warnings
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cantera as ct
 import h5py
@@ -15,8 +16,11 @@ from tqdm import tqdm
 
 from stanshock.models.jicf.profile import AnalyticJICF
 from stanshock.physics.flamelet import FPVTable
-from stanshock.system.backend import Array
 from stanshock.system.geometry import Box
+from stanshock.utils.h5 import RectilinearVtkhdf, h5_getarray, h5_has, h5_write
+
+if TYPE_CHECKING:
+    from stanshock.system.backend import Array
 
 
 class JICModel:
@@ -43,7 +47,7 @@ class JICModel:
         datadir: Path | str = "./data",
         theta_inj: float = 0.0,
         alpha: float = 1e6,
-        model_file: str = "jicf_model.h5",
+        model_file: str = "jicf_model.vtkhdf",
         x_profile: Array | None = None,
     ) -> None:
         """
@@ -192,27 +196,25 @@ class JICModel:
         )
 
         # Precompute a 3D array of the mixture fraction and generate an interpolator
-        if self._h5_has("Z_3D/Z"):
-            with h5py.File(str(self.model_file), "r") as f:
-                group = f["Z_3D"]
-                assert isinstance(group, h5py.Group)
-                self.x_3D_data = self._h5_getarray(group, "x")
-                self.y_3D_data = self._h5_getarray(group, "y")
-                self.z_3D_data = self._h5_getarray(group, "z")
-                self.Z_3D_data = self._h5_getarray(group, "Z")
+        if h5_has(self.model_file, "VTKHDF/PointData/Z"):
+            vtk = RectilinearVtkhdf.from_vtkhdf(self.model_file)
+            self.x_3D_data = vtk.x
+            self.y_3D_data = vtk.y
+            self.z_3D_data = vtk.z
+            self.Z_3D_data = vtk.vals["Z"]
             self._build_Z_3D_interp()
         else:
             self.calc_Z_3D_interp(write=True)
 
         # Precompute the axial mean and variance profiles of Z, along with the
         # mesh they were generated on.
-        if self._h5_has("Z_profiles/Z_avg"):
+        if h5_has(self.model_file, "Z_profiles/Z_avg"):
             with h5py.File(str(self.model_file), "r") as f:
                 group = f["Z_profiles"]
                 assert isinstance(group, h5py.Group)
-                self.x_profile = self._h5_getarray(group, "x")
-                self.Z_avg_profile = self._h5_getarray(group, "Z_avg")
-                self.Z_var_profile = self._h5_getarray(group, "Z_var")
+                self.x_profile = h5_getarray(group, "x")
+                self.Z_avg_profile = h5_getarray(group, "Z_avg")
+                self.Z_var_profile = h5_getarray(group, "Z_var")
         else:
             self.calc_Z_avg_var_profiles(write=True)
 
@@ -235,41 +237,19 @@ class JICModel:
         )
 
         # Precompute and tabulate chemical source terms
-        if self._h5_has("chemical_sources/omega_C_int"):
+        if h5_has(self.model_file, "chemical_sources/omega_C_int"):
             with h5py.File(str(self.model_file), "r") as f:
                 group = f["chemical_sources"]
                 assert isinstance(group, h5py.Group)
-                self.Zbar_vec = self._h5_getarray(group, "Zbar")
-                self.Lbar_vec = self._h5_getarray(group, "Lbar")
-                self.logsigma2_vec = self._h5_getarray(group, "logsigma2")
-                self.omega_C_int = self._h5_getarray(group, "omega_C_int")
+                self.Zbar_vec = h5_getarray(group, "Zbar")
+                self.Lbar_vec = h5_getarray(group, "Lbar")
+                self.logsigma2_vec = h5_getarray(group, "logsigma2")
+                self.omega_C_int = h5_getarray(group, "omega_C_int")
             self.omega_C_int_interp = RegularGridInterpolator(
                 (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
             )
         else:
             self.calc_chemical_sources(write=True)
-
-    def _h5_has(self, key: str) -> bool:
-        """Return True if the model file exists and contains the given dataset."""
-        if not self.model_file.exists():
-            return False
-        with h5py.File(str(self.model_file), "r") as f:
-            return key in f
-
-    def _h5_getarray(self, h: h5py.File | h5py.Group, key: str) -> Array:
-        """Load array data from h5 file in a way that respects type checking."""
-        data_handle = h[key]
-        assert isinstance(data_handle, h5py.Dataset)
-        return np.asarray(data_handle[...], dtype=float)
-
-    def _h5_write(self, group: str, data: dict[str, Array]) -> None:
-        """Write (overwriting if present) a group of named arrays to the model file."""
-        with h5py.File(str(self.model_file), "a") as f:
-            grp = f.require_group(group)
-            for name, array in data.items():
-                if name in grp:
-                    del grp[name]
-                grp[name] = array
 
     def __stretched_grid(
         self,
@@ -309,15 +289,15 @@ class JICModel:
         self.Z_3D_data[np.isnan(self.Z_3D_data)] = 0.0
 
         if write:
-            self._h5_write(
-                "Z_3D",
-                {
-                    "x": self.x_3D_data,
-                    "y": self.y_3D_data,
-                    "z": self.z_3D_data,
-                    "Z": self.Z_3D_data,
-                },
+            vtk = RectilinearVtkhdf(
+                self.x_3D_data,
+                self.y_3D_data,
+                self.z_3D_data,
+                {"Z": self.Z_3D_data},
+                self.model_file,
+                self.mdot_inj_unique,
             )
+            vtk.save()
 
         self._build_Z_3D_interp()
 
@@ -466,7 +446,8 @@ class JICModel:
         self.Z_var_profile[idx, :] = self.Z_var_profile[ifreeze, :]
 
         if write:
-            self._h5_write(
+            h5_write(
+                self.model_file,
                 "Z_profiles",
                 {
                     "x": self.x_profile,
@@ -591,7 +572,8 @@ class JICModel:
         self.omega_C_int[np.isnan(self.omega_C_int)] = 0.0
 
         if write:
-            self._h5_write(
+            h5_write(
+                self.model_file,
                 "chemical_sources",
                 {
                     "Zbar": self.Zbar_vec,
