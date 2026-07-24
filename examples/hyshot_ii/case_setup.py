@@ -9,7 +9,7 @@ from injector_models import fuel_props_from_phi
 
 from stanshock.components.combustor import Combustor
 from stanshock.models.inlet_diffuser import InletDiffuser
-from stanshock.models.jicf import JICModel
+from stanshock.models.jicf import JICModel, plot_jicf_flowfield
 from stanshock.models.wall_models import (
     CompressibleHeatFlux,
     CompressibleReactingSkinFriction,
@@ -403,7 +403,7 @@ def get_injectors_fpv(
     # U_f = U_f[-1]
     # T_f = T_f[-1]
 
-    return JICModel(
+    jicf = JICModel(
         x_inj=x_inj,
         x_noz=L_const,
         n_inj=N_f,
@@ -421,6 +421,11 @@ def get_injectors_fpv(
         physics=physics,
         datadir=fpv_dir,
     )
+
+    # Generate plots of the fuel jets
+    plot_jicf_flowfield(jicf)
+
+    return jicf
 
 
 class Hyshot2Interface:
