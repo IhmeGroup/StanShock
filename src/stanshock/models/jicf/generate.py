@@ -268,7 +268,7 @@ class JICModel:
                 spacing *= growth_rate
         return np.sort(np.unique(x_grid))
 
-    def calc_Z_3D_interp(self, write: bool = False) -> None:
+    def calc_Z_3D_interp(self, write: bool = False, debug: bool = False) -> None:
         print("Computing Z 3D array...")
         dx = 5.0e-4
         Ny = int(np.ceil(self.h / dx))
@@ -288,12 +288,25 @@ class JICModel:
         self.Z_3D_data[..., self.u_inj_unique == 0.0] = 0.0
         self.Z_3D_data[np.isnan(self.Z_3D_data)] = 0.0
 
+        results: dict[str, Array] = {"Z": self.Z_3D_data}
+
+        if debug:
+            z_inj = self.analytic.z_inj[0]
+            x_cl, y_cl, n2 = self.analytic.nearest_on_cl(
+                self.x_3D_data[:, None, None] - self.x_inj,
+                self.y_3D_data[None, :, None],
+                self.z_3D_data[None, None, :] - z_inj,
+            )
+            results["x_cl"] = x_cl
+            results["y_cl"] = y_cl
+            results["n"] = np.sqrt(n2)
+
         if write:
             vtk = RectilinearVtkhdf(
                 self.x_3D_data,
                 self.y_3D_data,
                 self.z_3D_data,
-                {"Z": self.Z_3D_data},
+                results,
                 self.model_file,
                 self.mdot_inj_unique,
             )
