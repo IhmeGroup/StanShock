@@ -171,12 +171,8 @@ class AnalyticJICF:
         def n2_func_y_cl(y_cl: Array, x: Array, y: Array, dz: Array) -> Array:
             return (x - self.x_cl_from_y_cl(y_cl)) ** 2 + (y - y_cl) ** 2 + dz**2
 
-        x_bracket: tuple[float, float, float] = (
-            self.x[0],
-            0.5 * (self.x[0] + self.x[-1]),
-            self.x[-1],
-        )
-        y_bracket: tuple[float, float, float] = (0.0, 0.5 * self.h, self.h)
+        x_guess = np.maximum(0.0, x)
+        x_bracket: tuple[float, Array, float] = (0.0, x_guess, self.x[-1])
 
         x, y, dz = np.broadcast_arrays(x, y, dz)
         x_cl = np.zeros((*x.shape, self.nJ))
@@ -196,10 +192,15 @@ class AnalyticJICF:
             idx = dy_cl_dx > 1
 
             # Compute the y_cl which minimizes n2
+            y_bracket: tuple[float, Array, float] = (0.0, y_cl[idx, i_m], self.h)
             res = find_minimum(n2_func_y_cl, y_bracket, args=(x[idx], y[idx], dz[idx]))
             y_cl[idx, i_m] = res.x
             n2[idx, i_m] = res.f_x
             x_cl[idx, i_m] = self.x_cl_from_y_cl(y_cl[idx, i_m])
+
+        x_cl[np.isnan(x_cl)] = 0.0
+        y_cl[np.isnan(y_cl)] = 0.0
+        n2[np.isnan(n2)] = 0.0
 
         return x_cl, y_cl, n2
 
@@ -208,9 +209,8 @@ class AnalyticJICF:
         denom = np.divide(1.0, r_u, out=np.zeros_like(r_u), where=r_u > 0)
         term = x_cl * denom / self.d_inj
         term = np.power(term, -2.0 / 3.0, out=np.zeros_like(term), where=term > 0)
-        Z = (
-            0.85 * denom * np.sqrt(self.rho_inj[self.i_m] / self.rho) * term
-        )  # Hasselbrink and Mungal 2001 Pt. 1
+        # Hasselbrink and Mungal 2001 Pt. 1
+        Z = 0.85 * denom * np.sqrt(self.rho_inj[self.i_m] / self.rho) * term
         return np.clip(Z, self.Z_gl[self.i_m], 1.0)
 
     def calc_adjustment_factor(self) -> None:
