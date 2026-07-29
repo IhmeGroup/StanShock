@@ -2,14 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import numpy as np
 
 from inlet_moc.char_net import CharNet, _wall_clearance
 from inlet_moc.planar_inlet import PlanarInlet
-from inlet_moc.plot.net_shock import ShockNetPlotter
 from inlet_moc.rotational_solvers import field_point_rot, wall_point_rot
 from inlet_moc.shock_solvers.char_shock import (
+    InsufficientCharPtsLError,
     ShockPoint,
     shock_field,
     shock_from_wall,
@@ -54,8 +53,8 @@ class NetShockSolver:
         self.L_stencil_max = 10
         self.R_stencil_max = 10
 
-        self.net_R: CharNet
-        self.net_R_test: CharNet
+        self.net_R: CharNet | None = None
+        self.net_R_test: CharNet | None = None
         self.gamma = self.net_L.gamma
 
         self.shock_pairs: list[ShockPoint] = []
@@ -65,7 +64,7 @@ class NetShockSolver:
         self.ij_shock_R = np.empty((0, 2), dtype=int)
         self.ij_mesh_R = np.empty((0, 2), dtype=int)
 
-        self.shock_plotter: ShockNetPlotter | None = None
+        self.shock_plotter: object | None = None
         self.shock_resample_N = self.net_L.N
 
     def _reset_common_state(self) -> None:
@@ -135,7 +134,7 @@ class NetShockSolver:
                 f"No valid from-wall C- solve index exists beyond event i={event_idx} "
                 f"at j={fixed_idx}."
             )
-            raise RuntimeError(msg)
+            raise InsufficientCharPtsLError(msg)
 
         for j_step in range(int(event_idx) + 1, self.net_L.N):
             if self.net_L.has_point(fixed_idx - 1, j_step) and self.net_L.has_point(
@@ -146,7 +145,73 @@ class NetShockSolver:
             f"No valid from-wall C+ solve index exists beyond event j={event_idx} "
             f"at i={fixed_idx}."
         )
-        raise RuntimeError(msg)
+        raise InsufficientCharPtsLError(msg)
+
+    def _get_from_wall_solve_indices(
+        self,
+        event_idx: int,
+        fixed_idx: int,
+        family: str,
+        shock_im1: ShockPoint,
+    ) -> tuple[int, int, bool]:
+        if family == "cminus":
+            for i_step in range(int(event_idx) + 1, self.net_L.N):
+                if self.net_L.has_point(i_step, fixed_idx - 1) and self.net_L.has_point(
+                    i_step, fixed_idx
+                ):
+                    return i_step, fixed_idx, False
+
+                active_j = _active_free_indices(self.net_L, i_step, "cplus")
+                if active_j is None or active_j.size == 0:
+                    continue
+                j_step = int(active_j[-1])
+                if j_step >= fixed_idx or j_step < 1:
+                    continue
+                char_pts_L, _ = get_char_interp_segment(
+                    self.net_L,
+                    i_step,
+                    j_step,
+                    "cplus",
+                    self.L_stencil_max,
+                    "upstream",
+                )
+                if self._field_left_intersects(char_pts_L, shock_im1):
+                    return i_step, j_step, True
+
+            msg = (
+                f"No valid from-wall C- solve index exists beyond event i={event_idx} "
+                f"near j={fixed_idx}."
+            )
+            raise InsufficientCharPtsLError(msg)
+
+        for j_step in range(int(event_idx) + 1, self.net_L.N):
+            if self.net_L.has_point(fixed_idx - 1, j_step) and self.net_L.has_point(
+                fixed_idx, j_step
+            ):
+                return fixed_idx, j_step, False
+
+            active_i = _active_free_indices(self.net_L, j_step, "cminus")
+            if active_i is None or active_i.size == 0:
+                continue
+            i_step = int(active_i[-1])
+            if i_step >= fixed_idx or i_step < 1:
+                continue
+            char_pts_L, _ = get_char_interp_segment(
+                self.net_L,
+                j_step,
+                i_step,
+                "cminus",
+                self.L_stencil_max,
+                "upstream",
+            )
+            if self._field_left_intersects(char_pts_L, shock_im1):
+                return i_step, j_step, True
+
+        msg = (
+            f"No valid from-wall C+ solve index exists beyond event j={event_idx} "
+            f"near i={fixed_idx}."
+        )
+        raise InsufficientCharPtsLError(msg)
 
     def _field_stencil_length(
         self,
@@ -473,6 +538,9 @@ class NetShockSolver:
         if not self.plot:
             self.shock_plotter = None
             return
+        import matplotlib.pyplot as plt
+
+        from inlet_moc.plot.net_shock import ShockNetPlotter
 
         plt.close("all")
         self.shock_plotter = ShockNetPlotter(
@@ -579,10 +647,11 @@ class NetShockSolver:
 
         self.record_cminus_step(i_L, j_L_s, j_R_s, shock_pt, 3)
 
-        i_L = self._get_from_wall_solve_idx(
+        i_L, j_L_s, used_edge_stencil = self._get_from_wall_solve_indices(
             event_idx=self.event.point_idx[0],
             fixed_idx=j_L_s,
             family=family,
+            shock_im1=shock_pt,
         )
 
         # NOTE: right net shock always gets j = 0
@@ -605,8 +674,11 @@ class NetShockSolver:
         pt_type_m = 0
 
         active_i = _active_free_indices(self.net_L, j_L_s, family)
-        terminal_offset = min(i_L + 1, int(active_i.size))
-        i_stop = int(active_i[-terminal_offset])
+        if used_edge_stencil:
+            i_stop = self.net_L.N - 1
+        else:
+            terminal_offset = min(i_L + 1, int(active_i.size))
+            i_stop = int(active_i[-terminal_offset])
 
         i_L += 1
 
@@ -622,6 +694,28 @@ class NetShockSolver:
             char_pts_L, idx_L = get_char_interp_segment(
                 self.net_L, i, j_L_s, "cplus", L_stencil, "upstream"
             )
+            if used_edge_stencil and char_pts_L.shape[0] == 0:
+                active_j = _active_free_indices(self.net_L, i, "cplus")
+                if active_j is not None and active_j.size > 0:
+                    j_edge = int(active_j[-1])
+                    if 0 < j_edge < j_L_s:
+                        j_L_s = j_edge
+                        L_stencil = self._field_stencil_length(
+                            self.net_L,
+                            i,
+                            j_L_s,
+                            "cplus",
+                            "upstream",
+                            self.L_stencil_max,
+                        )
+                        char_pts_L, idx_L = get_char_interp_segment(
+                            self.net_L,
+                            i,
+                            j_L_s,
+                            "cplus",
+                            L_stencil,
+                            "upstream",
+                        )
 
             R_stencil = self._field_stencil_length(
                 self.net_R,
@@ -637,10 +731,17 @@ class NetShockSolver:
 
             shock_im1 = self.shock_pairs[-1]
 
+            if char_pts_L.shape[0] == 0:
+                msg = f"No active C+ left-net stencil exists at i={i}, j={j_L_s}."
+                raise InsufficientCharPtsLError(msg)
+
             left_intersects = self._field_left_intersects(char_pts_L, shock_im1)
             terminal_step = (
-                (char_pts_L.shape[0] == 1) or (not left_intersects) or (i == i_stop)
+                (char_pts_L.shape[0] <= 1)
+                or (not left_intersects)
+                or ((not used_edge_stencil) and (i == i_stop))
             )
+            terminal_wall = self.wall_from if used_edge_stencil else self.wall_to
 
             if terminal_step:
                 shock_pair, mesh_pt, j_R_m = shock_to_wall(
@@ -649,7 +750,7 @@ class NetShockSolver:
                     char_pts_L[0, :],
                     char_pts_R,
                     idx_R,
-                    self.wall_to,
+                    terminal_wall,
                     self.gamma,
                     idx_R_min=1,
                     **self._cminus_solver_kwargs(),
@@ -684,7 +785,7 @@ class NetShockSolver:
         reflected_event = check_shock_reflection(
             shock_pair=shock_pair,
             point_idx=self._restored_reflection_idx(family) if restored else (i, j_R_s),
-            wall_from=self.wall_to,
+            wall_from=terminal_wall,
             inlet=self.inlet,
             next_family="cplus",
             tol=self.tol,
@@ -712,10 +813,11 @@ class NetShockSolver:
 
         self.record_cplus_step(j_L, i_L_s, i_R_s, shock_pt, 3)
 
-        j_L = self._get_from_wall_solve_idx(
+        i_L_s, j_L, used_edge_stencil = self._get_from_wall_solve_indices(
             event_idx=self.event.point_idx[1],
             fixed_idx=i_L_s,
             family=family,
+            shock_im1=shock_pt,
         )
 
         char_pts_L, idx_L = get_char_interp_segment(
@@ -737,8 +839,11 @@ class NetShockSolver:
         pt_type_m = 0
 
         active_j = _active_free_indices(self.net_L, i_L_s, family)
-        terminal_offset = min(j_L + 1, int(active_j.size))
-        j_stop = int(active_j[-terminal_offset])
+        if used_edge_stencil:
+            j_stop = self.net_L.N - 1
+        else:
+            terminal_offset = min(j_L + 1, int(active_j.size))
+            j_stop = int(active_j[-terminal_offset])
 
         j_L += 1
 
@@ -754,6 +859,28 @@ class NetShockSolver:
             char_pts_L, idx_L = get_char_interp_segment(
                 self.net_L, j, i_L_s, "cminus", L_stencil, "upstream"
             )
+            if used_edge_stencil and char_pts_L.shape[0] == 0:
+                active_i = _active_free_indices(self.net_L, j, "cminus")
+                if active_i is not None and active_i.size > 0:
+                    i_edge = int(active_i[-1])
+                    if 0 < i_edge < i_L_s:
+                        i_L_s = i_edge
+                        L_stencil = self._field_stencil_length(
+                            self.net_L,
+                            j,
+                            i_L_s,
+                            "cminus",
+                            "upstream",
+                            self.L_stencil_max,
+                        )
+                        char_pts_L, idx_L = get_char_interp_segment(
+                            self.net_L,
+                            j,
+                            i_L_s,
+                            "cminus",
+                            L_stencil,
+                            "upstream",
+                        )
 
             R_stencil = self._field_stencil_length(
                 self.net_R,
@@ -769,10 +896,17 @@ class NetShockSolver:
 
             shock_im1 = self.shock_pairs[-1]
 
+            if char_pts_L.shape[0] == 0:
+                msg = f"No active C- left-net stencil exists at i={i_L_s}, j={j}."
+                raise InsufficientCharPtsLError(msg)
+
             left_intersects = self._field_left_intersects(char_pts_L, shock_im1)
             terminal_step = (
-                (char_pts_L.shape[0] == 1) or (not left_intersects) or (j == j_stop)
+                (char_pts_L.shape[0] <= 1)
+                or (not left_intersects)
+                or ((not used_edge_stencil) and (j == j_stop))
             )
+            terminal_wall = self.wall_from if used_edge_stencil else self.wall_to
 
             if terminal_step:
                 shock_pair, mesh_pt, i_R_m = shock_to_wall(
@@ -781,7 +915,7 @@ class NetShockSolver:
                     char_pts_L[0, :],
                     char_pts_R,
                     idx_R,
-                    self.wall_to,
+                    terminal_wall,
                     self.gamma,
                     idx_R_min=1,
                     **self._cplus_solver_kwargs(),
@@ -816,7 +950,7 @@ class NetShockSolver:
         reflected_event = check_shock_reflection(
             shock_pair=shock_pair,
             point_idx=self._restored_reflection_idx(family) if restored else (i_R_s, j),
-            wall_from=self.wall_to,
+            wall_from=terminal_wall,
             inlet=self.inlet,
             next_family="cminus",
             tol=self.tol,

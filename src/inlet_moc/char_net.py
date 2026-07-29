@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import math
 from typing import Self
 
 import numpy as np
 
 from inlet_moc.planar_inlet import PlanarInlet, get_opposite_wall
-from inlet_moc.rotational_solvers import field_point_rot, wall_point_rot
+from inlet_moc.rotational_solvers import (
+    NoWallIntersectionError,
+    RotationalSolveError,
+    field_point_rot,
+    wall_point_rot,
+)
 
 
 def _wall_clearance(pt: np.ndarray, wall) -> float:
@@ -218,10 +224,6 @@ class CharNet:
                     tol=tol_val,
                 )
                 if _wall_clearance(pt_out, wall_to) <= tol_val:
-                    pt_out = self._wall_point_from_cminus_char(
-                        fixed_i, j, wall_to, tol_val
-                    )
-                    self.edit_point(fixed_i, j, pt_out, 2)
                     break
                 self.edit_point(fixed_i, j, pt_out, 0)
                 continue
@@ -273,8 +275,14 @@ class CharNet:
                     tol=tol_val,
                 )
                 if _wall_clearance(pt_out, wall_to) <= tol_val:
-                    pt_out = self._wall_point_from_cminus(i, fixed_j, wall_to, tol_val)
-                    self.edit_point(i, fixed_j, pt_out, 2)
+                    try:
+                        pt_out = self._wall_point_from_cminus(
+                            i, fixed_j, wall_to, tol_val
+                        )
+                    except (NoWallIntersectionError, RotationalSolveError):
+                        pt_out = None
+                    if pt_out is not None:
+                        self.edit_point(i, fixed_j, pt_out, 2)
                     break
                 self.edit_point(i, fixed_j, pt_out, 0)
                 continue
@@ -370,7 +378,7 @@ class CharNet:
             & np.isfinite(self.rho)
         )
 
-    def point_mask(self, point_type: str) -> np.ndarray | None:
+    def point_mask(self, point_type: str) -> np.ndarray:
         xy_mask = self.xy_mask()
         match point_type:
             case "field":
@@ -384,13 +392,11 @@ class CharNet:
             case "corner":
                 return xy_mask & (self.point_type == 3)
             case _:
-                return None
+                msg = f"Unsupported point type: {point_type}"
+                raise ValueError(msg)
 
     def point_ij_xy(self, point_type: str) -> tuple[np.ndarray, np.ndarray]:
         mask = self.point_mask(point_type)
-        if mask is None:
-            return np.empty((0, 2), dtype=int), np.empty((0, 2), dtype=float)
-
         rows, cols = np.nonzero(mask)
         ij = np.column_stack((rows, cols))
         xy = np.column_stack((self.x[rows, cols], self.y[rows, cols]))
@@ -412,15 +418,15 @@ class CharNet:
     def has_point(self, i: int, j: int) -> bool:
         if (i < 0) or (j < 0) or (i >= self.N) or (j >= self.N):
             return False
-        vals = [
-            self.x[i, j],
-            self.y[i, j],
-            self.V[i, j],
-            self.theta[i, j],
-            self.p[i, j],
-            self.rho[i, j],
-        ]
-        return bool(self.active[i, j] and np.all(np.isfinite(vals)))
+        return bool(
+            self.active[i, j]
+            and math.isfinite(self.x[i, j])
+            and math.isfinite(self.y[i, j])
+            and math.isfinite(self.V[i, j])
+            and math.isfinite(self.theta[i, j])
+            and math.isfinite(self.p[i, j])
+            and math.isfinite(self.rho[i, j])
+        )
 
     def deactivate_points(self, rows: np.ndarray, cols: np.ndarray) -> None:
         self.active[rows, cols] = False

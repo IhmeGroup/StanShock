@@ -8,9 +8,10 @@ import numpy as np
 from inlet_moc.char_net import CharNet
 from inlet_moc.initial_domain import initialize_domain
 from inlet_moc.planar_inlet import PlanarInlet
-from inlet_moc.rotational_solvers import NoWallIntersectionError
+from inlet_moc.rotational_solvers import NoWallIntersectionError, RotationalSolveError
 from inlet_moc.shock_solvers.char_shock import (
     DetachedShockError,
+    InsufficientCharPtsLError,
     SubsonicFlowError,
 )
 from inlet_moc.solver_events import get_next_event, handle_event
@@ -36,6 +37,7 @@ class MOCSolution:
         verbose: bool = False,
         plot_during_solve: bool = False,
         figdir: str | Path = "./01_figs",
+        case_name: str | None = None,
     ) -> None:
         self.inlet = inlet
         self.x_prog = float(self.inlet.get_infl0()[1][0])
@@ -58,6 +60,7 @@ class MOCSolution:
 
         self.plot_during_solve = bool(plot_during_solve)
         self.verbose = bool(verbose)
+        self.case_name = None if case_name is None else str(case_name).strip() or None
 
         self.cells = []
         self.nets = []
@@ -124,6 +127,11 @@ class MOCSolution:
         self._log(f"Saved error-state plot {self.error_plot_path}.")
         return self.error_plot_path
 
+    def case_filename(self, filename: str) -> str:
+        if self.case_name is None:
+            return filename
+        return f"{self.case_name}_{filename}"
+
     def _finish_net_L(self, net: CharNet, message: str) -> float:
         x_prog = self._net_progress(net)
         self.error_debug_net = net
@@ -143,6 +151,7 @@ class MOCSolution:
         self.solve_stopped_early = True
         self.solve_stop_reason = str(err)
         self._log(f"[warning]: {err} Solve stopped.")
+        self.save_last_progress_plot(str(err), highlight_net=self.error_debug_net)
 
     def _register_incomplete_net(self, net: CharNet) -> int:
         self._store_net(net)
@@ -159,7 +168,7 @@ class MOCSolution:
             try:
                 active_net.solve_net()
                 self._store_net(active_net)
-            except NoWallIntersectionError:
+            except (NoWallIntersectionError, RotationalSolveError):
                 self._register_incomplete_net(active_net)
                 initial_net_incomplete = True
 
@@ -196,7 +205,9 @@ class MOCSolution:
                     )
                 except (
                     NoWallIntersectionError,
+                    RotationalSolveError,
                     DetachedShockError,
+                    InsufficientCharPtsLError,
                     SubsonicFlowError,
                 ) as err:
                     self.error_debug_net = getattr(err, "current_net", active_net)
@@ -219,7 +230,9 @@ class MOCSolution:
 
         except (
             NoWallIntersectionError,
+            RotationalSolveError,
             DetachedShockError,
+            InsufficientCharPtsLError,
             SubsonicFlowError,
         ) as err:
             self._stop_on_supported_solver_limit(err)

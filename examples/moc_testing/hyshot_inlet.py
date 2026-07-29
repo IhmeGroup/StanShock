@@ -52,7 +52,7 @@ theta = np.radians(-alpha_deg[i])
 # theta = 0
 T_amb = T_atm_arr[i]
 p_amb = p_atm_arr[i]
-N_idl = 60
+N_idl = 100
 x_stop = 0.0
 
 
@@ -65,8 +65,9 @@ soln = MOCSolution(
     N_idl=N_idl,
     x_stop=None,
     verbose=True,
-    plot_during_solve=False,
+    plot_during_solve=True,
     figdir=figdir,
+    case_name="hyshot2",
 )
 
 print("[main] Starting solve_inlet()...")

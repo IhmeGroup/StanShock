@@ -165,10 +165,9 @@ def plot_net_points(
     net: CharNet,
     show_ids: bool = False,
     color_by_point_type: bool = False,
-    point_size: float = 1.0,
 ) -> None:
     xy_mask = net.xy_mask()
-
+    pt_size = 0.1
     if color_by_point_type:  # REMOVE THIS ARGUMENT!
         point_types = np.asarray(
             getattr(net, "point_type", np.full(net.x.shape, np.nan))
@@ -186,8 +185,10 @@ def plot_net_points(
             ax.scatter(
                 net.x[type_mask],
                 net.y[type_mask],
-                s=point_size,
+                s=pt_size,
+                marker=".",
                 c=color,
+                linewidths=0.0,
                 label=label,
                 zorder=7,
             )
@@ -204,7 +205,15 @@ def plot_net_points(
                 borderpad=0.3,
             )
     else:
-        ax.scatter(net.x[xy_mask], net.y[xy_mask], s=point_size, c="0.55", zorder=7)
+        ax.scatter(
+            net.x[xy_mask],
+            net.y[xy_mask],
+            s=pt_size,
+            marker=".",
+            c="k",
+            linewidths=0.0,
+            zorder=7,
+        )
 
     if show_ids:
         for i, j in np.argwhere(xy_mask):
@@ -227,7 +236,6 @@ def debug_plot(
     ax: Axes | None = None,
     show_point_types: bool = False,
     show_point_ids: bool = True,
-    point_size: float = 3.0,
 ) -> tuple[Figure, Axes]:
     if fig is None or ax is None:
         xy_mask = net.xy_mask()
@@ -251,7 +259,6 @@ def debug_plot(
         net,
         show_ids=show_point_ids,
         color_by_point_type=show_point_types,
-        point_size=point_size,
     )
     fig.tight_layout()
     return fig, ax
@@ -565,6 +572,8 @@ def _draw_completed_x_marker(soln: MOCSolution, axes: Axes | list[Axes]) -> None
         return
     y_lower = soln.inlet.centerbody.get_y(float(x_final))
     y_upper = soln.inlet.cowl.get_y(float(x_final))
+    if y_lower is None or y_upper is None:
+        return
 
     for ax in np.atleast_1d(axes).ravel():
         ax.plot(
@@ -585,8 +594,9 @@ def save_error_state_plot(
     highlight_ids: bool = False,
     output_path: str | Path | None = None,
 ) -> Path:
+    plot_var = None if getattr(soln, "point_mesh", None) is None else "mach"
     plot_kwargs = {
-        "plot_var": "mach",
+        "plot_var": plot_var,
         "show_points": False,
         "show_nets": True,
         "show_point_ids": False,
@@ -616,7 +626,10 @@ def save_error_state_plot(
     if output_path is None:
         plot_dir = Path(soln.figdir).expanduser().resolve()
         plot_dir.mkdir(parents=True, exist_ok=True)
-        output = plot_dir / "last_progress_plot.png"
+        filename = "last_progress_plot.png"
+        if hasattr(soln, "case_filename"):
+            filename = soln.case_filename(filename)
+        output = plot_dir / filename
     else:
         output = Path(output_path).expanduser().resolve()
         output.parent.mkdir(parents=True, exist_ok=True)

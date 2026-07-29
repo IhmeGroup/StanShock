@@ -190,8 +190,15 @@ def handle_event(
     if event_i is None:
         return None
 
-    from inlet_moc.rotational_solvers import NoWallIntersectionError
-    from inlet_moc.shock_solvers.char_shock import DetachedShockError, SubsonicFlowError
+    from inlet_moc.rotational_solvers import (
+        NoWallIntersectionError,
+        RotationalSolveError,
+    )
+    from inlet_moc.shock_solvers.char_shock import (
+        DetachedShockError,
+        InsufficientCharPtsLError,
+        SubsonicFlowError,
+    )
     from inlet_moc.shock_solvers.net_shock import NetShockSolver
 
     solver = NetShockSolver(
@@ -213,7 +220,9 @@ def handle_event(
             raise ValueError(msg)
     except (
         NoWallIntersectionError,
+        RotationalSolveError,
         DetachedShockError,
+        InsufficientCharPtsLError,
         SubsonicFlowError,
     ) as err:
         err.current_net = net_im1
