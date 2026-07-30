@@ -94,7 +94,7 @@ def streamtube_fxn(
 datadir = Path(__file__).resolve().parent
 figdir = datadir / "01_figs"
 figdir.mkdir(parents=True, exist_ok=True)
-su2_st_file = datadir / "emami" / "00_data" / "emami_streamthrust_su2.csv"
+su2_st_file = datadir / "00_data" / "emami_streamthrust_su2.csv"
 
 inlet = PlanarInlet(centerbody, cowl)
 

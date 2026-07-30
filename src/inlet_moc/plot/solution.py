@@ -552,9 +552,8 @@ def _add_h_plot(
         zorder=0,
     )
 
-    y_min, y_max, y_ticks, y_fmt = nice_ylims_ticks(y_anchor_bot, y_anchor_top)
+    _, _, y_ticks, y_fmt = nice_ylims_ticks(y_anchor_bot, y_anchor_top)
     ax1.set_xlim(float(np.min(x_plot)), float(np.max(x_plot)))
-    ax1.set_ylim(y_min, y_max)
     ax1.set_aspect("equal", adjustable="datalim")
     ax1.set_yticks(y_ticks)
     ax1.yaxis.set_major_formatter(FormatStrFormatter(y_fmt))
