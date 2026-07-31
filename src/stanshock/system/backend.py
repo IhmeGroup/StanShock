@@ -6,15 +6,16 @@ from typing import TypeAlias
 import numpy as np
 
 if sys.version_info >= (3, 13):
-    from typing import NotRequired, Unpack
+    from typing import NotRequired, Self, Unpack
 else:
-    from typing_extensions import NotRequired, Unpack
+    from typing_extensions import NotRequired, Self, Unpack
 
 __all__: list[str] = [
     "Array",
     "Composition",
     "Index",
     "NotRequired",
+    "Self",
     "TypeAlias",
     "Unpack",
     "np",

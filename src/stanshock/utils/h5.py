@@ -1,11 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Self
 
 from h5py import Dataset, File, Group, string_dtype
 
-from stanshock.system.backend import Array, IntArray, np
+from stanshock.system.backend import Array, IntArray, Self, np
 
 
 def h5_has(filename: Path, key: str) -> bool:
