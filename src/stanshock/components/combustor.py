@@ -107,6 +107,7 @@ class Combustor:
         self.initialization: Initialization = initialization
         self.include_diffusion = include_diffusion
         self.include_pseudoshock = include_pseudoshock
+        self.pseudoshock: Pseudoshock | None = None
         self.thickening = thickening
         self.plot_state_interval = plot_state_interval
         self.plot_state_variables = plot_state_variables

@@ -13,7 +13,7 @@ from stanshock.models.wall_models import (
     CompressibleInertSkinFriction,
 )
 from stanshock.numerics.boundary_conditions import BCInput
-from stanshock.physics.thermotable import ThermoTable
+from stanshock.physics.cantera_interface import CanteraInterface
 from stanshock.processing.initialize import InitializeRiemannProblem
 from stanshock.processing.probe import Probe
 from stanshock.system.backend import Array
@@ -105,7 +105,8 @@ def main(
     boundary_conditions: BCInput = {"left": ["reflecting"], "right": ["reflecting"]}
     state1 = (gas1, u1)
     state4 = (gas4, u4)
-    physics_model = ThermoTable(gas1)
+    # physics_model = ThermoTable(gas1)
+    physics_model = CanteraInterface(gas1)
     initialization = InitializeRiemannProblem(
         geometry, physics_model, state4, state1, xShock
     )
@@ -119,6 +120,7 @@ def main(
         output_every=100,
         wall_models=(CompressibleInertSkinFriction(), CompressibleHeatFlux()),
         wall_temperature=T1,  # assume wall temperature is in thermal eq. with gas
+        use_double_flux=False,
     )
     ssbl.probes.append(
         Probe(geometry, physics_model, max(geometry.xf))

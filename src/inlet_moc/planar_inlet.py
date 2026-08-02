@@ -113,8 +113,32 @@ class PlanarInlet:
         self.cowl = PiecewiseLinearCurve(xy_cowl, normal_sign=n_cowl)
 
     def plot_inlet(
-        self, fig: Figure | None = None, ax: Axes | None = None
+        self,
+        fig: Figure | None = None,
+        ax: Axes | None = None,
+        *,
+        hatch_band: float | None = None,
+        hatch_color: str = "0.55",
+        equal_aspect: bool = True,
     ) -> tuple[Figure, Axes]:
+        """Draw both inlet walls with a hatched band hugging each line.
+
+        The hatching marks the solid side of each wall as a narrow band that
+        follows the line, rather than filling the whole body.  Filling the body
+        does not survive being cropped or zoomed -- on a short panel, or one
+        whose y range stops below the centerbody, the fill swamps the plot -- so
+        the band is the more portable convention.
+
+        Parameters
+        ----------
+        hatch_band:
+            Band thickness in data units.  Defaults to 6% of the inlet height.
+        hatch_color:
+            Colour of the hatch strokes.
+        equal_aspect:
+            Set an equal data aspect.  Pass ``False`` when the caller manages the
+            aspect itself, e.g. via ``set_box_aspect`` on a gridded panel.
+        """
         if ax is None:
             import matplotlib.pyplot as plt
 
@@ -125,19 +149,28 @@ class PlanarInlet:
             fig = ax.figure  # type: ignore[assignment]
             assert fig is not None
 
-        ax.fill_between(
-            self.centerbody.x,
-            0,
-            self.centerbody.y,
-            facecolor="white",
-            edgecolor="0.35",
-            hatch="///",
-            linewidth=0.0,
-            zorder=8,
-        )
-        ax.plot(self.centerbody.x, self.centerbody.y, color="k", lw=0.5, zorder=50)
-        ax.plot(self.cowl.x, self.cowl.y, color="k", lw=0.5, zorder=50)
-        ax.set_aspect("equal")
+        if hatch_band is None:
+            y_lo = min(self.centerbody.y_min, self.cowl.y_min)
+            y_hi = max(self.centerbody.y_max, self.cowl.y_max)
+            hatch_band = 0.06 * max(y_hi - y_lo, 1.0e-12)
+
+        for wall in (self.centerbody, self.cowl):
+            # normal_sign points into the flow, so the solid side is its negative
+            offset = -wall.normal_sign * hatch_band
+            ax.fill_between(
+                wall.x,
+                wall.y,
+                wall.y + offset,
+                facecolor="none",
+                edgecolor=hatch_color,
+                hatch="///",
+                linewidth=0.0,
+                zorder=8,
+            )
+            ax.plot(wall.x, wall.y, color="k", lw=0.5, zorder=50)
+
+        if equal_aspect:
+            ax.set_aspect("equal")
         return fig, ax
 
     def get_infl0(self):

@@ -1,25 +1,37 @@
 from __future__ import annotations
 
+import itertools
 from collections.abc import Callable
-
-import numpy as np
-from scipy import integrate
 
 from stanshock.models.boundary_layer import BoundaryLayer
 from stanshock.models.wall_models import WallState
-from stanshock.physics.fluid_base import FluidState
-from stanshock.system.backend import Array, Unpack
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
+from stanshock.system.backend import Array, Index, Unpack, np
 from stanshock.system.base import FastSlowMode, FastSlowSource, PrecomputeSteps
 
-DhFunction = Callable[[Array | float], Array | float]
+
+def rk2_step(
+    rhs: Callable[[Array, float], Array], y: Array, x: float, dx: float
+) -> Array:
+    k1 = rhs(y, x)
+    return y + dx * rhs(y + 0.5 * dx * k1, x + 0.5 * dx)
+
+
+def interpolate_fluid_state(
+    x: Array,
+    state: FluidState,
+    x_q: Array | float,
+    physics: FluidPhysics,
+) -> FluidState:
+    x_q = np.atleast_1d(x_q)
+    state_array = physics.primitive_to_conservative(state)
+    state_array_q = np.column_stack(
+        [np.interp(x_q, x, state_array[:, i]) for i in range(state_array.shape[1])]
+    )
+    return physics.conservative_to_primitive(state_array_q)
 
 
 class Pseudoshock(FastSlowSource):
-    """
-    Compute the pressure profile found in a pseudoshock according to
-    Fievet et al. (2018).
-    """
-
     def __init__(
         self,
         boundary_layer: BoundaryLayer,
@@ -28,296 +40,483 @@ class Pseudoshock(FastSlowSource):
         **precompute_steps: Unpack[PrecomputeSteps],
     ) -> None:
         super().__init__(mode, **precompute_steps)
-        assert self.geometry is not None
-        assert self.physics is not None
+        geometry = self.geometry
+        physics = self.physics
+        assert geometry is not None
+        assert physics is not None
 
         self.boundary_layer = boundary_layer
-        self.x = self.geometry.xc[self.geometry.idx_cells]
-        self.all_idx = np.arange(len(self.x), dtype=np.int64)
-        self.idx_output_explicit = np.array([], dtype=np.int64)
+
+        self.x = geometry.xc[geometry.idx_cells]
+        dx = geometry.dx
+        if isinstance(dx, np.ndarray):
+            self.dx_cells = dx[geometry.idx_cells]
+        else:
+            self.dx_cells = np.full(self.x.shape, dx, dtype=np.float64)
+
+        self.all_idx: Index = np.arange(
+            len(self.x), dtype=np.int64
+        )  # Replace w/ self.geometry.idx_cells
+        self.idx_output_explicit: Index = np.empty(0, dtype=np.int64)
         self.idx_output_implicit = self.all_idx.copy()
 
-        self.wall_temperature = boundary_layer.wall_temperature
+        self.Tw = boundary_layer.wall_temperature
         self.skin_friction_coefficient = boundary_layer.skin_friction
+        self.heat_flux = boundary_layer.heat_flux
 
-        self.sf_array: list[int] = []
+        self.x_sf: list[float] = []
         self.us: list[float] = []
         self.t_ps: list[float] = []
-        self.L_scale: float = 0.0
         self.sigma_ss: list[float] = []
-        self._cache_time: float | None = None
-        self._last_logged_time: float | None = None
-        self._reset_cached_solution()
+        self.p2p1: list[float] = []
+        self.L_ps: list[float] = []
+        self.AcA_ps: Array = np.empty(0, dtype=np.float64)
+        self.Dh_fxn: Callable[[Array | float], Array | float] | None = None
+        self.A_fxn: Callable[[Array | float], Array | float] | None = None
+        self.Pwet_fxn: Callable[[Array | float], Array | float] | None = None
+        self.dlnA_dx_fxn: Callable[[Array | float], Array | float] | None = None
+        self.A0: float | None = None
+        self.state_0: FluidState | None = None
+        self.cf0: float | None = None
+        self._accepted_profile: tuple[Array, FluidState, Array] | None = None
+
+        self.p_res: list[float] = []
+        self.p_res_max = 0.05
 
         if parameters is None:
             parameters = {}
 
-        self.Ap = parameters.get("Ap", 1.64)
-        self.Bp = parameters.get("Bp", 25.9)
-        self.Cp = parameters.get("Cp", 2.5)
-        self.Dp = parameters.get("Dp", 3.5)
-        self.Ep = parameters.get("Ep", 0.0)
-        self.k_ref = parameters.get("k_ref", 135.5)
-        self.Beta_p = parameters.get("Beta_p", 1.1)
-        self.M_ref = parameters.get("M_ref", 1.90)
-        self.Alpha_p = parameters.get("Alpha_p", 1.064)
-        self.sigma = parameters.get("sigma", 0.769521)
+        self.alpha_p = parameters.get("alpha_p", 0.01)  # skin friction scaling
+        self.beta_p = parameters.get("beta_p", 0.11)  # obliqueness, user-defined
+        self.Gamma_p = parameters.get("gamma_p", 0.0575)  # Default
+        self.Omega_p = parameters.get("omega_p", 0.75)  # Default
 
-    def _reset_cached_solution(self) -> None:
-        self._ps_args: tuple[float, float, float, float, float, DhFunction] | None = (
-            None
+        self.S_p = parameters.get("S_p", parameters.get("S", 0.90))  # Symmetry
+        self.sigma_p = parameters.get("sigma_p", parameters.get("sigma", 0.76))
+        self.Lambda_p = self.beta_p * self.S_p * self.sigma_p
+        self.p_res_max = parameters.get("p_res_max", self.p_res_max)
+
+        self.n_shock_root_samples = int(parameters.get("n_shock_root_samples", 6))
+        self.n_shock_root_iterations = int(parameters.get("n_shock_root_iterations", 4))
+        self.shock_search_width_factor = parameters.get(
+            "shock_search_width_factor", 2.0
         )
-        self._ps_r_idx: int | None = None
-        self._ps_M_out = np.array([], dtype=np.float64)
-        self._ps_P_out = np.array([], dtype=np.float64)
+        self.shock_search_min_cells = int(parameters.get("shock_search_min_cells", 2))
 
-    def get_shock_idx(self, p: Array, u: Array, a: Array) -> None | int:
-        p2p1a = np.maximum(p[1:], p[:-1]) / np.minimum(p[1:], p[:-1])
-        dp_norm = np.sign(p[1:] - p[:-1])
-        uL = u[:-1]
-        uR = u[1:]
-        aL = a[:-1]
-        aR = a[1:]
+    def get_planar_shock_foot(self, p, u, a, max_half=6, edge_tol=1.005):
+        """Returns (s1_float, pi_local, armed) or (None, None, False).
+        s1_float is a real-valued cell-centre coordinate (index units)."""
 
-        maskLP = (np.abs(p2p1a) >= 1.05) & (dp_norm == 1)
-        l_entropy_condn = (uL - aL) > (uR - aR)
-        l_states = maskLP & l_entropy_condn
-        L = np.nonzero(l_states)[0]
-        if L.size == 0:
-            return None
-        s_idx_temp = L[0]
-        return int(np.clip(s_idx_temp - 1, 0, len(dp_norm) - 1))
+        pR_pL = p[1:] / p[:-1]  # >1 iff compressive
+        compressive = pR_pL >= 1.03
+        entropy = (u[:-1] - a[:-1]) > (u[1:] - a[1:])
+        cand = np.nonzero(compressive & entropy)[0]
+        if cand.size == 0:
+            return None, None, False
+        f = int(cand[0])  # most upstream candidate
 
-    def get_shock_properties(
-        self, time: float, state: FluidState
-    ) -> (
-        tuple[
-            tuple[float, float, float, float, float, DhFunction],
-            list[float],
-            int,
-            float,
-        ]
-        | None
-    ):
-        assert self.geometry is not None
-        assert self.physics is not None
+        lo = f
+        while lo > 0 and pR_pL[lo - 1] >= edge_tol and (f - lo) < max_half:
+            lo -= 1
+        hi = f + 1
+        while hi < len(pR_pL) and pR_pL[hi] >= edge_tol and (hi - f) < max_half:
+            hi += 1
+        p_lo, p_hi = p[lo], p[hi]
+        pi_local = p_hi / p_lo
 
-        p = self.physics.get_pressure(state)
-        u = self.physics.get_velocity(state)
+        pi_crit = 1.50
+        if pi_local < pi_crit:
+            return None, pi_local, False
+        p_t = p_lo * pi_crit
+        seg = p[lo : hi + 1]
+        k = int(np.searchsorted(seg, p_t))
+        if k == 0:
+            return float(lo), pi_local, True
+        k = min(k, len(seg) - 1)
+
+        lp0, lp1 = np.log(seg[k - 1]), np.log(seg[k])
+        frac = 0.0 if lp1 == lp0 else (np.log(p_t) - lp0) / (lp1 - lp0)
+        s1 = (lo + k - 1) + np.clip(frac, 0.0, 1.0)
+        return float(s1), pi_local, True
+
+    def clear_pseudoshock_setup(self) -> None:
+        self.state_0 = None
+        self.cf0 = None
+        self.Dh_fxn = None
+        self.A_fxn = None
+        self.Pwet_fxn = None
+        self.dlnA_dx_fxn = None
+        self.A0 = None
+
+    def set_pseudoshock_start(
+        self,
+        time: float,
+        x_sf: float,
+        state_0: FluidState,
+        us: float,
+    ) -> None:
+        self.Dh_fxn = lambda x_shift: self.geometry.hydraulic_diameter(
+            time, x_shift + x_sf
+        )
+        self.A_fxn = lambda x_shift: self.geometry.area(time, x_shift + x_sf)
+        self.Pwet_fxn = lambda x_shift: self.geometry.perimeter(time, x_shift + x_sf)
+        if self.geometry.dlnA_dx is None:
+            self.dlnA_dx_fxn = lambda _x_shift: 0.0
+        else:
+            self.dlnA_dx_fxn = lambda x_shift: self.geometry.dlnA_dx(
+                time, x_shift + x_sf
+            )
+        self.A0 = float(self.A_fxn(0.0))
+        Dh_sf = self.geometry.hydraulic_diameter(time, x_sf)
+        wall = WallState.from_state(state_0, self.physics, Lc=Dh_sf, Tw=self.Tw)
+        self.state_0 = state_0
+
+        self.j0 = state_0.density[0] * (state_0.velocity[0] - us)
+        self.cf0 = self.skin_friction_coefficient(wall)[0]
+        self.us.append(us)
+
+    def get_shock_properties(self, time: float, state: FluidState) -> bool:
+        prediction_active = bool(self.t_ps)
+
+        self.clear_pseudoshock_setup()
+        self._accepted_profile = None
+        p = state.pressure
+        u = state.velocity
         a = self.physics.get_sound_speed(state)
 
-        shock_idx = self.get_shock_idx(p, u, a)
-        if shock_idx is None:
-            return None
+        if prediction_active:
+            candidate = self.get_pseudoshock_shock_foot(time, state)
+        else:
+            s1, p_ratio, armed = self.get_planar_shock_foot(p, u, a)
+            if not armed:
+                return False
+            x_sf = np.interp(s1, np.arange(len(self.x), dtype=np.float64), self.x)
+            state_0 = interpolate_fluid_state(self.x, state, x_sf, self.physics)
+            gamma1 = self.physics.get_gamma(state_0)[0]
+            a1 = self.physics.get_sound_speed(state_0)[0]
+            u1 = state_0.velocity[0]
+            M1_rel = np.sqrt(
+                p_ratio * (gamma1 + 1.0) / (2.0 * gamma1)
+                + (gamma1 - 1.0) / (2.0 * gamma1)
+            )
+            us = u1 - a1 * M1_rel
+            candidate = (x_sf, state_0, us, p_ratio)
 
-        p1 = float(p[shock_idx])
-        u1 = float(u[shock_idx])
-        a1 = float(a[shock_idx])
-        gamma1 = float(self.physics.get_gamma(state)[shock_idx])
-        self.x_shock = float(self.x[shock_idx])
+        if candidate is None:
+            return False
 
-        def Dh_func(x_shift: Array | float) -> Array | float:
-            assert self.geometry is not None
-            return self.geometry.hydraulic_diameter(time, x_shift + self.x_shock)
+        if len(candidate) > 4:
+            x_sf, state_0, us, _, x_ps, state_ps, AcA_ps = candidate
+            self._accepted_profile = (x_ps, state_ps, AcA_ps)
+        else:
+            x_sf, state_0, us, _ = candidate
+        a1 = self.physics.get_sound_speed(state_0)[0]
+        M1_rel = (state_0.velocity[0] - us) / a1
+        if not np.isfinite(M1_rel) or M1_rel < 1.3:
+            self._accepted_profile = None
+            return False
 
-        if not self.L_scale:
-            self.L_scale = float(Dh_func(0.0))
+        self.set_pseudoshock_start(time, x_sf, state_0, us)
+        self.x_sf.append(x_sf)
+        return True
 
-        d_ind = int(np.rint(self.L_scale / (4 * self.geometry.dx)))
-        i0 = max(shock_idx - d_ind, 0)
-        i1 = min(shock_idx + d_ind, len(p))
-        p_wind = p[i0:i1]
-        p_rat = float(np.max(p_wind / p1))
+    def primitive_profile_state(
+        self,
+        x: float,
+        AcA: float,
+        u2: float,
+        p: float,
+    ) -> FluidState:
+        u = np.sqrt(u2)
+        rho = self.j0 * self.A0 / (AcA * self.A_fxn(x) * u)
+        composition = self.state_0.composition[0].reshape((1, -1))
 
-        us = u1 - a1 * np.sqrt(
-            (p_rat * (gamma1 + 1.0) / (2.0 * gamma1)) + (gamma1 - 1.0) / (2.0 * gamma1)
+        state = FluidState(
+            shape=(1,),
+            density=np.asarray([rho], dtype=np.float64),
+            velocity=np.asarray([u], dtype=np.float64),
+            pressure=np.asarray([p], dtype=np.float64),
+            composition=composition,
         )
-        M1 = u1 / a1
-        M1_rel = M1 - (us / a1)
-        if np.abs(us) >= 600.0 or M1_rel <= 1.3:
-            return None
+        state.temperature = self.physics.get_temperature(state)
+        return state
 
-        state_point = state[shock_idx]
-        x_shock = np.array([self.x_shock], dtype=np.float64)
-        wall = WallState.from_state(
-            state_point,
-            self.physics,
-            self.geometry.characteristic_length(time, x_shock),
-            self.wall_temperature,
-        )
-        cf0 = float(np.atleast_1d(self.skin_friction_coefficient(wall))[0])
+    def get_dlnp_dx(
+        self,
+        x: float,
+        AcA: float,
+        state: FluidState,
+    ) -> float:
+        rho = state.density[0]
+        u = state.velocity[0]
 
-        q1 = gamma1 * M1_rel**2 * p1 / 2.0
-        kappa, k_c, cf_model = self.get_constants(M1_rel, cf0)
-        y0 = [float(M1_rel**2), 1.0, p1]
-        args = (gamma1, q1, kappa, k_c, cf_model, Dh_func)
-        return args, y0, shock_idx, us
+        mu = self.physics.get_mu(state)[0]
+        gamma = self.physics.get_gamma(state)[0]
+        a = self.physics.get_sound_speed(state)[0]
 
-    def get_constants(
-        self, M1: float, cf0: float, sigma: float | None = None
-    ) -> tuple[float, float, float]:
-        if sigma is None:
-            sigma = self.sigma
-        kappa = self.Bp * (1.0 - np.tanh(self.Cp * (M1 - self.M_ref)))
-        norm_int = ((self.Ap + 1.0) ** (kappa + 1.0) - self.Ap ** (kappa + 1.0)) / (
-            kappa + 1.0
-        )
-        k_c = (self.k_ref * cf0**self.Alpha_p * sigma**self.Beta_p) / norm_int
-        cf_model = self.Ep + (self.Dp * cf0)
-        return kappa, k_c, cf_model
+        M2 = (u / a) ** 2
+        D_c = np.sqrt(4.0 * AcA * self.A_fxn(x) / np.pi)  # streamtube diameter
+        Re_Dc = rho * np.abs(u) * D_c / mu
 
-    def M_Ar_Derivatives(
+        return self.Lambda_p * (2.0 * gamma / (gamma + 1.0)) * max(M2 - 1.0, 0.0) + (
+            self.S_p / self.Gamma_p
+        ) ** 4 * gamma * M2 * Re_Dc ** (-4.0 * (1.0 - self.Omega_p))
+
+    def dydx(
         self,
         y: Array,
         x: float,
-        gamma: float,
-        q1: float,
-        kappa: float,
-        k_c: float,
-        cf_model: float,
-        Dh_func: DhFunction,
     ) -> Array:
-        Dh = Dh_func(x)
-        M2, AcA, p = y
-        q = gamma * M2 * p / 2.0
-        dp_dx = (q / Dh) * k_c * (self.Ap + (q / q1)) ** kappa
+        physics = self.physics
+        Dh_fxn = self.Dh_fxn
+        Pwet_fxn = self.Pwet_fxn
+        dlnA_dx_fxn = self.dlnA_dx_fxn
 
-        mult = -M2 * (1.0 + ((gamma - 1.0) / 2.0) * M2)
-        term1M2 = (2.0 / (gamma * M2)) * (dp_dx / p)
-        term2M2 = 4.0 * cf_model / Dh
-        dM2_dx = mult * ((term1M2 + term2M2) / AcA)
+        p, u2, AcA = y
 
-        term1AcA = (1.0 - M2 * (1.0 - gamma * (1.0 - AcA))) / (gamma * M2 * AcA)
-        term2AcA = ((1.0 + (gamma - 1.0) * M2) / (2.0 * AcA)) * (4.0 * cf_model / Dh)
-        dAcA_dx = ((term1AcA) * (dp_dx / p) + term2AcA) * AcA
+        Dh = Dh_fxn(x)
+        Pwet = Pwet_fxn(x)
+        dlnA_dx = dlnA_dx_fxn(x)
+        state = self.primitive_profile_state(x, AcA, u2, p)
+        wall = WallState.from_state(state, self.physics, Lc=Dh, Tw=self.Tw)
+        wall.Cf = np.full(state.shape, self.cf0 * self.alpha_p)
 
-        return np.array([dM2_dx, dAcA_dx, dp_dx])
+        rho = state.density[0]
+        T = state.temperature[0]
+        cp = physics.get_cp(state)[0]
+        G_p = self.get_dlnp_dx(x, AcA, state) / Dh
+
+        Cf = wall.Cf[0]
+        q_wall = 0.0
+        if self.heat_flux is not None:
+            q_wall = self.heat_flux(wall)[0]
+
+        dp_dx = p * G_p
+        du2_dx = -2.0 * p * G_p / (AcA * rho)
+        du2_dx -= 4.0 * Cf * u2 / (AcA * Dh)
+
+        dAcA_dx = AcA * (
+            -G_p
+            - dlnA_dx
+            - q_wall * Pwet / (self.j0 * self.A0 * cp * T)
+            - 0.5 * (1.0 + u2 / (cp * T)) * du2_dx / u2
+        )
+
+        return np.asarray(
+            [
+                dp_dx,
+                du2_dx,
+                dAcA_dx,
+            ],
+            dtype=np.float64,
+        )
 
     def pseudoshock_solver(
         self,
         x: Array,
-        args: tuple[float, float, float, float, float, DhFunction],
-        y0: list[float],
-    ) -> tuple[Array, Array, Array]:
-        y_out = integrate.odeint(self.M_Ar_Derivatives, y0, x, args)
-        M_out_temp = np.sqrt(y_out[:, 0])
-        AcA_temp = y_out[:, 1]
-        P_out_temp = y_out[:, 2]
-
-        search_inds = np.where(np.gradient(AcA_temp) > 0)[0]
-        if search_inds.size > 0:
-            abs_diff = np.abs(AcA_temp[search_inds] - 1.0)
-            end_ind = search_inds[np.argmin(abs_diff)] + 1
-            M_out = M_out_temp[:end_ind]
-            P_out = P_out_temp[:end_ind]
-        else:
-            M_out = M_out_temp
-            P_out = P_out_temp
-        return M_out, AcA_temp, P_out
-
-    def update_indices(self, time: float, state: FluidState | None) -> None:
-        assert state is not None
-        self.idx_output_explicit = np.array([], dtype=np.int64)
-        self.idx_output_implicit = self.all_idx.copy()
-        self._reset_cached_solution()
-
-        shock_properties = self.get_shock_properties(time, state)
-        if shock_properties is None:
-            return
-
-        args, y0, s_idx, us = shock_properties
-        M_out, _AcA, P_out = self.pseudoshock_solver(self.x, args, y0)
-        n_ps = len(P_out)
-        if n_ps < 2:
-            return
-
-        r_idx = int(np.clip(s_idx + n_ps, 0, len(self.x) - 1))
-        idx_ps = np.arange(s_idx, r_idx, dtype=np.int64)
-        if idx_ps.size == 0:
-            return
-
-        self.idx_output_explicit = idx_ps
-        self.idx_output_implicit = np.concatenate(
-            (self.all_idx[:s_idx], self.all_idx[r_idx:])
+        record: bool = True,
+    ) -> tuple[Array, FluidState, bool]:
+        y0 = np.asarray(
+            [
+                self.state_0.pressure[0],
+                (self.state_0.velocity[0] - self.us[-1]) ** 2,
+                1.0,
+            ],
+            dtype=np.float64,
         )
-        self._ps_args = args
-        self._ps_r_idx = r_idx
-        self._ps_M_out = M_out[: idx_ps.size]
-        self._ps_P_out = P_out[: idx_ps.size]
 
-        if self._last_logged_time != time:
-            self.sf_array.append(s_idx)
-            self.us.append(us)
-            self.t_ps.append(time)
-            self._last_logged_time = time
+        x_out = [x[0]]
+        y_out = [y0]
+        separated = False
+        reattached = False
+        for x0, x1 in itertools.pairwise(x):
+            y_prev = y_out[-1]
+            y_next = rk2_step(self.dydx, y_prev, x0, x1 - x0)
+            separated = separated or y_next[2] < 1.0
+            if separated and y_prev[2] < 1.0 <= y_next[2]:
+                f = (1.0 - y_prev[2]) / (y_next[2] - y_prev[2])
+                x_out.append(x0 + f * (x1 - x0))
+                y_out.append(y_prev + f * (y_next - y_prev))
+                y_out[-1][2] = 1.0
+                reattached = True
+                break
+            x_out.append(x1)
+            y_out.append(y_next)
 
-    def before_time_integration(
-        self,
-        time: float,
-        state_array: Array,
-        gamma_star: Array | None,
-        e0_star: Array | None,
-    ) -> tuple[Array, Array | None, Array | None]:
-        if self.mode == "slow":
-            self._cache_time = None
-        return super().before_time_integration(time, state_array, gamma_star, e0_star)
+        x_out = np.asarray(x_out, dtype=np.float64)
+        y_out = np.vstack(y_out)
 
-    def after_time_integration(
-        self,
-        time: float,
-        state_array_local: Array,
-        gamma_star_local: Array | None,
-        e0_star_local: Array | None,
-        state_array: Array,
-        gamma_star: Array | None,
-        e0_star: Array | None,
-    ) -> tuple[Array, Array | None, Array | None]:
-        _ = time
-        state_array_local = state_array_local.reshape(self.shape_input)
+        P_out = y_out[:, 0]
+        u2_out = y_out[:, 1]
+        AcA_out = y_out[:, 2]
+        self.AcA_ps = AcA_out
+        u_rel = np.sqrt(u2_out)
 
-        if self.physics is not None:
-            state = self.physics.conservative_to_primitive(
-                state_array_local, gamma_star_local, e0_star_local
+        state_0 = self.state_0
+
+        rho = self.j0 * self.A0 / (AcA_out * self.A_fxn(x_out) * u_rel)
+        u = u_rel + self.us[-1]
+        composition = np.tile(state_0.composition[0], (x_out.size, 1))
+
+        state_ps = FluidState(
+            shape=(x_out.size,),
+            density=rho,
+            velocity=u,
+            pressure=P_out,
+            composition=composition,
+        )
+        state_ps.temperature = self.physics.get_temperature(state_ps)
+        state_ps.internal_energy = self.physics.get_internal_energy(state_ps)
+
+        if record:
+            self.p2p1.append(P_out[-1] / P_out[0])
+            self.L_ps.append(x_out[-1])
+        return x_out, state_ps, reattached
+
+    def estimate_dt_max(self, state: FluidState) -> float:
+        ld_max = max(np.abs(state.velocity) + self.physics.get_sound_speed(state))
+        return np.min(self.dx_cells) / ld_max
+
+    def get_backpressure(self, time: float, state_ss: FluidState, x_tail: float):
+        x_tail += self.geometry.hydraulic_diameter(time, x_tail) / 4.0
+        M_ss = state_ss.velocity / self.physics.get_sound_speed(state_ss)
+        subsonic_post_ps = (M_ss <= 1.0) & (self.x >= x_tail)
+
+        idx = np.nonzero(subsonic_post_ps)[0]
+        if idx.size == 0:
+            idx = np.nonzero(self.x >= x_tail)[0]
+        if idx.size == 0:
+            idx = np.asarray([len(self.x) - 1], dtype=np.int64)
+
+        return np.max(state_ss.pressure[idx])
+
+    def get_pseudoshock_shock_foot(self, time, state):
+        x_tail = self.L_ps[-1] + self.x_sf[-1]
+        p_b = self.get_backpressure(time, state, x_tail)
+        dt = time - self.t_ps[-1]
+        x_min = self.x[0]
+        x_max = self.x[-2]
+        x_sf_guess = np.clip(self.x_sf[-1] + self.us[-1] * dt, x_min, x_max)
+        dx_min = float(np.min(self.dx_cells))
+        travel = abs(self.us[-1] * dt)
+        search_width = max(
+            self.shock_search_width_factor * travel,
+            self.shock_search_min_cells * dx_min,
+        )
+        x_lo = max(x_min, x_sf_guess - search_width)
+        x_hi = min(x_max, x_sf_guess + search_width)
+
+        eval_cache = {}
+
+        def evaluate(x_sf):
+            x_sf = float(x_sf)
+            key = round(x_sf, 12)
+            if key in eval_cache:
+                return eval_cache[key]
+            trial = None
+            if x_sf < x_min or x_sf > x_max:
+                eval_cache[key] = trial
+                return trial
+            state_0 = interpolate_fluid_state(self.x, state, x_sf, self.physics)
+            gamma1 = self.physics.get_gamma(state_0)[0]
+            a1 = self.physics.get_sound_speed(state_0)[0]
+            u1 = state_0.velocity[0]
+            p_ratio = p_b / state_0.pressure[0]
+            if p_ratio <= 1.0:
+                eval_cache[key] = trial
+                return trial
+            M1_rel = np.sqrt(
+                p_ratio * (gamma1 + 1.0) / (2.0 * gamma1)
+                + (gamma1 - 1.0) / (2.0 * gamma1)
             )
-            if gamma_star is not None:
-                state.temperature = self.physics.get_temperature(state)
-                state.internal_energy = None
-                state_array_local = self.physics.primitive_to_conservative(state)
-                gamma_star_local, e0_star_local = (
-                    self.physics.get_double_flux_variables(state)
+            us = u1 - a1 * M1_rel
+            x_after = self.x[self.x > x_sf] - x_sf
+            x_local = np.concatenate((np.asarray([0.0], dtype=np.float64), x_after))
+            if x_local.size < 2:
+                eval_cache[key] = trial
+                return trial
+            n_us = len(self.us)
+            self.set_pseudoshock_start(time, x_sf, state_0, us)
+            x_ps, state_ps, _ = self.pseudoshock_solver(x_local, record=False)
+            AcA_ps = self.AcA_ps.copy()
+            del self.us[n_us:]
+            self.clear_pseudoshock_setup()
+            if x_sf + x_ps[-1] > self.x[-1]:
+                eval_cache[key] = trial
+                return trial
+            err = state_ps.pressure[-1] / p_b - 1.0
+            trial = x_sf, state_0, us, p_ratio, x_ps, state_ps, AcA_ps, err
+            eval_cache[key] = trial
+            return trial
+
+        def accept(trial):
+            self.p_res.append(trial[-1])
+            return trial[:-1]
+
+        best = evaluate(x_sf_guess)
+        if best is not None and abs(best[-1]) <= self.p_res_max:
+            return accept(best)
+
+        x_samples = np.unique(
+            np.concatenate(
+                (
+                    np.asarray([x_sf_guess], dtype=np.float64),
+                    np.linspace(x_lo, x_hi, self.n_shock_root_samples),
                 )
-
-                gamma_star[self.idx_input] = gamma_star_local
-                assert e0_star is not None
-                e0_star[self.idx_input] = e0_star_local
-
-        state_array = np.reshape(state_array, self.shape_full)
-        state_array[self.idx_input] = state_array_local
-
-        return np.ravel(state_array), gamma_star, e0_star
-
-    def precompute_for_source(
-        self,
-        time: float,
-        state_array_local: Array,
-        gamma_star: Array | None = None,
-        e0_star: Array | None = None,
-    ) -> tuple[
-        Array,
-        FluidState | None,
-        FluidState | None,
-        FluidState | None,
-        FluidState | None,
-    ]:
-        data = super().precompute_for_source(
-            time, state_array_local, gamma_star, e0_star
+            )
         )
-        state = data[1]
-        if self._cache_time != time:
-            assert state is not None
-            self.update_indices(time, state)
-            self._cache_time = time
-        return data
+        prev = None
+        for x_sample in x_samples:
+            trial = evaluate(x_sample)
+            if trial is None:
+                continue
+            if best is None or abs(trial[-1]) < abs(best[-1]):
+                best = trial
+            if abs(trial[-1]) <= self.p_res_max:
+                return accept(trial)
+            if prev is not None and prev[-1] * trial[-1] <= 0.0:
+                lo = trial
+                hi = prev
+                for _ in range(self.n_shock_root_iterations):
+                    mid = evaluate(0.5 * (lo[0] + hi[0]))
+                    if mid is None:
+                        break
+                    if best is None or abs(mid[-1]) < abs(best[-1]):
+                        best = mid
+                    if abs(mid[-1]) <= self.p_res_max:
+                        return accept(mid)
+                    if lo[-1] * mid[-1] <= 0.0:
+                        hi = mid
+                    else:
+                        lo = mid
+                break
+            prev = trial
+
+        if best is not None and abs(best[-1]) <= self.p_res_max:
+            return accept(best)
+        return None
+
+    def assemble_corrective_pseudoshock_source(
+        self,
+        state_array_local: Array,
+        state: FluidState,
+        idx: Index,
+        x_cells: Array,
+        x_ps: Array,
+        state_ps: FluidState,
+    ) -> Array:
+        state_array_local = np.reshape(state_array_local, self.shape_input)
+        rhs = np.zeros_like(state_array_local)
+        if idx.size < 2:
+            return rhs
+
+        state_array_current = state_array_local[idx]
+        target_state = interpolate_fluid_state(x_ps, state_ps, x_cells, self.physics)
+        target_array = self.physics.primitive_to_conservative(target_state)
+        tau_ps = 2.0 * self.estimate_dt_max(state)
+
+        rhs[idx] += (target_array - state_array_current) / tau_ps
+        return rhs
 
     def add_source(self, y: Array, dy: Array) -> Array:
         state_array_local = np.reshape(y, self.shape_input)
@@ -335,28 +534,64 @@ class Pseudoshock(FastSlowSource):
         face_gradients: FluidState | None,
     ) -> Array:
         _ = face_states, avg_face_states, face_gradients
-        assert self.geometry is not None
-        assert state_array_local is not None
-        assert state is not None
-        rhs: Array = np.zeros_like(state_array_local)
-        idx = self.idx_output_explicit
-        if idx.size == 0 or self._ps_args is None or self._ps_r_idx is None:
+        if state_array_local is None or state is None:
+            return np.zeros(self.shape_input)
+
+        state_array_local = np.reshape(state_array_local, self.shape_input)
+        rhs = np.zeros_like(state_array_local)
+        self.idx_output_explicit = np.empty(0, dtype=np.int64)
+        self.idx_output_implicit = self.all_idx.copy()
+
+        if not self.get_shock_properties(time, state):
             return rhs
 
-        x_ps = self.x[idx]
-        Dh = self.geometry.hydraulic_diameter(time, x_ps)
-        gamma, q1, kappa, k_c, _cf_model, _Dh_func = self._ps_args
-        q = gamma * self._ps_M_out**2 * self._ps_P_out / 2.0
-        K_PS = (k_c / Dh) * (self.Ap + (q / q1)) ** kappa
+        x_sf = self.x_sf[-1]
+        s_idx = int(np.searchsorted(self.x, x_sf, side="left"))
+        x_cells = self.x[s_idx:] - x_sf
+        if x_cells.size < 1:
+            self._accepted_profile = None
+            return rhs
+        x_local = x_cells
+        if x_local[0] > 0.0:
+            x_local = np.concatenate((np.asarray([0.0], dtype=np.float64), x_local))
+        if x_local.size < 2:
+            self._accepted_profile = None
+            return rhs
 
-        P_error = (state.pressure[idx] - self._ps_P_out) / self._ps_P_out
-        gain = np.clip(P_error, -5.0, 5.0)
-        dp_dx_PS = q * K_PS
-        rhs[idx, 0] += dp_dx_PS * gain
+        accepted_profile = self._accepted_profile
+        self._accepted_profile = None
+        if accepted_profile is None:
+            x_ps, state_ps, _ = self.pseudoshock_solver(x_local)
+        else:
+            x_ps, state_ps, AcA_ps = accepted_profile
+            self.AcA_ps = AcA_ps
+            self.p2p1.append(state_ps.pressure[-1] / state_ps.pressure[0])
+            self.L_ps.append(x_ps[-1])
+        if x_ps.size < 2:
+            return rhs
 
-        sigma_ps = float(state.pressure[self._ps_r_idx] / self._ps_P_out[-1])
-        self.sigma_ss.append(sigma_ps)
-        return rhs
+        idx_local = np.nonzero(x_cells <= x_ps[-1])[0]
+        idx_ps = s_idx + idx_local
+        x_cells = x_cells[idx_local]
+        if idx_ps.size < 2:
+            return rhs
+
+        self.idx_output_explicit = idx_ps
+        r_idx = idx_ps[-1] + 1
+        self.idx_output_implicit = np.concatenate(
+            (self.all_idx[:s_idx], self.all_idx[r_idx:])
+        )
+
+        self.t_ps.append(time)
+
+        return self.assemble_corrective_pseudoshock_source(
+            state_array_local,
+            state,
+            idx_ps,
+            x_cells,
+            x_ps,
+            state_ps,
+        )
 
     def source_fast(
         self,
@@ -367,8 +602,10 @@ class Pseudoshock(FastSlowSource):
         avg_face_states: FluidState | None,
         face_gradients: FluidState | None,
     ) -> Array:
-        assert state_array_local is not None
-        rhs: Array = np.zeros_like(state_array_local)
+        if state_array_local is None:
+            return np.zeros(self.shape_input)
+
+        rhs = np.zeros_like(np.reshape(state_array_local, self.shape_input))
         idx = self.idx_output_implicit
         if idx.size == 0:
             return rhs
