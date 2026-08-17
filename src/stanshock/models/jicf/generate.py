@@ -5,7 +5,6 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import cantera as ct
 import h5py
 import numpy as np
 from joblib import Parallel, delayed
@@ -16,6 +15,7 @@ from tqdm import tqdm
 
 from stanshock.models.jicf.profile import AnalyticJICF
 from stanshock.physics.flamelet import FPVTable
+from stanshock.physics.fluid_base import FluidState
 from stanshock.system.geometry import Box
 from stanshock.utils.h5 import RectilinearVtkhdf, h5_getarray, h5_has, h5_write
 
@@ -35,17 +35,13 @@ class JICModel:
         n_inj: int,
         d_inj: float,
         J: Array,
-        rho_inj: Array,
-        u_inj: Array,
-        T_inj: Array,
-        rho: float,
-        u: float,
-        T: float,
+        fuel_state: FluidState,
         geometry: Box,
         physics: FPVTable,
         datadir: Path | str = "./data",
         theta_inj: float = 0.0,
         alpha: float = 1e6,
+        Cd: float = 0.7,
         model_file: str = "jicf_model.vtkhdf",
         x_profile: Array | None = None,
     ) -> None:
@@ -73,18 +69,8 @@ class JICModel:
             The grid of momentum-flux ratios to tabulate over. Sets the table
             resolution and range; each entry corresponds to one injected-fluid
             state ``(rho_inj[i], u_inj[i], T_inj[i])``.
-        rho_inj: np.ndarray
-            The density of the injected jet at each ``J`` grid point
-        u_inj: np.ndarray
-            The velocity of the injected jet at each ``J`` grid point
-        T_inj: np.ndarray
-            The temperature of the injected jet at each ``J`` grid point
-        rho: float
-            The density of the crossflow
-        u: float
-            The velocity of the crossflow
-        T: float
-            The temperature of the crossflow
+        fuel_state: FluidState
+            Thermodynamic state of the fuel manifold.
         alpha: float
             The relaxation parameter (used here only for storage)
         datadir: str
@@ -108,12 +94,8 @@ class JICModel:
         self.geometry = geometry
         self.physics = physics
 
-        assert self.physics.fuel_def is not None
-        self.fuel_def = self.physics.fuel_def
-        assert self.physics.ox_def is not None
-        self.ox_def = self.physics.ox_def
-
-        gas = self.physics.gas
+        # Set the fuel properties
+        self.fuel_state = fuel_state
 
         # Extract some information about the geometry
         self.xc = self.geometry.xc[self.geometry.idx_cells]
@@ -124,8 +106,6 @@ class JICModel:
         self.n_inj = n_inj
         self.d_inj = d_inj
         self.theta_inj = theta_inj
-
-        self.rho = rho
 
         self.alpha = alpha
         self.datadir = Path(datadir)
@@ -139,39 +119,14 @@ class JICModel:
         # Geometry parameters
         self.A = self.w * self.h
         self.A_inj = np.pi * (self.d_inj / 2.0) ** 2
-
-        # Free stream properties
-        self.u = u
-        self.T = T
-        gas.TDX = self.T, self.rho, self.ox_def
-        self.p = gas.P
-        self.W = gas.mean_molecular_weight
-        self.gamma = gas.cp / gas.cv
-        self.c = gas.sound_speed
-        self.M = self.u / self.c
-        self.Y_ox = gas.Y
+        self.Ae = Cd * self.A_inj
 
         # Momentum-flux-ratio grid (the table dimension). Sort ascending and
         # carry the per-grid injected-fluid state along so the tables and the
         # RegularGridInterpolators built below share a monotone axis.
         order = np.argsort(J)
         self.J = J[order]
-        self.rho_inj = rho_inj[order]
-        self.u_inj = u_inj[order]
-        self.T_inj = T_inj[order]
         self.nJ = len(self.J)
-
-        # Properties of the injected fluid at each grid point
-        sol = ct.SolutionArray(gas, shape=self.J.shape)
-        sol.TDX = self.T_inj, self.rho_inj, self.fuel_def  # type: ignore[assignment]
-        self.p_inj = sol.P
-        self.W_inj = sol.mean_molecular_weight
-        self.gamma_inj = sol.cp / sol.cv
-        self.c_inj = sol.sound_speed
-        self.Y_fuel = sol.Y[0]
-        self.M_inj = 1.0
-        self.mdot_inj = self.n_inj * self.rho_inj * self.u_inj * self.A_inj
-        self.mdot_inj[np.isnan(self.mdot_inj)] = 0.0
 
         # Set up the analytic JICF model
         self.analytic = AnalyticJICF(
@@ -180,11 +135,7 @@ class JICModel:
             h=self.h,
             n_inj=n_inj,
             d_inj=d_inj,
-            rho_inj=self.rho_inj,
-            u_inj=self.u_inj,
-            rho=rho,
-            u=u,
-            physics=self.physics,
+            J=J,
             theta_inj=theta_inj,
         )
 
@@ -250,6 +201,21 @@ class JICModel:
         else:
             self.calc_chemical_sources(write=True)
 
+    @property
+    def fuel_state(self) -> FluidState:
+        return self._fuel_state
+
+    @fuel_state.setter
+    def fuel_state(self, state: FluidState) -> None:
+        # Update stored properties of the fuel
+        self._fuel_state = state
+        self.gamma_inj = float(self.physics.get_gamma(state))
+        self.p_inj = float(self.physics.get_pressure(state))
+        self.rho_inj = float(self.physics.get_pressure(state))
+        self.T_inj = float(self.physics.get_temperature(state))
+        self.R_inj = float(self.physics.get_specific_gas_constant(state))
+        self.e0_inj = float(self.physics.get_internal_energy(state))
+
     def _cached_J_matches(self, dataset: str) -> bool:
         """Return True if the cached group was generated on the current J grid.
 
@@ -264,7 +230,7 @@ class JICModel:
             J_cached = h5_getarray(f, dataset)
         return J_cached.shape == self.J.shape and np.allclose(J_cached, self.J)
 
-    def __stretched_grid(
+    def _stretched_grid(
         self,
         x_start: float,
         x_end: float,
@@ -288,7 +254,7 @@ class JICModel:
         Nz = int(np.ceil(self.w / dx))
         self.y_3D_data = np.linspace(0, self.h, Ny)
         self.z_3D_data = np.linspace(-self.w / 2, self.w / 2, Nz)
-        self.x_3D_data = self.__stretched_grid(
+        self.x_3D_data = self._stretched_grid(
             self.xc[0], self.xc[-1], dx, 1.1, self.x_inj
         )
         self.analytic.i_m = slice(None)
