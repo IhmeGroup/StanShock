@@ -5,6 +5,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 from case_setup import Hyshot2Interface, data_dir
 
+from stanshock.models.jicf.source import LinearInterpolator
 from stanshock.processing.csv_writer import CSVWriter
 from stanshock.processing.plot import XTDiagram
 
@@ -24,6 +25,12 @@ ss = sim.case
 ss.verbose = True
 ss.output_every = 100
 ss.plot_state_interval = 100
+
+# Get integration time span
+t_end = 5e-3
+throttle = ss.injectors[0].throttle
+if isinstance(throttle, LinearInterpolator):
+    t_end = throttle.xmax
 
 plot_variables: list[str] = [
     "density",
@@ -55,7 +62,7 @@ ss.plot_state_variables = plot_variables
 #     ["Y_H2", "Y_OH", "Y_H2O"],
 # ]
 ss.xt_diagrams = [XTDiagram(ss, variable, skip_steps=10) for variable in plot_variables]
-ss.advance_simulation(ss.injectors[0].t_inj[-1])
+ss.advance_simulation(t_end)
 for diagram in ss.xt_diagrams:
     diagram.plot(figdir=fig_dir)
 

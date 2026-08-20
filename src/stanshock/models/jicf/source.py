@@ -11,6 +11,11 @@ from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, TypeAlias, Unpack
 from stanshock.system.base import PrecomputeSteps, RightHandSide
 from stanshock.system.geometry import Box
+from stanshock.utils.isentropic import (
+    mach_from_pressure_ratio,
+    mdot_from_pressure_ratio,
+    property_ratios,
+)
 
 _ThrottleFunction: TypeAlias = Callable[[float], float]
 _ThrottleFunctionLike: TypeAlias = _ThrottleFunction | tuple[Array, Array] | float
@@ -27,16 +32,16 @@ class ConstantValue:
 
 class LinearInterpolator:
     def __init__(self, time: Array, throttle: Array) -> None:
-        self.xmin, self.xmax = time[0], time[-1]
-        self.ymin, self.ymax = throttle[0], throttle[-1]
+        self.xmin, self.xmax = float(time[0]), float(time[-1])
+        self.ymin, self.ymax = float(throttle[0]), float(throttle[-1])
         self.interp = make_interp_spline(time, throttle, k=1)
 
-    def __call__(self, time: float) -> Array:
+    def __call__(self, time: float) -> float:
         if time <= self.xmin:
             return self.ymin
         if time >= self.xmax:
             return self.ymax
-        return self.interp(time)
+        return float(self.interp(time))
 
 
 class FuelInjector(RightHandSide):
@@ -85,6 +90,11 @@ class FuelInjector(RightHandSide):
             )[0]
             + self.geometry.n_ghost_layers
         )
+        # Cross flow properties defined just upstream of the injector
+        self.idx_upstream: int = self.idx_input[0] - 1
+        self.idx_input = np.concatenate(([self.idx_upstream], self.idx_input))
+        self.shape_input = (len(self.idx_input), -1)
+        self.shape_output = (len(self.idx_input), -1)
 
         # Extract some information about the geometry
         self.xc = self.geometry.xc[self.idx_input]
@@ -93,15 +103,16 @@ class FuelInjector(RightHandSide):
             # Constant volume
             self.cell_volumes = self.geometry.volume()[self.idx_input, None]
 
-        # Weight injection distribution by cell widths
-        self.distribute_factor: Array | float = 1.0 / len(self.idx_input)
+        # Weight injection distribution by cell widths - don't include upstream cell
+        self.distribute_factor: Array | float = 1.0 / (len(self.idx_input) - 1)
         if isinstance(self.geometry.dx, np.ndarray):
             dx = self.geometry.dx[self.idx_input]
-            self.distribute_factor = dx / np.sum(dx)
+            self.distribute_factor = dx / np.sum(dx[1:])
+            self.distribute_factor[0] = 0.0
 
-        # Position of the first injected fluid particle: [x, mdot, J]. Both the
-        # mass flow rate (for reporting) and the momentum-flux ratio (the table
-        # lookup axis) are convected with each parcel.
+        # Properties of the first injected fluid particle: [x, mdot, J, rho_inj/rho].
+        # The mass flow rate (for reporting), the momentum-flux ratio (the table lookup
+        # axis), and the fuel/air density ratio are convected with each parcel.
         self.fluid_tips = np.array([[self.jicf.x_inj, 0.0, 0.0, 1.0]])
 
     @property
@@ -118,28 +129,45 @@ class FuelInjector(RightHandSide):
         else:
             self._throttle = throttle
 
+    def inflow(self, t: float, state: FluidState) -> tuple[FluidState, float, float]:
+        """Fluid properties at the plane of injection.
+
+        Simple model: Use specified manifold temperature and crossflow pressure.
+        """
+        assert self.physics is not None
+        inflow = FluidState(
+            shape=(1,),
+            temperature=np.asarray([self.jicf.T0]),
+            pressure=np.mean(self.physics.get_pressure(state)[1:], keepdims=True),
+            composition=self.jicf.manifold_state.composition,
+        )
+        rho = self.physics.get_density(inflow)
+        mdot = self.mdot(t, state)
+        inflow.velocity = mdot / (rho * self.jicf.n_inj * self.jicf.A_inj)
+        J = self.J(state, inflow)
+        return inflow, mdot, J
+
     def mdot(self, t: float, state: FluidState) -> float:
-        """Injector mass flow rate at a given time and fluid state."""
+        """Injector mass flow rate at a given time and fluid state.
+
+        Simple model: Throttle is simple percentage of specified maximum flow rate.
+        """
         _ = state
         return self.throttle(t) * self.mdot_max
 
-    def J(self, t: float, state: FluidState, mdot_inj: float | None = None) -> float:
+    def J(self, state: FluidState, inflow: FluidState) -> float:
         """Momentum-flux ratio ``J = rho_inj u_inj**2 / (rho u**2)`` at time ``t``."""
-        if mdot_inj is None:
-            mdot_inj = self.mdot(t, state[self.idx_input])
-        if mdot_inj <= 0.0:
-            return 0.0
-
         assert self.physics is not None
-        A_inj = self.jicf.n_inj * self.jicf.A_inj
-        mom_inj = (mdot_inj / A_inj) ** 2 / self.jicf.rho_inj
 
         # Get cross flow momentum flux just upstream of the injector
-        idx: int = self.idx_input[0] - 1
-        rho = float(self.physics.get_density(state)[idx])
-        u = float(self.physics.get_velocity(state)[idx])
+        rho = float(self.physics.get_density(state)[0])
+        u = float(self.physics.get_velocity(state)[0])
 
-        return mom_inj / (rho * u**2)
+        # Get momentum flux at the injection plane
+        rho_inj: float = float(self.physics.get_density(inflow)[0])
+        u_inj = float(self.physics.get_velocity(inflow)[0])
+
+        return (rho_inj * u_inj**2) / (rho * u**2)
 
     def update_fluid_tip_positions(
         self, dt: float, t: float, state: FluidState
@@ -154,24 +182,27 @@ class FuelInjector(RightHandSide):
         state: FluidState
             The current state of the cross flow
         """
-        # Update the fluid tip positions
         assert self.geometry is not None
         assert self.physics is not None
-        xc = self.geometry.xc[self.geometry.idx_cells]
+
+        # Get inflow properties
+        inflow, mdot, J = self.inflow(t, state[self.idx_input])
+        rho_inj = float(self.physics.get_density(inflow)[0])
+
+        # Get cross flow density just upstream of the injector
+        rho = float(self.physics.get_density(state)[self.idx_upstream])
+
+        # Update the fluid tip positions
+        xc = self.geometry.xc
         u = self.physics.get_velocity(state)
         x = self.fluid_tips[:, 0]
         x += dt * make_interp_spline(xc, u, k=1)(x)
-
-        # Get cross flow density just upstream of the injector
-        rho = float(self.physics.get_density(state)[self.idx_input[0] - 1])
 
         # Drop fluid tips that have passed the end of the domain
         idx = x < xc[-1]
 
         # Emit a new fluid tip, carrying its mass flow rate, momentum-flux ratio, and density ratio
-        mdot = self.mdot(t, state[self.idx_input])
-        J = self.J(t, state, mdot)
-        next_tip = np.array([[self.jicf.x_inj, mdot, J, self.jicf.rho_inj / rho]])
+        next_tip = np.array([[self.jicf.x_inj, mdot, J, rho_inj / rho]])
         self.fluid_tips = np.concatenate([next_tip, self.fluid_tips[idx]], axis=0)
 
     def source_implementation(
@@ -186,14 +217,15 @@ class FuelInjector(RightHandSide):
         """Compute a fuel injector source term to target the desired mixture fraction profile."""
         _ = state_array_local, face_states, avg_face_states, face_gradients
         assert self.geometry is not None
+        assert self.physics is not None
         assert state is not None
-        rhs = np.zeros_like(self.shape_input)
+        rhs = np.zeros_like(state_array_local)
 
-        mdot: Array | float = self.mdot(time, state)
-        u_inj: float = mdot / (self.jicf.n_inj * self.jicf.A_inj * self.jicf.rho_inj)
-        E_inj: float = self.jicf.e0_inj + 0.5 * u_inj**2
+        inflow, mdot_total, _ = self.inflow(time, state)
+        u_inj = self.physics.get_velocity(inflow)
+        E_inj = self.physics.get_internal_energy(inflow) + 0.5 * u_inj**2
 
-        mdot *= self.distribute_factor
+        mdot = mdot_total * self.distribute_factor
 
         # Compute the source term
         rhs[:, 0] = mdot * u_inj * np.cos(self.jicf.theta_inj)  # momentum
@@ -216,8 +248,8 @@ class NozzleInjector(FuelInjector):
         """Compute mdot from discharge coefficient."""
         assert self.physics is not None
         throttle = self.throttle(t)
-        p0 = self.jicf.p_inj
-        rho0 = self.jicf.rho_inj
+        p0 = self.jicf.p0
+        rho0 = self.jicf.rho0
 
         # Compute pressure drop across injector
         p = np.mean(self.physics.get_pressure(state))
@@ -228,31 +260,55 @@ class NozzleInjector(FuelInjector):
 
 
 class GasInjector(FuelInjector):
-    def mdot(self, t: float, state: FluidState) -> float:
+    """Injection computed using isentropic compressible flow relations."""
+
+    def inflow(self, t: float, state: FluidState) -> tuple[FluidState, float, float]:
+        """Fluid properties at the plane of injection.
+
+        Simple model: Use specified manifold temperature and crossflow pressure.
+        """
+        assert self.physics is not None
+
+        # Compute pressure drop across injector
+        g = self.jicf.gamma0
+        p0 = self.jicf.p0
+        p = float(np.mean(self.physics.get_pressure(state)[1:]))
+        pr = p / p0
+
+        # Get mass flow rate
+        mdot = self.mdot(t, state, pr)
+
+        # Set inflow properties from isentropic flow relations
+        mach = mach_from_pressure_ratio(pr, g)
+        Tr, pr, rhor = property_ratios(mach, g)
+        rho = self.jicf.rho0 * rhor
+
+        inflow = FluidState(
+            shape=(1,),
+            temperature=np.asarray([self.jicf.T0 * Tr]),
+            pressure=np.asarray([p0 * pr]),
+            density=np.asarray([rho]),
+            velocity=np.asarray([mdot / (rho * self.jicf.n_inj * self.jicf.A_inj)]),
+            composition=self.jicf.manifold_state.composition,
+        )
+        J = self.J(state, inflow)
+        return inflow, mdot, J
+
+    def mdot(self, t: float, state: FluidState, pr: float | None = None) -> float:
         """Compute mdot from isentropic flow relations."""
         assert self.physics is not None
         throttle = self.throttle(t)
-        g = self.jicf.gamma_inj
-        p0 = self.jicf.p_inj
-        T0 = self.jicf.T_inj
-        R = self.jicf.R_inj
+        g = self.jicf.gamma0
+        p0 = self.jicf.p0
+        T0 = self.jicf.T0
+        R0 = self.jicf.R0
 
-        # Compute pressure drop across injector
-        p = np.mean(self.physics.get_pressure(state))
-        pr = p / p0
-
-        choked: bool = pr < (2.0 / (g + 1)) ** (g / (g - 1))
-
-        tmp = throttle * self.jicf.Ae * p0 / np.sqrt(R * T0)
-
-        if choked:
-            mdot = tmp * np.sqrt(g) * (2.0 / (g + 1)) ** ((g + 1) / (2 * (g - 1)))
-        else:
-            mdot = float(
-                tmp
-                * pr ** (1.0 / g)
-                * np.sqrt((2.0 * g / (g - 1.0)) * (1.0 - pr ** ((g - 1.0) / g)))
-            )
+        p = (
+            float(np.mean(self.physics.get_pressure(state)[1:]))
+            if pr is None
+            else pr * p0
+        )
+        mdot = mdot_from_pressure_ratio(p0, T0, R0, g, p, throttle * self.jicf.Ae)
 
         return min(mdot, self.mdot_max)
 
@@ -296,11 +352,13 @@ class JICFChemistrySource(RightHandSide):
         # Get the mixture fraction variance profile. The variance table is
         # indexed by momentum-flux ratio J (column 2 of the fluid tips), which
         # is convected with each injected parcel.
-        J_inj = make_interp_spline(
+        result = make_interp_spline(
             self.injector.fluid_tips[:, 0], self.injector.fluid_tips[:, 2:], k=1
         )(self.xc)
+        J = result[:, 0]
+        rhor = result[:, 1]
 
-        Zvar = self.injector.jicf.Z_var_profile_interp((self.xc, J_inj))
+        Zvar = rhor * self.injector.jicf.Z_var_profile_interp((self.xc, J))
         Zvar = np.maximum(Zvar, 10 ** self.injector.jicf.logsigma2_vec.min())
 
         return (

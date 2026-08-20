@@ -328,12 +328,7 @@ class Combustor:
             if self.injectors is not None:
                 assert self.state.velocity is not None
                 for inj in self.injectors:
-                    inj.update_fluid_tip_positions(
-                        dt, self.t, self.state.velocity[self.geometry.idx_cells]
-                    )
-                # self.injector.update_fluid_tip_positions(
-                #     dt, self.t, self.state.velocity[self.geometry.idx_cells]
-                # )
+                    inj.update_fluid_tip_positions(dt, self.t, self.state)
 
             # Update the system state
             self.t, state_array, gamma_star, e0_star = self.time_integrator.advance(

@@ -35,13 +35,13 @@ class JICModel:
         n_inj: int,
         d_inj: float,
         J: Array,
-        fuel_state: FluidState,
+        manifold_state: FluidState,
         geometry: Box,
         physics: FPVTable,
-        datadir: Path | str = "./data",
         theta_inj: float = 0.0,
         alpha: float = 1e6,
         Cd: float = 0.7,
+        datadir: Path | str = "./data",
         model_file: str = "jicf_model.vtkhdf",
         x_profile: Array | None = None,
     ) -> None:
@@ -63,16 +63,22 @@ class JICModel:
             The number of injected jets
         d_inj: float
             The diameter of the injected jet
-        theta_inj: float
-            The angle of the jet relative to the x axis (rads)
         J: np.ndarray
             The grid of momentum-flux ratios to tabulate over. Sets the table
             resolution and range; each entry corresponds to one injected-fluid
             state ``(rho_inj[i], u_inj[i], T_inj[i])``.
-        fuel_state: FluidState
-            Thermodynamic state of the fuel manifold.
+        manifold_state: FluidState
+            Thermodynamic state in the propellant manifold.
+        geometry: Box
+            The geometry object describing the mesh and cross-section
+        physics: FPVTable
+            The FPV table object, used for the chemical source terms
+        theta_inj: float
+            The angle of the jet relative to the x axis (rads)
         alpha: float
             The relaxation parameter (used here only for storage)
+        Cd: float
+            Discharge coefficient for the injector
         datadir: str
             Where to access or store tables written for this injector
         model_file: str
@@ -86,16 +92,12 @@ class JICModel:
             for the 3D field is reused. When supplied, it is used verbatim.
             Ignored when the profiles are loaded from an existing model file
             (the stored mesh is used instead).
-        geometry: Box
-            The geometry object describing the mesh and cross-section
-        physics: FPVTable
-            The FPV table object, used for the chemical source terms
         """
         self.geometry = geometry
         self.physics = physics
 
-        # Set the fuel properties
-        self.fuel_state = fuel_state
+        # Set the manifold properties
+        self.manifold_state = manifold_state
 
         # Extract some information about the geometry
         self.xc = self.geometry.xc[self.geometry.idx_cells]
@@ -202,19 +204,19 @@ class JICModel:
             self.calc_chemical_sources(write=True)
 
     @property
-    def fuel_state(self) -> FluidState:
-        return self._fuel_state
+    def manifold_state(self) -> FluidState:
+        """Thermodynamic properties in the propellant manifold."""
+        return self._manifold_state
 
-    @fuel_state.setter
-    def fuel_state(self, state: FluidState) -> None:
-        # Update stored properties of the fuel
-        self._fuel_state = state
-        self.gamma_inj = float(self.physics.get_gamma(state))
-        self.p_inj = float(self.physics.get_pressure(state))
-        self.rho_inj = float(self.physics.get_pressure(state))
-        self.T_inj = float(self.physics.get_temperature(state))
-        self.R_inj = float(self.physics.get_specific_gas_constant(state))
-        self.e0_inj = float(self.physics.get_internal_energy(state))
+    @manifold_state.setter
+    def manifold_state(self, state: FluidState) -> None:
+        # Update stored properties
+        self._manifold_state = state
+        self.gamma0 = float(self.physics.get_gamma(state)[0])
+        self.p0 = float(self.physics.get_pressure(state)[0])
+        self.rho0 = float(self.physics.get_density(state)[0])
+        self.T0 = float(self.physics.get_temperature(state)[0])
+        self.R0 = float(self.physics.get_specific_gas_constant(state)[0])
 
     def _cached_J_matches(self, dataset: str) -> bool:
         """Return True if the cached group was generated on the current J grid.
@@ -263,8 +265,8 @@ class JICModel:
             self.y_3D_data[None, :, None],
             self.z_3D_data[None, None, :],
         )
-        self.Z_3D_data[..., np.isnan(self.rho_inj)] = 0.0
-        self.Z_3D_data[..., self.u_inj == 0.0] = 0.0
+        self.Z_3D_data[..., np.isnan(self.rho0)] = 0.0
+        self.Z_3D_data[..., self.J == 0.0] = 0.0
         self.Z_3D_data[np.isnan(self.Z_3D_data)] = 0.0
 
         results: dict[str, Array] = {"Z": self.Z_3D_data}

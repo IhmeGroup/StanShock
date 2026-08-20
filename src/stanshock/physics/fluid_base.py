@@ -114,6 +114,7 @@ class FluidPhysics(ABC):
         )
         self.Z_weights: Array = np.zeros(self.gas.n_species)
         self.Z_offset: float = 0.0
+        self.stoich_mass_ratio: float = 0.0
         self.prog_weights: Array = np.zeros(self.gas.n_species)
 
         if self.ox_def is not None and self.fuel_def is not None:
@@ -233,6 +234,18 @@ class FluidPhysics(ABC):
         self.Z_weights /= denom * self.gas.molecular_weights
         self.Z_offset /= denom
 
+        # Get stoichiometric ox/fuel mass ratio
+        iO2 = self.gas.species_index("O2")
+        if self.gas.X[iO2] > 0.0:
+            msg = "WARNING: stoich_mass_ratio does not currently account for presence of oxygen in fuel stream."
+            print(msg)
+        self.gas.X = self.ox_def
+        Yox = self.gas.Y
+
+        self.gas.set_equivalence_ratio(1.0, fuel=self.fuel_def, oxidizer=self.ox_def)
+        Yo = self.gas.Y[iO2] / Yox[iO2]
+        self.stoich_mass_ratio = Yo / (1.0 - Yo)
+
     def get_bilger_mixture_fraction(self, Y: Array) -> Array:
         """Compute the Bilger mixture fraction from given mass fractions."""
         assert self.ox_def is not None
@@ -250,7 +263,7 @@ class FluidPhysics(ABC):
 
         if np.sum(self.prog_weights) == 0.0:
             msg = "Progress Variable Weights Sum to Zero"
-            raise Exception(msg)
+            raise ValueError(msg)
 
         self.prog_weights /= np.sum(self.prog_weights)
 
@@ -258,7 +271,7 @@ class FluidPhysics(ABC):
         """Compute the progress variable from given mass fractions."""
         if self.prog_def is None:
             msg = "Progress Variable Not Defined"
-            raise Exception(msg)
+            raise ValueError(msg)
 
         tmp = np.dot(Y, self.prog_weights)
         assert isinstance(tmp, np.ndarray)
