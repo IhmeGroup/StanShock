@@ -60,7 +60,14 @@ def _contour_plot(
     plt.close(fig)
 
 
-def plot_jicf_flowfield(jicf: JICModel, plot_dir: Path = Path("figures/jicf")) -> None:
+def plot_jicf_flowfield(
+    jicf: JICModel,
+    plot_dir: Path = Path("figures/jicf"),
+    plot_all_inj: bool = False,
+    plot_all_J: bool = True,
+    plot_centerlines: bool = True,
+    truncate_plot: bool = True,
+) -> None:
     """Generate contour plots of the JICF flow field"""
     plot_dir.mkdir(parents=True, exist_ok=True)
     x = jicf.x_3D_data
@@ -71,12 +78,17 @@ def plot_jicf_flowfield(jicf: JICModel, plot_dir: Path = Path("figures/jicf")) -
     # Get injector location info for constraining the plots
     x_min = 0.9 * jicf.x_inj + 0.1 * x[0]
     ix_min = np.argmin(np.abs(x - x_min))
-    x_max = 0.6 * jicf.x_inj + 0.4 * x[-1]
+    r = 0.9 if truncate_plot else 0.6
+    x_max = r * jicf.x_inj + (1.0 - r) * x[-1]
     ix_max = np.argmin(np.abs(x - x_max))
     x = x[ix_min:ix_max]
     Z = Z[ix_min:ix_max]
 
     z_inj = jicf.analytic.z_inj
+    if not plot_all_inj:
+        # Keep center injector
+        i_mid = len(z_inj) // 2
+        z_inj = z_inj[[i_mid]]
     nx = len(x)
     ix_inj = np.argmin(np.abs(x - jicf.x_inj))
 
@@ -87,26 +99,39 @@ def plot_jicf_flowfield(jicf: JICModel, plot_dir: Path = Path("figures/jicf")) -
     x_cl += jicf.x_inj
     y_cl[y_cl > y[-1]] = np.nan
 
+    # Get the momentum flux ratios to plot over
+    nJ = jicf.nJ
+    J = jicf.analytic.J
+    if not plot_all_J:
+        nstep = max(len(J) // 5, 1)
+        J = J[::nstep]
+        nJ = len(J)
+        x_cl = x_cl[:, ::nstep]
+        y_cl = y_cl[:, ::nstep]
+
     # Generate plot along injector centerlines
     opts = PlotOptions(
         "Centerline Mixture Fraction",
         "x [m]",
         "y [m]",
         plot_dir / "Z_centerline.png",
-        (38.4, 4.0),
+        (19.2, 6.4) if truncate_plot else (38.4, 4.0),
     )
 
     for i in range(len(z_inj)):
         iz_inj = np.argmin(np.abs(z - z_inj[i]))
-        for iJ in range(jicf.nJ):
-            opts.title = f"Jet Centerline Mixture Fraction at z={z_inj[i]:.3f}, J={jicf.analytic.J[iJ]:.2f}"
-            opts.filename = plot_dir / f"Z_z{i:02d}_J{iJ:02d}.png"
-            _contour_plot(x, y, Z[:, :, iz_inj, iJ].T, opts)
-
-            opts.filename = plot_dir / f"Z_z{i:02d}_J{iJ:02d}_cl.png"
-            _contour_plot(
-                x, y, Z[:, :, iz_inj, iJ].T, opts, extra={"": (x_cl, y_cl[:, iJ])}
+        for iJ in range(nJ):
+            opts.title = (
+                f"Jet Centerline Mixture Fraction at z={z_inj[i]:.3f}, J={J[iJ]:.2f}"
             )
+            if plot_centerlines:
+                opts.filename = plot_dir / f"Z_z{i:02d}_J{iJ:02d}_cl.png"
+                _contour_plot(
+                    x, y, Z[:, :, iz_inj, iJ].T, opts, extra={"": (x_cl, y_cl[:, iJ])}
+                )
+            else:
+                opts.filename = plot_dir / f"Z_z{i:02d}_J{iJ:02d}.png"
+                _contour_plot(x, y, Z[:, :, iz_inj, iJ].T, opts)
 
     # Generate plots in transverse slices
     n_plot = 5
