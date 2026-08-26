@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 import numpy as np
 from scipy import interpolate, special
-from scipy.optimize.elementwise import find_minimum
+from scipy.optimize.elementwise import find_root
 from tqdm import tqdm
 
 from stanshock.physics.flamelet import FPVTable
@@ -153,54 +153,79 @@ class AnalyticJICF:
         J = self.J[self.i_m]
         denom = np.divide(1.0, self.d_inj * J, out=np.zeros_like(J), where=J > 0)
         term = x_cl * denom
-        term = np.power(term, 0.344 - 1.0, out=np.zeros_like(term), where=term > 0)
-        return 0.344 * self.d_inj * J * 1.23 * term * denom  # Gruber 1995 JPP
+        term = np.power(term, 0.344 - 1.0, out=np.full_like(term, 1e20), where=term > 0)
+        return 0.344 * 1.23 * term  # Gruber 1995 JPP
         # return (0.344 *
         #         self.d_inj * self.J * 1.20 * ((x_cl + self.d_inj/2) / (self.d_inj * self.J))**(0.344 - 1.0) *
         #         (1.0 / (self.d_inj * self.J))) # Gruber 1997 Phys. Fluids
 
+    def dx_cl_dy(self, y_cl: Array) -> Array:
+        # SONIC VERSION
+        J = self.J[self.i_m]
+        denom = np.divide(1.0, self.d_inj * J * 1.23, out=np.zeros_like(J), where=J > 0)
+        term = y_cl * denom
+        c = 1.0 / 0.344
+        term = np.power(term, c - 1.0, out=np.zeros_like(term), where=term > 0)
+        return c / 1.23 * term
+
     def nearest_on_cl(
         self, x: Array, y: Array, dz: Array
     ) -> tuple[Array, Array, Array]:
-        # Define the centerline
-        # Note: dz makes no difference in the minimization, but it's more convenient to include it here
-        # so that the n2 is correct
-        def n2_func_x_cl(x_cl: Array, x: Array, y: Array, dz: Array) -> Array:
-            return (x - x_cl) ** 2 + (y - self.y_cl(x_cl)) ** 2 + dz**2
+        # Define distance to the centerline as function of x or y
+        def n2_func_x_cl(x_cl: Array, x: Array, y: Array) -> Array:
+            return (x - x_cl) ** 2 + (y - self.y_cl(x_cl)) ** 2
 
-        def n2_func_y_cl(y_cl: Array, x: Array, y: Array, dz: Array) -> Array:
-            return (x - self.x_cl_from_y_cl(y_cl)) ** 2 + (y - y_cl) ** 2 + dz**2
+        def n2_func_y_cl(y_cl: Array, x: Array, y: Array) -> Array:
+            return (x - self.x_cl_from_y_cl(y_cl)) ** 2 + (y - y_cl) ** 2
 
-        x_guess = np.maximum(0.0, x)
-        x_bracket: tuple[float, Array, float] = (0.0, x_guess, self.x[-1])
+        def distance_derivative_x(x_cl: Array, x: Array, y: Array) -> Array:
+            """Derivative of the squared Euclidean distance w.r.t. x_cl"""
+            dydx = self.dy_cl_dx(x_cl)
+            # return (x - x_cl) + (self.y_cl(x_cl) - y)*dydx
+            return x_cl - x + (self.y_cl(x_cl) - y) * dydx
 
-        x, y, dz = np.broadcast_arrays(x, y, dz)
+        def distance_derivative_y(y_cl: Array, x: Array, y: Array) -> Array:
+            """Derivative of the squared Euclidean distance w.r.t. y_cl"""
+            dxdy = self.dx_cl_dy(y_cl)
+            # return (self.x_cl_from_y_cl(y_cl) - x)*dxdy + (y - y_cl)
+            return y_cl - y + (self.x_cl_from_y_cl(y_cl) - x) * dxdy
+
+        x_bracket: tuple[float, float] = (0.0, self.x[-1])
+
+        x, y = np.broadcast_arrays(x, y)
         x_cl = np.zeros((*x.shape, self.nJ))
         y_cl = np.zeros((*x.shape, self.nJ))
         n2 = np.zeros((*x.shape, self.nJ))
         for i_m in range(self.nJ):
+            if self.J[i_m] == 0.0:
+                continue
+
             self.i_m = i_m
 
             # Compute the x_cl which minimizes n2
-            res = find_minimum(n2_func_x_cl, x_bracket, args=(x, y, dz))
+            res = find_root(distance_derivative_x, x_bracket, args=(x, y))
             x_cl[..., i_m] = res.x
-            n2[..., i_m] = res.f_x
+            n2[..., i_m] = n2_func_x_cl(x_cl[..., i_m], x, y)
             y_cl[..., i_m] = self.y_cl(x_cl[..., i_m])
 
-            # For points where dy_cl/dx > 1
-            dy_cl_dx = self.dy_cl_dx(x_cl[..., i_m])
-            idx = dy_cl_dx > 1
+            # Retry points where root solve failed
+            # idx = res.status < 0
+            idx = np.logical_or(res.status < 0, x == 0.0)
 
             # Compute the y_cl which minimizes n2
-            y_bracket: tuple[float, Array, float] = (0.0, y_cl[idx, i_m], self.h)
-            res = find_minimum(n2_func_y_cl, y_bracket, args=(x[idx], y[idx], dz[idx]))
+            y_bracket: tuple[float, float] = (0.0, self.h)
+            res = find_root(distance_derivative_y, y_bracket, args=(x[idx], y[idx]))
             y_cl[idx, i_m] = res.x
-            n2[idx, i_m] = res.f_x
             x_cl[idx, i_m] = self.x_cl_from_y_cl(y_cl[idx, i_m])
+            n2[idx, i_m] = n2_func_y_cl(y_cl[idx, i_m], x[idx], y[idx])
 
         x_cl[np.isnan(x_cl)] = 0.0
         y_cl[np.isnan(y_cl)] = 0.0
         n2[np.isnan(n2)] = 0.0
+
+        # Add z-offset to the Euclidean distance
+        n2 = n2 + dz[..., None] ** 2
+        n2, x_cl, y_cl = np.broadcast_arrays(n2, x_cl, y_cl)
 
         return x_cl, y_cl, n2
 
@@ -208,7 +233,7 @@ class AnalyticJICF:
         r_u = self.r_u[self.i_m]
         denom = np.divide(1.0, r_u, out=np.zeros_like(r_u), where=r_u > 0)
         term = x_cl * denom / self.d_inj
-        term = np.power(term, -2.0 / 3.0, out=np.zeros_like(term), where=term > 0)
+        term = np.power(term, -2.0 / 3.0, out=np.full_like(term, 1e20), where=term > 0)
         # Hasselbrink and Mungal 2001 Pt. 1
         Z = 0.85 * denom * np.sqrt(self.rho_inj[self.i_m] / self.rho) * term
         return np.clip(Z, self.Z_gl[self.i_m], 1.0)
