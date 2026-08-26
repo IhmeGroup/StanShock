@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling>=1.26", "hatch-vcs"]
+requires = ["hatchling>=1.26,<1.32", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 
@@ -35,21 +35,22 @@ dynamic = ["version"]
 dependencies = [
   "numpy",
   "scipy",
-  # "scipy-stubs",
   "scikit-learn",
   "matplotlib",
   "numba",
   "cantera",
   "joblib",
   "tqdm",
-  "tqdm_joblib",
-  # "types-tqdm",
   "h5py",
   "imageio",
   # Conditional:
   "cantera>=3.2.0; python_version>='3.14'",
   "numba>=0.63.0rc1; python_version>='3.14'",
 ]
+
+[tool.pyrefly.errors]
+redundant-condition = "error"
+redundant-cast = "warn"
 
 [project.urls]
 Homepage = "https://github.com/IhmeGroup/StanShock"
@@ -63,8 +64,16 @@ test = [
   "pytest >=6",
   "pytest-cov >=3",
 ]
+type-check = [
+  "mypy",
+  "h5py-stubs",
+  "scipy-stubs>=1.18.0; python_version>='3.12'",
+  "types-tqdm",
+  "joblib-stubs",
+]
 dev = [
   { include-group = "test" },
+  { include-group = "type-check" },
 ]
 docs = [
   "sphinx>=7.0",
@@ -84,15 +93,12 @@ build.hooks.vcs.version-file = "src/stanshock/_version.py"
 dependencies = [
   "numpy",
   "scipy",
-  # "scipy-stubs",
   "scikit-learn",
   "matplotlib",
   "numba",
   "cantera",
   "joblib",
   "tqdm",
-  "tqdm_joblib",
-  # "types-tqdm",
   "h5py",
   "imageio",
 ]
@@ -121,14 +127,14 @@ report.exclude_also = [
 
 [tool.mypy]
 files = ["src", "tests"]
-python_version = "3.10"
+python_version = "3.12"
 warn_unused_configs = true
 strict = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
 warn_unreachable = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
-mypy_path = ["src", "stubs", "tests"]
+mypy_path = ["src", "tests"]
 
 [[tool.mypy.overrides]]
 module = "stanshock.*"
@@ -200,4 +206,20 @@ messages_control.disable = [
   "missing-module-docstring",
   "missing-function-docstring",
   "wrong-import-position",
+]
+
+[tool.pyrefly]
+project-includes = [
+    "src",
+    "tests",
+]
+search-path = [
+    "src",
+    "tests",
+]
+python-version = "3.12.0"
+preset = "legacy"
+ignore-missing-imports = [
+    "numba.*",
+    "h5py.*",
 ]
