@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from stanshock.components.combustor import Combustor
-from stanshock.models.jicf import JICModel
+from stanshock.models.jicf import FuelInjector, JICModel
 from stanshock.numerics.boundary_conditions import BCInput, SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
 from stanshock.processing.csv_writer import CSVWriter
@@ -152,26 +152,60 @@ def build_fpv_table(paths: dict[str, Path]) -> FPVTable:
 
 def build_injector(
     geometry: Box, physics: FPVTable, paths: dict[str, Path], t_end: float
-) -> JICModel:
-    t_inj = np.array([0.0, t_end])
-    rho_inj = np.array([RHO_F, RHO_F])
-
+) -> FuelInjector:
     cache_dir = paths["cache_dir"]
-    return JICModel(
-        fuel="H2",
+
+    # Momentum-flux ratio at the (single) operating condition, and a small
+    # grid bracketing it for the throttle-agnostic table. Under choked
+    # injection the jet velocity/temperature are ~constant, so only the
+    # injected density varies across the grid.
+    J0 = RHO_F * U_F**2 / (RHO_IN * U_IN**2)
+    J_grid = np.linspace(0.5 * J0, 1.5 * J0, 5)
+    rho_grid = J_grid * RHO_IN * U_IN**2 / U_F**2
+    u_grid = np.full_like(J_grid, U_F)
+    T_grid = np.full_like(J_grid, T_F)
+
+    jicf = JICModel(
         x_inj=X_INJ,
         x_noz=L_DOMAIN,
         n_inj=N_INJ,
         d_inj=D_F,
-        t_inj=t_inj,
-        rho_inj=rho_inj,
-        u_inj=U_F,
-        T_inj=T_F,
+        J=J_grid,
+        rho_inj=rho_grid,
+        u_inj=u_grid,
+        T_inj=T_grid,
         rho=RHO_IN,
         u=U_IN,
         T=T_IN,
         alpha=1.0e6,
         datadir=cache_dir,
+        geometry=geometry,
+        physics=physics,
+    )
+
+    # Constant-throttle runtime schedule at the operating condition.
+    A_f = np.pi * (D_F / 2.0) ** 2
+    mdot_f = N_INJ * RHO_F * U_F * A_f
+    A_in = float(geometry.area(0.0, geometry.xf[0]))
+    mdot_ox = RHO_IN * U_IN * A_in
+    gas = physics.gas
+    gas.TDX = T_IN, RHO_IN, X_OX
+    Y_ox = gas.Y.copy()
+    gas.TDX = T_F, RHO_F, X_F
+    Y_f = gas.Y.copy()
+    E_f = float(gas.int_energy_mass) + 0.5 * U_F**2
+    w_f = mdot_f / (mdot_f + mdot_ox)
+    gas.Y = (1.0 - w_f) * Y_ox + w_f * Y_f
+    phi0 = float(gas.equivalence_ratio(X_F, X_OX))
+
+    t_inj = np.array([0.0, t_end])
+    return FuelInjector(
+        jicf,
+        t_inj=t_inj,
+        phi_inj=np.array([phi0, phi0]),
+        mdot_inj=np.array([mdot_f, mdot_f]),
+        u_inj=np.array([U_F, U_F]),
+        E_inj=np.array([E_f, E_f]),
         geometry=geometry,
         physics=physics,
     )

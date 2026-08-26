@@ -205,7 +205,7 @@ class XTDiagram:
             self.x = geometry.xf
         elif (x[-1] > geometry.xc[-1]) or (x[0] < geometry.xc[0]):
             msg = "Invalid Interpolation Grid"
-            raise Exception(msg)
+            raise ValueError(msg)
         else:
             self.x = x
 
@@ -232,7 +232,7 @@ class XTDiagram:
         if domain.injectors is not None:
             mdot_f = 0.0
             for inj in domain.injectors:
-                mdot_f += float(inj.jicf.mdot_f_interp(domain.t))
+                mdot_f += float(inj.fluid_tips[0, 1])
             self.mdot.append(mdot_f)
 
     def plot(self, figdir: Path | str = ".") -> None:
@@ -482,14 +482,23 @@ def plot_state(
 
     ax = axs[-1]
     if domain.injectors is not None:
-        phi_tot = 0.0
+        # Oxidizer mass flow rate:
+        inflow = state[0]
+        rho = float(variable_info_map["density"].fun(inflow)[0])
+        u = float(variable_info_map["velocity"].fun(inflow)[0])
+        A = float(geometry.area(domain.t, geometry.xc[idx_cells][0]))
+        mdot_ox = rho * u * A
+
+        # Fuel mass flow rate:
+        mdot_f = 0.0
         for inj in domain.injectors:
             ax.scatter(
                 inj.fluid_tips[:, 0] * xscale,
                 inj.fluid_tips[:, 1] * 1e3 * inj.jicf.n_inj,
                 s=1,
             )
-            phi_tot += inj.jicf.phi_f_interp(domain.t)
+            mdot_f += float(inj.fluid_tips[0, 1])
+        phi_tot = mdot_f / mdot_ox * domain.physics.stoich_mass_ratio
         ax.set_title(rf"$\phi={phi_tot:.2f}$")
         ax.set_ymargin(0.1)
         ax.set_ylabel(r"$\dot{m}_f$ [g/s]")

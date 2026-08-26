@@ -5,11 +5,11 @@ from typing import Literal, TypedDict
 
 import cantera as ct
 import numpy as np
-from injector_models import fuel_props_from_phi
 
 from stanshock.components.combustor import Combustor
 from stanshock.models.inlet_diffuser import InletDiffuser
-from stanshock.models.jicf import JICModel, plot_jicf_flowfield
+from stanshock.models.jicf import FuelInjector, JICModel, plot_jicf_flowfield
+from stanshock.models.jicf.source import ConstantValue
 from stanshock.models.wall_models import (
     CompressibleHeatFlux,
     CompressibleReactingSkinFriction,
@@ -24,6 +24,7 @@ from stanshock.processing.initialize import InitializeConstant
 from stanshock.system.backend import Array, Composition, Unpack
 from stanshock.system.base import PrecomputeSteps, RightHandSide
 from stanshock.system.geometry import AsymmetricBox, Geometry
+from stanshock.utils.isentropic import p0_from_mdot, property_ratios
 
 data_dir = Path(__file__).resolve().parent / "../../data"
 
@@ -320,10 +321,11 @@ def get_injectors_fpv(
     geometry: Geometry,
     physics: FPVTable,
     gas_in: ct.Solution,
-    U_in: float,
+    u_in: float,
     mdot: Literal["constant", "schedule"] = "constant",
     fpv_dir: Path = Path("./data"),
-) -> JICModel:
+    nJ: int = 31,
+) -> FuelInjector:
     assert isinstance(geometry, AsymmetricBox)
     # Freeze after constant cross section region of the combustor
     L_const = 300.0e-3  # m
@@ -332,15 +334,13 @@ def get_injectors_fpv(
     x_inj = 58.0e-3  # m
     r_f = 1.0e-3  # m
     N_f = 4  # -
-
     A_f = np.pi * r_f**2  # m^2
     A_f_tot = N_f * A_f  # m^2
-
-    T0_f = 300.0
+    Cd = 0.9
+    Ae = Cd * A_f_tot
 
     # Air flow properties
-    T_in = gas_in.T
-    P_in = gas_in.P
+    p_in = gas_in.P
     rho_in = gas_in.density_mass
     # gamma_in = gas_in.cp / gas_in.cv
     # H_in = gas_init.enthalpy_mass
@@ -349,7 +349,8 @@ def get_injectors_fpv(
 
     # Stoichiometry
     A_in = float(geometry.area(0.0, geometry.xf[0]))
-    mdot_ox = rho_in * U_in * A_in
+    mdot_ox = rho_in * u_in * A_in
+    afr_st = physics.stoich_mass_ratio
 
     # # State downstream of the bow shock on the injected jet
     # rho_2 = rho_in * (gamma_in + 1) * M_in_comp**2 / ((gamma_in - 1) * M_in_comp**2 + 2)
@@ -358,74 +359,67 @@ def get_injectors_fpv(
 
     # Time parameters
     L = float(geometry.xf[-1] - geometry.xf[0])
-    tau = L / U_in
+    tau = L / u_in
     print(f"tau = {tau:.2e} s")
 
-    # Mass flow rate ramp:
     if mdot == "constant":
-        t_phi_gl_schedule = np.array(
-            [[0.0, 0.45], [1e3, 0.45 + 1e-15], [2e3, 0.45 + 2e-15]]
-        )
+        phi = 0.45
+        mdot_max = mdot_ox / afr_st * phi
+        throttle = 1.0
+        J = np.asarray([1.0])  # Only need the target profile
     else:
+        # Mass flow rate ramp:
         eps_t = 1.0e-6
-        # t_phi_gl_schedule = np.array(
-        #     [
-        #         [0.0, 0.0],
-        #         [0.1 * tau, 0.0],
-        #         [8.0 * tau, 0.35],
-        #         [10.0 * tau, 0.35],
-        #         [14.0 * tau, 0.45],
-        #         [16.0 * tau, 0.45],
-        #     ]
-        # )
-        t_phi_gl_schedule = np.array(
-            [
-                [0.0, 0.0],
-                [0.1 * tau - eps_t, 0.0],
-                [0.1 * tau, 0.35],
-                [3.0 * tau, 0.35],
-                [8.0 * tau, 0.35],
-                [13.0 * tau, 0.6],
-                [15.0 * tau, 0.6],
-            ]
-        )
+        t = tau * np.array([0.0, 0.1 - eps_t, 0.1, 3.0, 8.0, 13.0, 15.0])
+        phi = np.array([0.0, 0.0, 0.35, 0.35, 0.35, 0.6, 0.6])
+        mdot_fuel = mdot_ox / afr_st * phi
+        mdot_max = float(mdot_fuel[-1])
+        throttle = (t, mdot_fuel / mdot_max)
+        J = np.linspace(0.0, 1.1, nJ)  # +10% buffer beyond maximum
 
-    t_f = np.zeros(t_phi_gl_schedule.shape[0])
-    rho_f = np.zeros(t_phi_gl_schedule.shape[0])
-    U_f = np.zeros(t_phi_gl_schedule.shape[0])
-    T_f = np.zeros(t_phi_gl_schedule.shape[0])
-    for i in range(t_phi_gl_schedule.shape[0]):
-        t_f[i] = t_phi_gl_schedule[i, 0]
-        rho_f[i], U_f[i], T_f[i] = fuel_props_from_phi(
-            physics, t_phi_gl_schedule[i, 1], mdot_ox, T0_f, P_in, A_f_tot
-        )
-    # # NOTE: Assuming perfect gas & isentropic choked flow, only rho_f changes with phi/mdot
-    # U_f = U_f[-1]
-    # T_f = T_f[-1]
+    # Fuel manifold properties
+    T0_f = 300.0
+    fuel_state = FluidState(
+        shape=(1,),
+        temperature=np.asarray([T0_f]),
+        composition=np.asarray([[1.0, 1.0, 0.0]]),
+    )
+    R0 = float(physics.get_specific_gas_constant(fuel_state)[0])
+    gamma = float(physics.get_gamma(fuel_state)[0])
+    p0_f, mach = p0_from_mdot(mdot_max, T0_f, R0, gamma, p_in, Ae)
+    fuel_state.pressure = np.asarray([p0_f])
 
+    # Estimated maximum momentum flux ratio
+    _, _, rhor = property_ratios(mach, gamma)
+    rho_f = rhor * float(physics.get_density(fuel_state)[0])
+    u_f = mdot_max / (rho_f * Ae)
+    J_max = (rho_f * u_f**2) / (rho_in * u_in**2)
+
+    # Construct the fuel injector model
     jicf = JICModel(
         x_inj=x_inj,
         x_noz=L_const,
         n_inj=N_f,
         d_inj=2 * r_f,
-        t_inj=t_f,
-        phi_inj=t_phi_gl_schedule[:, 1],
-        rho_inj=rho_f,
-        u_inj=U_f,
-        T_inj=T_f,
-        rho=rho_in,
-        u=U_in,
-        T=T_in,
-        alpha=1e6,
+        J=J * J_max,
+        manifold_state=fuel_state,
         geometry=geometry,
         physics=physics,
+        alpha=1e6,
+        Cd=Cd,
         datadir=fpv_dir,
     )
 
     # Generate plots of the fuel jets
     plot_jicf_flowfield(jicf)
 
-    return jicf
+    return FuelInjector(
+        jicf,
+        mdot_max=mdot_max,
+        throttle=throttle,
+        geometry=geometry,
+        physics=physics,
+    )
 
 
 class Hyshot2Interface:
@@ -496,6 +490,7 @@ class Hyshot2Interface:
         T_ref: float,
         mach: float,
         angle_of_attack: float | None = None,
+        throttle_setting: float | None = None,
     ) -> tuple[float, float]:
         self.p_ref = p_ref
 
@@ -517,6 +512,11 @@ class Hyshot2Interface:
             )
             freestream.velocity = mach * physics.get_sound_speed(freestream)
             self.inflow_bc.freestream = freestream
+
+        if throttle_setting is not None:
+            throttle = self.case.injectors[0].throttle
+            assert isinstance(throttle, ConstantValue)
+            throttle.constant = throttle_setting
 
         # Integrate forward in time by dt
         self.case.advance_simulation(self.case.t + dt)

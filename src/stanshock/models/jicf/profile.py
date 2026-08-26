@@ -7,12 +7,14 @@ from scipy import interpolate, special
 from scipy.optimize.elementwise import find_root
 from tqdm import tqdm
 
-from stanshock.physics.flamelet import FPVTable
 from stanshock.system.backend import Array
 
 
 class AnalyticJICF:
-    """Direct evaluation of analytical models of a jet-in-crossflow."""
+    """Direct evaluation of analytical models of a jet-in-crossflow.
+
+    Computed values of mixture fraction, Z, are normalized by sqrt(rho_fuel / rho_ox).
+    """
 
     def __init__(
         self,
@@ -21,11 +23,7 @@ class AnalyticJICF:
         h: float,
         n_inj: int,
         d_inj: float,
-        rho_inj: Array,
-        u_inj: Array,
-        rho: float,
-        u: float,
-        physics: FPVTable,
+        J: Array,
         theta_inj: float = 0.0,
     ) -> None:
         """
@@ -41,33 +39,14 @@ class AnalyticJICF:
             The number of injected jets
         d_inj: float
             The diameter of the injected jet
-        rho_inj: np.ndarray
-            The density of the injected jet, as a function of time
-        u_inj: np.ndarray
-            The velocity of the injected jet
-        rho: float
-            The density of the crossflow
-        u: float
-            The velocity of the crossflow
-        physics: FPVTable
-            The FPV table object, used for the chemical source terms
+        J: np.ndarray
+            The momentum flux ratios over which to discretize the profiles
         theta_inj: float
             The angle of the jet relative to the x axis (rads)
         """
-        self.physics = physics
-
-        assert self.physics.fuel_def is not None
-        self.fuel_def = self.physics.fuel_def
-        assert self.physics.ox_def is not None
-        self.ox_def = self.physics.ox_def
-
-        gas = self.physics.gas
-
         self.n_inj = n_inj
         self.d_inj = d_inj
         self.theta_inj = theta_inj
-        self.rho_inj = rho_inj
-        self.u_inj = u_inj
 
         # Geometry parameters
         self.x = x
@@ -77,44 +56,22 @@ class AnalyticJICF:
         self.A = self.w * self.h
         self.A_inj = np.pi * (self.d_inj / 2.0) ** 2
 
-        # Free stream properties
-        self.rho = rho
-        self.u = u
-        gas.X = self.ox_def
-        self.Y_ox = gas.Y
-
-        # Properties of the injected fluid
-        self.mdot_inj = self.rho_inj * self.u_inj * self.A_inj
-        self.nJ = len(self.mdot_inj)
-        gas.X = self.fuel_def
-        self.Y_fuel = gas.Y
-
-        # Index into the mass flux array
-        self.i_m: slice | int = slice(None)
-
-        # Integral of Z across centerline normal plane
-        A_inj = np.pi * (self.d_inj / 2.0) ** 2
-        self.Z_cl_int = self.rho_inj * self.u_inj * A_inj / (self.rho * self.u)
-        self.d_eff = np.sqrt(self.Z_cl_int / (2 * np.pi))
-
-        # Stoichiometry
-        mdot_a = self.rho * self.u * self.A
-        self.phi_gl = np.zeros_like(self.mdot_inj)
-        self.Z_gl = np.zeros_like(self.mdot_inj)
-        for i_m in range(self.nJ):
-            Y_ox = mdot_a / (mdot_a + self.mdot_inj[i_m])
-            gas.Y = Y_ox * self.Y_ox + (1.0 - Y_ox) * self.Y_fuel
-            self.phi_gl[i_m] = gas.equivalence_ratio(self.fuel_def, self.ox_def)
-            self.Z_gl[i_m] = gas.mixture_fraction(self.fuel_def, self.ox_def)
-
-        # Compute the non-dimensional parameters
-        self.J = (self.rho_inj * self.u_inj**2) / (
-            self.rho * self.u**2
-        )  # Momentum flux ratio
-        self.r_u = np.sqrt(self.J)  # Blowing ratio = sqrt(J)
-
         # Create the array of injectors
         self.z_inj = np.linspace(-self.w / 2, self.w / 2, n_inj + 2)[1:-1]
+
+        # Non-dimensional parameters
+        self.J = J  # Momentum flux ratio
+        self.r_u = np.sqrt(self.J)  # Blowing ratio = sqrt(J)
+        self.nJ = len(self.J)
+        # Minimum mixture fraction (i.e. fully-mixed) - currently not clipping by this
+        self.Z_gl = np.zeros_like(self.J)
+
+        # Index into the J array
+        self.i_m: slice | int = slice(None)
+
+        # # Integral of Z across centerline normal plane
+        # self.Z_cl_int = self.rho_inj * self.u_inj * self.A_inj / (self.rho * self.u)
+        self.Z_cl_int = self.r_u * self.A_inj
 
         # Precompute the adjustment factor for the boundary clipping
         self.calc_adjustment_factor()
@@ -235,8 +192,7 @@ class AnalyticJICF:
         term = x_cl * denom / self.d_inj
         term = np.power(term, -2.0 / 3.0, out=np.full_like(term, 1e20), where=term > 0)
         # Hasselbrink and Mungal 2001 Pt. 1
-        Z = 0.85 * denom * np.sqrt(self.rho_inj[self.i_m] / self.rho) * term
-        return np.clip(Z, self.Z_gl[self.i_m], 1.0)
+        return np.clip(0.85 * denom * term, self.Z_gl[self.i_m], 1.0)
 
     def calc_adjustment_factor(self) -> None:
         print("Computing adjustment factor...")
@@ -247,7 +203,7 @@ class AnalyticJICF:
         y_cl_arr = np.linspace(0, y_cl_max, 1000, axis=0)
 
         for i_m in tqdm(range(self.nJ)):
-            if self.u_inj[i_m] == 0.0:
+            if self.J[i_m] == 0.0:
                 self.adjustment_factor_interp.append(np.ones_like)
                 continue
 
