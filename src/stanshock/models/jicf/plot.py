@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -21,6 +21,39 @@ class PlotOptions:
     ylabel: str
     filename: Path
     figsize: tuple[float, float]
+    xscale: Literal["linear", "log"] = "linear"
+    yscale: Literal["linear", "log"] = "linear"
+
+
+def _line_plot(x: Array, y: Array, opts: PlotOptions) -> None:
+    """Plot variable over a range of secondary values."""
+    nJ = y.shape[1]
+
+    fig, ax = plt.subplots(figsize=opts.figsize)
+    ax.tick_params(axis="both", which="major")
+    ax.set_xscale(opts.xscale)
+    ax.set_yscale(opts.yscale)
+
+    for i in range(nJ):
+        alpha = 0.8 * (i / max(nJ - 1, 1) + 0.25)
+        ax.set_prop_cycle(None)
+        ax.plot(x, y[:, i], alpha=alpha)
+
+    ax.set_xlabel(opts.xlabel)
+    ax.set_ylabel(opts.ylabel)
+
+    if opts.yscale == "log":
+        ymax = np.max(y)
+        ylim = ax.get_ylim()
+        ymin = max(1e-3 * ymax, ylim[0], 1e-8)
+        ax.set_ylim((ymin, ylim[1]))
+
+    if opts.title:
+        ax.set_title(opts.title)
+
+    fig.tight_layout()
+    fig.savefig(opts.filename)
+    plt.close()
 
 
 def _contour_plot(
@@ -68,7 +101,8 @@ def plot_jicf_flowfield(
     plot_centerlines: bool = True,
     truncate_plot: bool = True,
 ) -> None:
-    """Generate contour plots of the JICF flow field"""
+    """Generate contour plots of the JICF flow field."""
+    print("Generating contour plots of the JICF flow field.")
     plot_dir.mkdir(parents=True, exist_ok=True)
     x = jicf.x_3D_data
     y = jicf.y_3D_data
@@ -149,3 +183,29 @@ def plot_jicf_flowfield(
             )
             opts.filename = plot_dir / f"Z_x{i:02d}_J{iJ:02d}.png"
             _contour_plot(z, y, Z[ix, :, :, iJ], opts)
+
+
+def plot_jicf_mean_variance(
+    jicf: JICModel, plot_dir: Path = Path("figures/jicf")
+) -> None:
+    """Plot the mixture fraction mean and variance profiles."""
+    print("Plotting mixture fraction mean and variance profiles.")
+    Zmean = jicf.Z_avg_profile
+    Zvar = jicf.Z_var_profile
+    x = jicf.x_profile
+
+    # Plot mean mixture fraction vs. J
+    opts = PlotOptions(
+        "",
+        "x [m]",
+        "Mean Mixture Fraction",
+        plot_dir / "Zmean.png",
+        (19.2, 10.8),
+        yscale="log",
+    )
+    _line_plot(x, Zmean, opts)
+
+    # Plot mixture fraction variance vs. J
+    opts.ylabel = "Mixture Fraction Variance"
+    opts.filename = plot_dir / "Zvar.png"
+    _line_plot(x, Zvar, opts)

@@ -8,7 +8,12 @@ import numpy as np
 
 from stanshock.components.combustor import Combustor
 from stanshock.models.inlet_diffuser import InletDiffuser
-from stanshock.models.jicf import FuelInjector, JICModel, plot_jicf_flowfield
+from stanshock.models.jicf import (
+    FuelInjector,
+    JICModel,
+    plot_jicf_flowfield,
+    plot_jicf_mean_variance,
+)
 from stanshock.models.jicf.source import ConstantValue
 from stanshock.models.wall_models import (
     CompressibleHeatFlux,
@@ -412,6 +417,7 @@ def get_injectors_fpv(
 
     # Generate plots of the fuel jets
     plot_jicf_flowfield(jicf)
+    plot_jicf_mean_variance(jicf)
 
     return FuelInjector(
         jicf,
