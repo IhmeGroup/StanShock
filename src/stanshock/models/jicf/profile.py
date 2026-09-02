@@ -25,6 +25,7 @@ class AnalyticJICF:
         d_inj: float,
         J: Array,
         theta_inj: float = 0.0,
+        Cd: float = 1.0,
     ) -> None:
         """
         This method initializes the Jet-in-Crossflow model with the following
@@ -43,6 +44,8 @@ class AnalyticJICF:
             The momentum flux ratios over which to discretize the profiles
         theta_inj: float
             The angle of the jet relative to the x axis (rads)
+        Cd: float
+            Discharge coefficient for the injector
         """
         self.n_inj = n_inj
         self.d_inj = d_inj
@@ -54,14 +57,15 @@ class AnalyticJICF:
         self.h = h
         self.L = self.x[-1] - self.x[0]
         self.A = self.w * self.h
-        self.A_inj = np.pi * (self.d_inj / 2.0) ** 2
+        self.A_inj = np.pi * (0.5 * self.d_inj) ** 2
+        Ae = Cd * self.A_inj
 
         # Create the array of injectors
         self.z_inj = np.linspace(-self.w / 2, self.w / 2, n_inj + 2)[1:-1]
 
         # Non-dimensional parameters
         self.J = J  # Momentum flux ratio
-        self.r_u = np.sqrt(self.J)  # Blowing ratio = sqrt(J)
+        self.r_u = np.sqrt(self.J)  # Blowing ratio = sqrt(rho_inj / rho) * u_inj / u
         self.nJ = len(self.J)
         # Minimum mixture fraction (i.e. fully-mixed) - currently not clipping by this
         self.Z_gl = np.zeros_like(self.J)
@@ -70,8 +74,7 @@ class AnalyticJICF:
         self.i_m: slice | int = slice(None)
 
         # # Integral of Z across centerline normal plane
-        # self.Z_cl_int = self.rho_inj * self.u_inj * self.A_inj / (self.rho * self.u)
-        self.Z_cl_int = self.r_u * self.A_inj
+        self.Z_cl_int = self.r_u * Ae
 
         # Precompute the adjustment factor for the boundary clipping
         self.calc_adjustment_factor()
@@ -186,13 +189,37 @@ class AnalyticJICF:
 
         return x_cl, y_cl, n2
 
-    def Z_cl(self, x_cl: Array) -> Array:
+    def Z_cl(self, y_cl: Array) -> Array:
+        """Centerline concentration as a function of y.
+
+        Equations from Hasselbrink and Mungal 2001 Pt. 1, normalized by the square root
+        of the density ratio.
+        """
+        # Normalized coordinates
+        y = y_cl / self.d_inj
+        Zmax = self.Z_cl_int[self.i_m] / self.A_inj
         r_u = self.r_u[self.i_m]
         denom = np.divide(1.0, r_u, out=np.zeros_like(r_u), where=r_u > 0)
-        term = x_cl * denom / self.d_inj
-        term = np.power(term, -2.0 / 3.0, out=np.full_like(term, 1e20), where=term > 0)
-        # Hasselbrink and Mungal 2001 Pt. 1
-        return np.clip(0.85 * denom * term, self.Z_gl[self.i_m], 1.0)
+
+        # Linear slope computed from intersection with jet-like or wake-like curves
+        a = np.where(
+            r_u > 20.0,
+            0.1 * Zmax - 0.05,  # Intersects with jet-like at y/d = 10
+            # Intersects wake-like at y/d = r*3/4:
+            denom / 0.75 * (Zmax - (1.6 / 0.73 * 0.75**2) * denom**2),
+        )
+
+        # Potential core region (y/d < 10), linear from (y=0, Z=Zmax) to intersection point
+        Z = Zmax - a * y
+
+        # Free jet region (10 < y/d < 3r/4), only if r > 20, eq. 3.39:
+        Z = np.divide(5.0, y, out=Z, where=np.logical_and(y > 10.0, r_u > 20.0))
+
+        # Wake region (y/rd > 3/4), eq. 3.40:
+        y = y * denom
+        Z = (1.6 / 0.73) * denom * np.power(y, -2.0, out=Z, where=y > 0.75)
+
+        return np.clip(Z, self.Z_gl[self.i_m], Zmax)
 
     def calc_adjustment_factor(self) -> None:
         print("Computing adjustment factor...")
@@ -235,7 +262,7 @@ class AnalyticJICF:
 
         Z_int_nobound = self.n_inj * self.Z_cl_int[self.i_m]
 
-        Z_cl = self.Z_cl(x_cl)
+        Z_cl = self.Z_cl(y_cl)
         sigma2 = self.Z_cl_int[self.i_m] / (2 * np.pi * Z_cl)
         s2s = np.sqrt(2 * sigma2)
 
@@ -339,10 +366,10 @@ class AnalyticJICF:
             The injector z-coordinate
         """
         # Compute the nearest point on the centerline and the distance squared
-        x_cl, _, n2 = self.nearest_on_cl(x, y, z - z_inj)
+        _, y_cl, n2 = self.nearest_on_cl(x, y, z - z_inj)
 
         # Compute the centerline fuel mass fraction
-        Z_cl = self.Z_cl(x_cl)
+        Z_cl = self.Z_cl(y_cl)
 
         sigma2 = np.divide(
             self.Z_cl_int, Z_cl * 2 * np.pi, out=np.zeros_like(Z_cl), where=Z_cl > 0
@@ -368,7 +395,7 @@ class AnalyticJICF:
         x_cl, y_cl, n2 = self.nearest_on_cl(x, y, z - z_inj)
 
         # Compute the centerline fuel mass fraction
-        Z_cl = self.Z_cl(x_cl)
+        Z_cl = self.Z_cl(y_cl)
 
         # Spreading based on scalar conservation
         # (Assume gaussian, rho_inj * u_inj * Z_inj * A_inj = rho * u * int(Z * dA))

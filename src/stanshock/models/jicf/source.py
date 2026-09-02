@@ -143,7 +143,7 @@ class FuelInjector(RightHandSide):
         )
         rho = self.physics.get_density(inflow)
         mdot = self.mdot(t, state)
-        inflow.velocity = mdot / (rho * self.jicf.n_inj * self.jicf.A_inj)
+        inflow.velocity = mdot / (rho * self.jicf.Ae)
         J = self.J(state, inflow)
         return inflow, mdot, J
 
@@ -288,7 +288,7 @@ class GasInjector(FuelInjector):
             temperature=np.asarray([self.jicf.T0 * Tr]),
             pressure=np.asarray([p0 * pr]),
             density=np.asarray([rho]),
-            velocity=np.asarray([mdot / (rho * self.jicf.n_inj * self.jicf.A_inj)]),
+            velocity=np.asarray([mdot / (rho * self.jicf.Ae)]),
             composition=self.jicf.manifold_state.composition,
         )
         J = self.J(state, inflow)

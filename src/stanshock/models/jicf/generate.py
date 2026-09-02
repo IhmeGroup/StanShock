@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import warnings
+from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -40,7 +41,7 @@ class JICModel:
         physics: FPVTable,
         theta_inj: float = 0.0,
         alpha: float = 1e6,
-        Cd: float = 0.7,
+        Cd: float = 1.0,
         datadir: Path | str = "./data",
         model_file: str = "jicf_model.vtkhdf",
         x_profile: Array | None = None,
@@ -120,8 +121,8 @@ class JICModel:
 
         # Geometry parameters
         self.A = self.w * self.h
-        self.A_inj = np.pi * (self.d_inj / 2.0) ** 2
-        self.Ae = Cd * self.A_inj
+        self.A_inj = np.pi * (0.5 * self.d_inj) ** 2
+        self.Ae = Cd * self.n_inj * self.A_inj
 
         # Momentum-flux-ratio grid (the table dimension). Sort ascending and
         # carry the per-grid injected-fluid state along so the tables and the
@@ -139,6 +140,7 @@ class JICModel:
             d_inj=d_inj,
             J=J,
             theta_inj=theta_inj,
+            Cd=Cd,
         )
 
         # Precompute a 3D array of the mixture fraction and generate an interpolator.
@@ -152,7 +154,6 @@ class JICModel:
             self.y_3D_data = vtk.y
             self.z_3D_data = vtk.z
             self.Z_3D_data = vtk.vals["Z"]
-            self._build_Z_3D_interp()
         else:
             self.calc_Z_3D_interp(write=True)
 
@@ -251,7 +252,7 @@ class JICModel:
 
     def calc_Z_3D_interp(self, write: bool = False, debug: bool = False) -> None:
         print("Computing Z 3D array...")
-        dx = 5.0e-4
+        dx = 1.0e-4
         Ny = int(np.ceil(self.h / dx))
         Nz = int(np.ceil(self.w / dx))
         self.y_3D_data = np.linspace(0, self.h, Ny)
@@ -260,12 +261,11 @@ class JICModel:
             self.xc[0], self.xc[-1], dx, 1.1, self.x_inj
         )
         self.analytic.i_m = slice(None)
-        self.Z_3D_data = self.analytic.Z_3D_adjusted(
+        self.Z_3D_data = self.analytic.Z_3D(  # Z_3D_adjusted(
             self.x_3D_data[:, None, None] - self.x_inj,
             self.y_3D_data[None, :, None],
             self.z_3D_data[None, None, :],
         )
-        self.Z_3D_data[..., np.isnan(self.rho0)] = 0.0
         self.Z_3D_data[..., self.J == 0.0] = 0.0
         self.Z_3D_data[np.isnan(self.Z_3D_data)] = 0.0
 
@@ -278,9 +278,17 @@ class JICModel:
                 self.y_3D_data[None, :, None],
                 self.z_3D_data[None, None, :] - z_inj,
             )
+            Z_cl = self.analytic.Z_cl(y_cl)
+            sigma2 = np.divide(
+                self.analytic.Z_cl_int,
+                Z_cl * 2 * np.pi,
+                out=np.zeros_like(Z_cl),
+                where=Z_cl > 0,
+            )
             results["x_cl"] = x_cl
             results["y_cl"] = y_cl
             results["n"] = np.sqrt(n2)
+            results["sigma2"] = sigma2
 
         if write:
             vtk = RectilinearVtkhdf(
@@ -293,17 +301,21 @@ class JICModel:
             )
             vtk.save()
 
-        self._build_Z_3D_interp()
+    @cached_property
+    def Z_3D_interp(self) -> list[RegularGridInterpolator[np.float64]]:
+        """Interpolators for the 3D mixture fraction fields.
 
-    def _build_Z_3D_interp(self) -> None:
-        self.Z_3D_interp: list[RegularGridInterpolator[np.float64]] = []
+        These are computed once when first accessed, and cached for reuse.
+        """
+        Z_3D_interp: list[RegularGridInterpolator[np.float64]] = []
         for i_m in range(self.nJ):
             interp = RegularGridInterpolator(
                 (self.x_3D_data, self.y_3D_data, self.z_3D_data),
                 self.Z_3D_data[..., i_m],
                 method="cubic",
             )
-            self.Z_3D_interp.append(interp)
+            Z_3D_interp.append(interp)
+        return Z_3D_interp
 
     def _mu_Z(self, yz: Array, x: Array) -> Array:
         """Vectorized evaluation of mixture fraction over set of y + z points.
@@ -356,13 +368,14 @@ class JICModel:
         #     dtype=float,
         # )
 
-        dx = 5.0e-4
+        dx = 1e-4  # 5.0e-4
         Ny = int(np.ceil(self.h / dx))
         Nz = int(np.ceil(self.w / dx))
         y = np.linspace(0.0, self.h, Ny)[None, :, None]
         z = np.linspace(0.0, 0.5 * self.w, Nz)[None, None, :]
         self.analytic.i_m = slice(None)
-        Z = self.analytic.Z_3D_adjusted(x[:, None, None] - self.x_inj, y, z)
+        # Z = self.analytic.Z_3D_adjusted(x[:, None, None] - self.x_inj, y, z)
+        Z = self.analytic.Z_3D(x[:, None, None] - self.x_inj, y, z)
         Z_avg = np.mean(Z, axis=(1, 2))
         Z_var = np.mean((Z - Z_avg[:, None, None, :]) ** 2, axis=(1, 2))
 
@@ -420,24 +433,31 @@ class JICModel:
         # be rebuilt independently of the simulation mesh. Use the caller-supplied
         # mesh if given, otherwise the stretched 3D grid (which spans the same
         # [xc[0], xc[-1]] interval as the simulation mesh).
-        self.x_profile = (
-            self.x_3D_data if self._x_profile_input is None else self._x_profile_input
-        )
-        self.Z_avg_profile = np.zeros((self.x_profile.shape[0], self.nJ))
-        self.Z_var_profile = np.zeros((self.x_profile.shape[0], self.nJ))
+        # self.x_profile = (
+        #     self.x_3D_data if self._x_profile_input is None else self._x_profile_input
+        # )
+        # self.Z_avg_profile = np.zeros((self.x_profile.shape[0], self.nJ))
+        # self.Z_var_profile = np.zeros((self.x_profile.shape[0], self.nJ))
 
-        # Compute profiles between injector and nozzle
-        idx = np.logical_and(self.x_profile > self.x_inj, self.x_profile < self.x_noz)
-        self.Z_avg_profile[idx, :], self.Z_var_profile[idx, :] = (
-            # self.Z_avg_var_adjusted(self.x_profile[idx])
-            self.Z_avg_var(self.x_profile[idx])
-        )
+        # # Compute profiles between injector and nozzle
+        # idx = np.logical_and(self.x_profile > self.x_inj, self.x_profile < self.x_noz)
+        # self.Z_avg_profile[idx, :], self.Z_var_profile[idx, :] = (
+        #     # self.Z_avg_var_adjusted(self.x_profile[idx])
+        #     self.Z_avg_var(self.x_profile[idx])
+        # )
 
         # Freeze profiles downstream of the nozzle
-        ifreeze = len(idx) - 1 - np.argmax(idx[::-1])
-        idx = self.x_profile >= self.x_noz
-        self.Z_avg_profile[idx, :] = self.Z_avg_profile[ifreeze, :]
-        self.Z_var_profile[idx, :] = self.Z_var_profile[ifreeze, :]
+        # ifreeze = len(idx) - 1 - np.argmax(idx[::-1])
+        # idx = self.x_profile >= self.x_noz
+        # self.Z_avg_profile[idx, :] = self.Z_avg_profile[ifreeze, :]
+        # self.Z_var_profile[idx, :] = self.Z_var_profile[ifreeze, :]
+
+        self.x_profile = self.x_3D_data
+        Z = self.Z_3D_data
+        self.Z_avg_profile = np.mean(Z, axis=(1, 2))
+        self.Z_var_profile = np.mean(
+            (Z - self.Z_avg_profile[:, None, None, :]) ** 2, axis=(1, 2)
+        )
 
         if write:
             h5_write(
