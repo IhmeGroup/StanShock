@@ -245,6 +245,7 @@ class FluidPhysics(ABC):
         self.gas.set_equivalence_ratio(1.0, fuel=self.fuel_def, oxidizer=self.ox_def)
         Yo = self.gas.Y[iO2] / Yox[iO2]
         self.stoich_mass_ratio = Yo / (1.0 - Yo)
+        self.Z_stoich = float(self.get_bilger_mixture_fraction(self.gas.Y[None, :])[0])
 
     def get_bilger_mixture_fraction(self, Y: Array) -> Array:
         """Compute the Bilger mixture fraction from given mass fractions."""

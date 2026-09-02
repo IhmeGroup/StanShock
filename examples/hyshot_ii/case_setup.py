@@ -341,7 +341,7 @@ def get_injectors_fpv(
     N_f = 4  # -
     A_f = np.pi * r_f**2  # m^2
     A_f_tot = N_f * A_f  # m^2
-    Cd = 0.9
+    Cd = 1.0  # 0.9
     Ae = Cd * A_f_tot
 
     # Air flow properties
@@ -400,6 +400,13 @@ def get_injectors_fpv(
     u_f = mdot_max / (rho_f * Ae)
     J_max = (rho_f * u_f**2) / (rho_in * u_in**2)
 
+    # Print the mixture fraction for verification
+    Z_st = physics.Z_stoich
+    phi_max = float(np.sqrt(J[-1])) * mdot_max * afr_st / mdot_ox
+    Z_max = phi_max * Z_st / (1.0 - Z_st + phi_max * Z_st)
+    print(f"Maximum equivalence ratio = {phi_max}")
+    print(f"Maximum mixture fraction = {Z_max}")
+
     # Construct the fuel injector model
     jicf = JICModel(
         x_inj=x_inj,
@@ -416,8 +423,9 @@ def get_injectors_fpv(
     )
 
     # Generate plots of the fuel jets
-    plot_jicf_flowfield(jicf)
-    plot_jicf_mean_variance(jicf)
+    rho_ratio = rho_f / rho_in
+    plot_jicf_flowfield(jicf, rho_ratio)
+    plot_jicf_mean_variance(jicf, rho_ratio)
 
     return FuelInjector(
         jicf,
