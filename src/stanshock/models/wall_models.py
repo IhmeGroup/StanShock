@@ -7,6 +7,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import newton
 
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array
 
 
@@ -48,6 +49,39 @@ def get_wall_state(
 
     q = 0.5 * rho * U**2 * np.sign(U)
     return WallState(Re=Re, M=M, T=T, Tw=Tw, Pr=Pr, gamma=gamma, h_St=h_St, q=q)
+
+
+class WallStateBuilder:
+    def __init__(self, physics: FluidPhysics) -> None:
+        self.physics = physics
+
+    def get_wall_state(
+        self,
+        state: FluidState,
+        Lc: Array | float,
+        Tw: Array | float | None = None,
+    ) -> WallState:
+        T = state.temperature = self.physics.get_temperature(state)
+        return get_wall_state(
+            rho=state.density,
+            U=state.velocity,
+            mu=self.physics.get_mu(state),
+            a=self.physics.get_sound_speed(state),
+            cp=self.physics.get_cp(state),
+            k=self.physics.get_thermal_conductivity(state),
+            gamma=self.physics.get_gamma(state),
+            Lc=Lc,
+            T=T,
+            wall_temperature=Tw,
+        )
+
+    def __call__(
+        self,
+        state: FluidState,
+        Lc: Array | float,
+        Tw: Array | float | None = None,
+    ) -> WallState:
+        return self.get_wall_state(state, Lc=Lc, Tw=Tw)
 
 
 """
