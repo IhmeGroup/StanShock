@@ -163,7 +163,10 @@ class AreaChange(FastSlowSource):
         assert self.physics is not None
         rhs = self.source(time, state_array_local, gamma_star, e0_star)
         rhs = np.reshape(rhs, self.shape_output)
-        rhs_full = np.zeros_like(np.reshape(state_array_local, self.shape_output))
+        rhs = np.pad(rhs, ((0, 0), (0, self.physics.n_scalars - 1)), mode="edge")
+        rhs[:, 2:] *= self.composition_frozen
+
+        rhs_full = np.zeros(self.shape_input)
         rhs_full[self.idx_output, :] = rhs
 
         return np.ravel(rhs_full)
@@ -184,7 +187,7 @@ class AreaChange(FastSlowSource):
         state_array_local = np.reshape(state_array_local, shape=self.shape_output)
         idx = self.idx_output_explicit
         state_array_output = state_array_local[idx]
-        rhs_compact: Array = np.zeros_like(state_array_output)
+        rhs_compact: Array = np.zeros_like(state_array_local)
 
         if self.geometry.dlnA_dx is not None:
             assert state is not None
@@ -198,9 +201,9 @@ class AreaChange(FastSlowSource):
             x: Array = self.x[idx]
             dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
 
-            rhs_compact[:, 0] -= u * ru * dlnA_dx
-            rhs_compact[:, 1] -= u * (rE + p) * dlnA_dx
-            rhs_compact[:, 2] -= ru * dlnA_dx
+            rhs_compact[idx, 0] -= u * ru * dlnA_dx
+            rhs_compact[idx, 1] -= u * (rE + p) * dlnA_dx
+            rhs_compact[idx, 2] -= ru * dlnA_dx
 
         return np.ravel(rhs_compact)
 
@@ -221,14 +224,14 @@ class AreaChange(FastSlowSource):
         x: Array = self.x[idx]
         state_array_local = np.reshape(state_array_local, shape=self.shape_output)
         state_array_output = state_array_local[idx]
-        rhs_compact: Array = np.zeros_like(state_array_output)
+        rhs_compact: Array = np.zeros_like(state_array_local)
 
         # create quasi-1D right hand side
         if self.geometry.dlnA_dt is not None:
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)
             if isinstance(dlnA_dt, np.ndarray):
                 dlnA_dt = dlnA_dt[:, None]
-            rhs_compact -= state_array_output * dlnA_dt
+            rhs_compact[idx] -= state_array_output * dlnA_dt
 
         if self.geometry.dlnA_dx is not None:
             assert state is not None
@@ -240,9 +243,9 @@ class AreaChange(FastSlowSource):
             p: Array = state.pressure[idx]
             dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
 
-            rhs_compact[:, 0] -= u * ru * dlnA_dx
-            rhs_compact[:, 1] -= u * (rE + p) * dlnA_dx
-            rhs_compact[:, 2] -= ru * dlnA_dx
+            rhs_compact[idx, 0] -= u * ru * dlnA_dx
+            rhs_compact[idx, 1] -= u * (rE + p) * dlnA_dx
+            rhs_compact[idx, 2] -= ru * dlnA_dx
 
         return np.ravel(rhs_compact)
 
