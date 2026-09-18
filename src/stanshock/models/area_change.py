@@ -160,6 +160,12 @@ class AreaChange(FastSlowSource):
         e0_star: Array | None = None,
     ) -> Array:
         """Transform the RHS into standard format."""
+        if self.mode == "fast":
+            dydt = np.zeros_like(state_array_local)
+            return self.add_source(
+                dydt, self.source(time, state_array_local, gamma_star, e0_star)
+            )
+
         assert self.physics is not None
         rhs = self.source(time, state_array_local, gamma_star, e0_star)
         rhs = np.reshape(rhs, self.shape_output)

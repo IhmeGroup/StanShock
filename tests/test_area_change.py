@@ -22,9 +22,9 @@ def test_area_change_handles_partial_moving_area_region() -> None:
 
     geometry = initialize_geometry(xf=xf, area=1.0, dlnA_dt=dlnA_dt)
     gas = Solution(
-        Path(__file__).resolve().parent / ".." / "data" / "mechanisms" / "Nitrogen.yaml"
+        Path(__file__).resolve().parent / ".." / "data" / "mechanisms" / "N2O2HeAr.yaml"
     )
-    gas.TP = 300.0, 101325.0
+    gas.TPX = 300.0, 101325.0, "N2:0.79,O2:0.21"
     physics = CanteraInterface(gas)
     state = InitializeConstant(geometry, physics, gas, 50.0)()
     state_array = np.ravel(physics.primitive_to_conservative(state))
