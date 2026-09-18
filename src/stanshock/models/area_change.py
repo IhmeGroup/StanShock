@@ -160,11 +160,17 @@ class AreaChange(FastSlowSource):
         e0_star: Array | None = None,
     ) -> Array:
         """Transform the RHS into standard format."""
+        if self.mode == "fast":
+            dydt = np.zeros_like(state_array_local)
+            return self.add_source(
+                dydt, self.source(time, state_array_local, gamma_star, e0_star)
+            )
+
         assert self.physics is not None
         rhs = self.source(time, state_array_local, gamma_star, e0_star)
         rhs = np.reshape(rhs, self.shape_output)
         rhs = np.pad(rhs, ((0, 0), (0, self.physics.n_scalars - 1)), mode="edge")
-        rhs[:, 2:] *= self.composition_frozen
+        rhs[:, 2:] *= self.composition_frozen[self.idx_output]
 
         rhs_full = np.zeros(self.shape_input)
         rhs_full[self.idx_output, :] = rhs
@@ -185,18 +191,20 @@ class AreaChange(FastSlowSource):
         assert state_array_local is not None
         _ = face_states, avg_face_states, face_gradients
         state_array_local = np.reshape(state_array_local, shape=self.shape_output)
-        rhs_compact: Array = np.zeros_like(state_array_local)
+        idx = self.idx_output_explicit
+        state_array_output = state_array_local[idx]
+        rhs_compact: Array = np.zeros_like(state_array_output)
 
         if self.geometry.dlnA_dx is not None:
             assert state is not None
             assert state.velocity is not None
             assert state.pressure is not None
-            ru: Array = state_array_local[:, 0]
-            rE: Array = state_array_local[:, 1]
-            u: Array = state.velocity
-            p: Array = state.pressure
+            ru: Array = state_array_output[:, 0]
+            rE: Array = state_array_output[:, 1]
+            u: Array = state.velocity[idx]
+            p: Array = state.pressure[idx]
 
-            x: Array = self.x[self.idx_output_explicit]
+            x: Array = self.x[idx]
             dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
 
             rhs_compact[:, 0] -= u * ru * dlnA_dx
@@ -218,25 +226,27 @@ class AreaChange(FastSlowSource):
         assert self.geometry is not None
         assert state_array_local is not None
         _ = face_states, avg_face_states, face_gradients
-        x: Array = self.x[self.idx_output_implicit]
+        idx = self.idx_output_implicit
+        x: Array = self.x[idx]
         state_array_local = np.reshape(state_array_local, shape=self.shape_output)
-        rhs_compact: Array = np.zeros_like(state_array_local)
+        state_array_output = state_array_local[idx]
+        rhs_compact: Array = np.zeros_like(state_array_output)
 
         # create quasi-1D right hand side
         if self.geometry.dlnA_dt is not None:
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, x)
             if isinstance(dlnA_dt, np.ndarray):
                 dlnA_dt = dlnA_dt[:, None]
-            rhs_compact -= state_array_local * dlnA_dt
+            rhs_compact -= state_array_output * dlnA_dt
 
         if self.geometry.dlnA_dx is not None:
             assert state is not None
             assert state.velocity is not None
             assert state.pressure is not None
-            ru: Array = state_array_local[:, 0]
-            rE: Array = state_array_local[:, 1]
-            u: Array = state.velocity
-            p: Array = state.pressure
+            ru: Array = state_array_output[:, 0]
+            rE: Array = state_array_output[:, 1]
+            u: Array = state.velocity[idx]
+            p: Array = state.pressure[idx]
             dlnA_dx: Array | float = self.geometry.dlnA_dx(time, x)
 
             rhs_compact[:, 0] -= u * ru * dlnA_dx
@@ -255,11 +265,14 @@ class AreaChange(FastSlowSource):
         assert self.geometry is not None
         assert gamma_star is not None
         _ = e0_star
-        x: Array = self.geometry.xc[self.idx_output_implicit]
+        idx = self.idx_output_implicit
+        x: Array = self.x[idx]
         n: int = len(x)
         state_array_local = np.reshape(state_array_local, shape=self.shape_output)
-        ru: Array = state_array_local[:, 0]
-        r: Array = state_array_local[:, 2]
+        state_array_output = state_array_local[idx]
+        ru: Array = state_array_output[:, 0]
+        r: Array = state_array_output[:, 2]
+        gamma_star = gamma_star[idx]
         # rE: Array = y[2 * n : 3 * n]
         # p = (gamma_star - 1) * (rE - r*e0_star - 0.5 * ru**2 / r)
 
