@@ -252,12 +252,22 @@ class Combustor:
             local_timescale = np.minimum(local_timescale, viscous_timescale)
         return self.cfl * np.min(local_timescale)
 
+    def update_indices(self, operator: TimeIntegrator) -> None:
+        """
+        Call update_indices on all source terms.
+        """
+        if hasattr(operator, "operators"):
+            # Call recursively for meta-integrators like LieSplitting
+            for sub_operator in operator.operators:
+                self.update_indices(sub_operator)
+            return
+
+        operator.rhs.update_indices(self.t, self.state)
+
     def update_probes(self, iters: int) -> None:
         """
         This method updates all the probes to the current value
         """
-
-        # update probes
         for probe in self.probes:
             if iters % (probe.skip_steps + 1) == 0:
                 probe.update(self.t, self.state)
@@ -266,7 +276,6 @@ class Combustor:
         """
         This method updates all the XT Diagrams to the current value.
         """
-        # update diagrams
         for diagram in self.xt_diagrams:
             if iters % (diagram.skip_steps + 1) == 0:
                 diagram.update(self)
@@ -313,9 +322,6 @@ class Combustor:
                     inj.update_fluid_tip_positions(
                         dt, self.t, self.state.velocity[self.geometry.idx_cells]
                     )
-                # self.injector.update_fluid_tip_positions(
-                #     dt, self.t, self.state.velocity[self.geometry.idx_cells]
-                # )
 
             # Update the system state
             self.t, state_array, gamma_star, e0_star = self.time_integrator.advance(
@@ -332,6 +338,7 @@ class Combustor:
             self.state.gamma = self.physics.get_gamma(self.state)
 
             # perform other updates
+            self.update_indices(self.time_integrator)
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
             self.update_csv_writers(iters)
