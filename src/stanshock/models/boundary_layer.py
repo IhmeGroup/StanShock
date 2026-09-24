@@ -22,6 +22,7 @@ class BoundaryLayer(RightHandSide):
         **precompute_steps: Unpack[PrecomputeSteps],
     ) -> None:
         super().__init__(**precompute_steps)
+        assert self.physics is not None
         self.wall_temperature = wall_temperature
 
         if wall_models is None:
@@ -47,17 +48,13 @@ class BoundaryLayer(RightHandSide):
         _ = time, state_array_local, face_states, avg_face_states, face_gradients
         assert self.geometry is not None
         assert state is not None
-        assert state.density is not None
-        assert state.velocity is not None
         rhs = np.zeros((*state.shape, 2))
         x = self.geometry.xc[self.idx_input]
         characteristic_length = self.geometry.characteristic_length(time, x)
         hydraulic_diameter = self.geometry.hydraulic_diameter(time, x)
 
-        wall = self.wall_state.get_wall_state(
-            state,
-            Lc=characteristic_length,
-            Tw=self.wall_temperature,
+        wall = self.wall_state(
+            state, Lc=characteristic_length, Tw=self.wall_temperature
         )
 
         wall.Cf = self.skin_friction(wall)
