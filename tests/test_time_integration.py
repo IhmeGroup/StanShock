@@ -101,8 +101,8 @@ class Circle(RightHandSide):
 
 class LotkaVolterra(FastSlowSource):
     REQUIRED_PRECOMPUTE_STEPS = ()
-    idx_output_explicit = np.s_[:]
-    idx_output_implicit = np.s_[:]
+    idx_input_explicit = np.s_[:]
+    idx_input_implicit = np.s_[:]
     idx_source_explicit = np.array([0])
     idx_source_implicit = np.array([1])
 
@@ -114,6 +114,7 @@ class LotkaVolterra(FastSlowSource):
         """Split RHS into fast and slow source terms accessed by setting the mode."""
         super().__init__(mode, **precompute_steps)
         self.shape_full = self.shape_input = (-1, 2)
+        self.shape_input_implicit = self.shape_input_explicit = (-1, 2)
         self.shape_output = (-1, 1)
 
     def source_slow(
@@ -173,7 +174,7 @@ class TimeIntegrationCase:
 
         if self.analytical_function is None:
             ode_result = solve_ivp(
-                fun=rhs.source,
+                fun=rhs.source_full,
                 t_span=self.t_span,
                 y0=self.y_init,
                 t_eval=t_eval,
