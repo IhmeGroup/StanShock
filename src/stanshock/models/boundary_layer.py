@@ -5,7 +5,7 @@ import numpy as np
 from stanshock.models.wall_models import (
     HeatFlux,
     SkinFriction,
-    get_wall_state,
+    WallState,
 )
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, Unpack
@@ -22,6 +22,7 @@ class BoundaryLayer(RightHandSide):
         **precompute_steps: Unpack[PrecomputeSteps],
     ) -> None:
         super().__init__(**precompute_steps)
+        assert self.physics is not None
         self.wall_temperature = wall_temperature
 
         if wall_models is None:
@@ -47,27 +48,13 @@ class BoundaryLayer(RightHandSide):
         assert self.physics is not None
         assert self.geometry is not None
         assert state is not None
-        assert state.density is not None
-        assert state.velocity is not None
         rhs = np.zeros((*state.shape, 2))
         x = self.geometry.xc[self.idx_input]
         characteristic_length = self.geometry.characteristic_length(time, x)
         hydraulic_diameter = self.geometry.hydraulic_diameter(time, x)
 
-        # Compute gas properties
-        T = state.temperature = self.physics.get_temperature(state)
-
-        wall = get_wall_state(
-            rho=state.density,
-            U=state.velocity,
-            mu=self.physics.get_mu(state),
-            a=self.physics.get_sound_speed(state),
-            cp=self.physics.get_cp(state),
-            k=self.physics.get_thermal_conductivity(state),
-            gamma=self.physics.get_gamma(state),
-            Lc=characteristic_length,
-            T=T,
-            wall_temperature=self.wall_temperature,
+        wall = WallState.from_state(
+            state, self.physics, Lc=characteristic_length, Tw=self.wall_temperature
         )
 
         wall.Cf = self.skin_friction(wall)
