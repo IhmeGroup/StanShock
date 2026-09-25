@@ -5,7 +5,7 @@ import numpy as np
 from stanshock.models.wall_models import (
     HeatFlux,
     SkinFriction,
-    WallStateBuilder,
+    WallState,
 )
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Index, Unpack
@@ -31,7 +31,6 @@ class BoundaryLayer(RightHandSide):
 
         # Provides momentum and energy source terms
         self.skin_friction, self.heat_flux = wall_models
-        self.wall_state = WallStateBuilder(physics=self.physics)
         self.idx_source: Index = np.array([0, 1])
         self.shape_output = (self.shape_output[0], 2)
 
@@ -46,6 +45,7 @@ class BoundaryLayer(RightHandSide):
     ) -> Array:
         """Boundary layer contribution to RHS."""
         _ = time, state_array_local, face_states, avg_face_states, face_gradients
+        assert self.physics is not None
         assert self.geometry is not None
         assert state is not None
         rhs = np.zeros((*state.shape, 2))
@@ -53,8 +53,8 @@ class BoundaryLayer(RightHandSide):
         characteristic_length = self.geometry.characteristic_length(time, x)
         hydraulic_diameter = self.geometry.hydraulic_diameter(time, x)
 
-        wall = self.wall_state(
-            state, Lc=characteristic_length, Tw=self.wall_temperature
+        wall = WallState.from_state(
+            state, self.physics, Lc=characteristic_length, Tw=self.wall_temperature
         )
 
         wall.Cf = self.skin_friction(wall)
