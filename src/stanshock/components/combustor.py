@@ -80,7 +80,7 @@ class Combustor:
         plot_state_interval: int = -1,  # plot the state every n iterations
         plot_state_variables: list[str | list[str]] | None = None,
         plot_state_variable_info_map: dict[str, VariableInfo] | None = None,
-        plot_state_region: str | None = None,
+        plot_state_region: str = "domain",
         iteration: int = 0,  # Iteration to start from
         n_restart_interval: int = -1,  # If >0, saves the fluid state to a file every n_restart_interval iterations
     ) -> None:
@@ -290,7 +290,7 @@ class Combustor:
                 f"./figures/anim/test_{iters // self.plot_state_interval:05d}.png",
                 variable_info_map=self.plot_state_variable_info_map,
                 plot_variables=self.plot_state_variables,
-                plot_region=self.plot_state_region,
+                region=self.plot_state_region,
             )
 
     def advance_simulation(self, tFinal: float, res_p_target: float = -1.0) -> None:

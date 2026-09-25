@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from matplotlib.figure import Figure
 
     from stanshock.components.combustor import Combustor
-    from stanshock.system.backend import Array
+    from stanshock.system.backend import Array, Index
 
 
 @dataclass
@@ -33,35 +33,32 @@ class VariableInfo:
 VariableInfoMap: TypeAlias = dict[str, VariableInfo]
 
 
-def _get_plot_region(geometry: Geometry, region: str | None) -> tuple[float, float]:
-    region_name = region
-    if region_name is None:
-        region_name = "combustor" if "combustor" in geometry.regions else "domain"
-    elif not isinstance(geometry, AsymmetricBox) and region_name != "combustor":
-        msg = "Only AsymmetricBox geometries can plot non-combustor regions."
+def _get_plot_region(geometry: Geometry, region: str = "domain") -> tuple[float, float]:
+    if region not in geometry.regions:
+        msg = f"Unknown plot region: {region}"
         raise ValueError(msg)
 
-    if region_name not in geometry.regions:
-        msg = f"Unknown plot region: {region_name}"
+    if not isinstance(geometry, AsymmetricBox) and region != "domain":
+        msg = "Only AsymmetricBox geometries can plot external regions."
         raise ValueError(msg)
 
-    return geometry.regions[region_name]
+    return geometry.regions[region]
 
 
-def get_plot_cell_mask(geometry: Geometry, region: str | None = None) -> Array:
+def get_plot_cell_mask(geometry: Geometry, region: str = "domain") -> Index:
     x0, x1 = _get_plot_region(geometry, region)
     x = geometry.xc[geometry.idx_cells]
-    mask: Array = (x >= x0) & (x <= x1)
+    mask = np.logical_and(x >= x0, x <= x1)
     if not np.any(mask):
         msg = f"Plot region contains no cells: {region}"
         raise ValueError(msg)
     return mask
 
 
-def get_plot_face_locations(geometry: Geometry, region: str | None = None) -> Array:
+def get_plot_face_locations(geometry: Geometry, region: str = "domain") -> Array:
     x0, x1 = _get_plot_region(geometry, region)
     x = geometry.xf
-    mask: Array = (x >= x0) & (x <= x1)
+    mask = np.logical_and(x >= x0, x <= x1)
     return np.unique(np.concatenate(([x0], x[mask], [x1])))
 
 
@@ -223,7 +220,7 @@ class XTDiagram:
         skip_steps: int = 0,  # number of timesteps to skip
         x: Array | None = None,  # mesh to interpolate solution onto
         limits: tuple[float, float] | None = None,  # colormap range
-        plot_region: str | None = None,
+        region: str = "domain",
     ) -> None:
         self.name = variable.lower()
         if variable_info_map is None:
@@ -235,7 +232,7 @@ class XTDiagram:
         # check interpolation grid
         geometry = domain.geometry
         if x is None:
-            self.x = get_plot_face_locations(geometry, plot_region)
+            self.x = get_plot_face_locations(geometry, region)
         elif (x[-1] > geometry.xc[-1]) or (x[0] < geometry.xc[0]):
             msg = "Invalid Interpolation Grid"
             raise Exception(msg)
@@ -334,7 +331,7 @@ class XTDiagram:
 
 
 def add_h_plot(
-    domain: Combustor, ax: Axes, scale: float = 1.0e3, plot_region: str | None = None
+    domain: Combustor, ax: Axes, scale: float = 1.0e3, region: str = "domain"
 ) -> Axes:
     ax1 = ax.twinx()
     ax1.set_zorder(-np.inf)
@@ -342,7 +339,7 @@ def add_h_plot(
 
     geometry = domain.geometry
     t = domain.t
-    x = get_plot_face_locations(geometry, plot_region)
+    x = get_plot_face_locations(geometry, region)
 
     yname = "h"
     if isinstance(geometry, AsymmetricBox):
@@ -386,12 +383,12 @@ def plot_state(
     variable_info_map: dict[str, VariableInfo] | None = None,
     plot_geometry: bool = True,
     plot_variables: list[str | list[str]] | None = None,
-    plot_region: str | None = None,
+    region: str = "domain",
 ) -> None:
     xscale = 1.0e3
     geometry = domain.geometry
     idx_cells = geometry.idx_cells
-    idx_plot = get_plot_cell_mask(geometry, plot_region)
+    idx_plot = get_plot_cell_mask(geometry, region)
     x = xscale * geometry.xc[idx_cells][idx_plot]
     state = domain.state[idx_cells][idx_plot]
 
@@ -411,9 +408,8 @@ def plot_state(
         nrows += 1
 
     fig: Figure
-    axs: list[Axes]
-    fig, axs = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
-    axs = np.atleast_1d(axs)
+    fig, tmp = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
+    axs: list[Axes] = tmp if isinstance(tmp, list) else [tmp]
 
     for iax, vnames in enumerate(plot_variables):
         ax = axs[iax]
@@ -468,7 +464,7 @@ def plot_state(
 
     if plot_geometry:
         for ax in axs:
-            add_h_plot(domain, ax, scale=xscale, plot_region=plot_region)
+            add_h_plot(domain, ax, scale=xscale, region=region)
 
     fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
 
