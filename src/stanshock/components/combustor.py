@@ -80,6 +80,7 @@ class Combustor:
         plot_state_interval: int = -1,  # plot the state every n iterations
         plot_state_variables: list[str | list[str]] | None = None,
         plot_state_variable_info_map: dict[str, VariableInfo] | None = None,
+        plot_state_region: str = "domain",
         iteration: int = 0,  # Iteration to start from
         n_restart_interval: int = -1,  # If >0, saves the fluid state to a file every n_restart_interval iterations
     ) -> None:
@@ -107,6 +108,7 @@ class Combustor:
         self.plot_state_interval = plot_state_interval
         self.plot_state_variables = plot_state_variables
         self.plot_state_variable_info_map = plot_state_variable_info_map
+        self.plot_state_region = plot_state_region
         self.iteration = iteration
         self.n_restart_interval = n_restart_interval
         self.reacting = reacting
@@ -280,6 +282,17 @@ class Combustor:
             if iters % (diagram.skip_steps + 1) == 0:
                 diagram.update(self)
 
+    def plot_current_state(self, iters: int) -> None:
+        """Plot the current state if this iteration is due for output."""
+        if (self.plot_state_interval > 0) and (iters % self.plot_state_interval == 0):
+            plot_state(
+                self,
+                f"./figures/anim/test_{iters // self.plot_state_interval:05d}.png",
+                variable_info_map=self.plot_state_variable_info_map,
+                plot_variables=self.plot_state_variables,
+                region=self.plot_state_region,
+            )
+
     def advance_simulation(self, tFinal: float, res_p_target: float = -1.0) -> None:
         """
         This method advances the simulation until the prescribed time, tFinal
@@ -301,6 +314,7 @@ class Combustor:
             # Update plots at initial condition
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
+            self.plot_current_state(iters)
 
         res_p = np.inf
         gamma_star: Array | None = None
@@ -350,15 +364,7 @@ class Combustor:
                     + f"Max T[K]: {self.physics.get_temperature(self.state).max():.3e}. "
                     + f"Residual(p): {res_p:.3e}."
                 )
-            if (self.plot_state_interval > 0) and (
-                iters % self.plot_state_interval == 0
-            ):
-                plot_state(
-                    self,
-                    f"./figures/anim/test_{iters // self.plot_state_interval:05d}.png",
-                    variable_info_map=self.plot_state_variable_info_map,
-                    plot_variables=self.plot_state_variables,
-                )
+            self.plot_current_state(iters)
 
             # Periodically save the fluid state
             if (self.n_restart_interval > 0) and (iters % self.n_restart_interval == 0):

@@ -81,7 +81,7 @@ ss = Combustor(
 )
 ss.csv_writers = [
     CSVWriter(
-        combustor=ss,
+        domain=ss,
         filename=figdir / "csv" / "state.csv",
         interval=ss.plot_state_interval,
         variables=["x", "mach", "p", "T"],

@@ -11,14 +11,14 @@ import numpy as np
 
 from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
-from stanshock.system.geometry import AsymmetricBox, Box, Cylinder
+from stanshock.system.geometry import AsymmetricBox, Box, Cylinder, Geometry
 
 if TYPE_CHECKING:
     from matplotlib.axes import Axes
     from matplotlib.figure import Figure
 
     from stanshock.components.combustor import Combustor
-    from stanshock.system.backend import Array
+    from stanshock.system.backend import Array, Index
 
 
 @dataclass
@@ -31,6 +31,35 @@ class VariableInfo:
 
 
 VariableInfoMap: TypeAlias = dict[str, VariableInfo]
+
+
+def _get_plot_region(geometry: Geometry, region: str = "domain") -> tuple[float, float]:
+    if region not in geometry.regions:
+        msg = f"Unknown plot region: {region}"
+        raise ValueError(msg)
+
+    if not isinstance(geometry, AsymmetricBox) and region != "domain":
+        msg = "Only AsymmetricBox geometries can plot external regions."
+        raise ValueError(msg)
+
+    return geometry.regions[region]
+
+
+def get_plot_cell_mask(geometry: Geometry, region: str = "domain") -> Index:
+    x0, x1 = _get_plot_region(geometry, region)
+    x = geometry.xc[geometry.idx_cells]
+    mask = np.logical_and(x >= x0, x <= x1)
+    if not np.any(mask):
+        msg = f"Plot region contains no cells: {region}"
+        raise ValueError(msg)
+    return mask
+
+
+def get_plot_face_locations(geometry: Geometry, region: str = "domain") -> Array:
+    x0, x1 = _get_plot_region(geometry, region)
+    x = geometry.xf
+    mask = np.logical_and(x >= x0, x <= x1)
+    return np.unique(np.concatenate(([x0], x[mask], [x1])))
 
 
 def get_variable_info_map(physics: FluidPhysics) -> VariableInfoMap:
@@ -191,6 +220,7 @@ class XTDiagram:
         skip_steps: int = 0,  # number of timesteps to skip
         x: Array | None = None,  # mesh to interpolate solution onto
         limits: tuple[float, float] | None = None,  # colormap range
+        region: str = "domain",
     ) -> None:
         self.name = variable.lower()
         if variable_info_map is None:
@@ -202,7 +232,7 @@ class XTDiagram:
         # check interpolation grid
         geometry = domain.geometry
         if x is None:
-            self.x = geometry.xf
+            self.x = get_plot_face_locations(geometry, region)
         elif (x[-1] > geometry.xc[-1]) or (x[0] < geometry.xc[0]):
             msg = "Invalid Interpolation Grid"
             raise Exception(msg)
@@ -300,17 +330,25 @@ class XTDiagram:
         fig.savefig(Path(figdir) / f"{short_name}.png", bbox_inches="tight", dpi=300)
 
 
-def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
+def add_h_plot(
+    domain: Combustor, ax: Axes, scale: float = 1.0e3, region: str = "domain"
+) -> Axes:
     ax1 = ax.twinx()
     ax1.set_zorder(-np.inf)
     ax.patch.set_visible(False)
 
     geometry = domain.geometry
     t = domain.t
-    x = geometry.xf
+    x = get_plot_face_locations(geometry, region)
 
     yname = "h"
-    if isinstance(geometry, Cylinder):
+    if isinstance(geometry, AsymmetricBox):
+        upper = np.broadcast_to(geometry.upper_wall(t, x), x.shape)
+        lower = np.broadcast_to(geometry.lower_wall(t, x), x.shape)
+        ax1.plot(x * scale, upper * scale, color="0.8", linestyle="--")
+        ax1.plot(x * scale, lower * scale, color="0.8", linestyle="--")
+        yname = "y"
+    elif isinstance(geometry, Cylinder):
         d = np.broadcast_to(geometry.d_outer(t, x), x.shape)
         ax1.plot(x * scale, d * scale, color="0.8", linestyle="--")
         yname = r"$d_{outer}$"
@@ -318,11 +356,6 @@ def add_h_plot(domain: Combustor, ax: Axes, scale: float = 1.0e3) -> Axes:
         h = np.broadcast_to(geometry.h(t, x), x.shape)
         ax1.plot(x * scale, h * scale, color="0.8", linestyle="--")
         ax1.axhline(0, color="0.8", linestyle="--")
-    elif isinstance(geometry, AsymmetricBox):
-        upper = np.broadcast_to(geometry.upper_wall(t, x), x.shape)
-        lower = np.broadcast_to(geometry.lower_wall(t, x), x.shape)
-        ax1.plot(x * scale, upper * scale, color="0.8", linestyle="--")
-        ax1.plot(x * scale, lower * scale, color="0.8", linestyle="--")
 
     if domain.injectors is not None:
         for inj in domain.injectors:
@@ -350,12 +383,14 @@ def plot_state(
     variable_info_map: dict[str, VariableInfo] | None = None,
     plot_geometry: bool = True,
     plot_variables: list[str | list[str]] | None = None,
+    region: str = "domain",
 ) -> None:
     xscale = 1.0e3
     geometry = domain.geometry
     idx_cells = geometry.idx_cells
-    x = xscale * geometry.xc[idx_cells]
-    state = domain.state[idx_cells]
+    idx_plot = get_plot_cell_mask(geometry, region)
+    x = xscale * geometry.xc[idx_cells][idx_plot]
+    state = domain.state[idx_cells][idx_plot]
 
     if variable_info_map is None:
         variable_info_map = get_variable_info_map(domain.physics)
@@ -373,8 +408,8 @@ def plot_state(
         nrows += 1
 
     fig: Figure
-    axs: list[Axes]
-    fig, axs = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
+    fig, tmp = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
+    axs: list[Axes] = tmp if isinstance(tmp, list) else [tmp]
 
     for iax, vnames in enumerate(plot_variables):
         ax = axs[iax]
@@ -429,7 +464,7 @@ def plot_state(
 
     if plot_geometry:
         for ax in axs:
-            add_h_plot(domain, ax, scale=xscale)
+            add_h_plot(domain, ax, scale=xscale, region=region)
 
     fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
 
