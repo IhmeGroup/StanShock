@@ -6,7 +6,7 @@ import numpy as np
 from scipy import integrate
 
 from stanshock.models.boundary_layer import BoundaryLayer
-from stanshock.models.wall_models import get_wall_state
+from stanshock.models.wall_models import WallState
 from stanshock.physics.fluid_base import FluidState
 from stanshock.system.backend import Array, Unpack
 from stanshock.system.base import FastSlowMode, FastSlowSource, PrecomputeSteps
@@ -139,17 +139,11 @@ class Pseudoshock(FastSlowSource):
 
         state_point = state[shock_idx]
         x_shock = np.array([self.x_shock], dtype=np.float64)
-        wall = get_wall_state(
-            rho=state_point.density,
-            U=state_point.velocity,
-            mu=self.physics.get_mu(state_point),
-            a=self.physics.get_sound_speed(state_point),
-            cp=self.physics.get_cp(state_point),
-            k=self.physics.get_thermal_conductivity(state_point),
-            gamma=self.physics.get_gamma(state_point),
-            Lc=self.geometry.characteristic_length(time, x_shock),
-            T=self.physics.get_temperature(state_point),
-            wall_temperature=self.wall_temperature,
+        wall = WallState.from_state(
+            state_point,
+            self.physics,
+            self.geometry.characteristic_length(time, x_shock),
+            self.wall_temperature,
         )
         cf0 = float(np.atleast_1d(self.skin_friction_coefficient(wall))[0])
 
