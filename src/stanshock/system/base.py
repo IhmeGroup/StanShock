@@ -135,31 +135,27 @@ class RightHandSide:
 
         Can also apply any necessary inverse transforms.
         """
-        state_array_local = state_array_local.reshape(self.shape_input)
+        _ = time
+        state_array_local = state_array_local.reshape(self.shape_full)
 
-        state = None
-        if self.physics is not None:
+        # Update total energy if using double-flux method
+        if gamma_star is not None and self.physics is not None:
             state = self.physics.conservative_to_primitive(
                 state_array_local, gamma_star_local, e0_star_local
             )
-            # Update total energy if using double-flux method
-            if gamma_star is not None:
-                state.temperature = self.physics.get_temperature(state)
-                state.internal_energy = None
-                state_array_local = self.physics.primitive_to_conservative(state)
-                gamma_star_local, e0_star_local = (
-                    self.physics.get_double_flux_variables(state)
-                )
+            state.temperature = self.physics.get_temperature(state)
+            state.internal_energy = None
+            state_array_local = self.physics.primitive_to_conservative(state)
+            gamma_star_local, e0_star_local = self.physics.get_double_flux_variables(
+                state
+            )
 
-                gamma_star[self.idx_input] = gamma_star_local
-                assert e0_star is not None
-                e0_star[self.idx_input] = e0_star_local
+            gamma_star[self.idx_input] = gamma_star_local
+            assert e0_star is not None
+            e0_star[self.idx_input] = e0_star_local
 
         state_array = np.reshape(state_array, self.shape_full)
         state_array[self.idx_input] = state_array_local
-
-        # Update the input indices for next time step
-        self.update_indices(time, state)
 
         return np.ravel(state_array), gamma_star, e0_star
 
@@ -237,23 +233,47 @@ class RightHandSide:
         )
 
     def add_source(self, y: Array, dy: Array) -> Array:
-        """Add (2D) source term to the (1D) state array."""
+        """Add (2D) source term to the (1D) local state array."""
         dy = np.reshape(dy, self.shape_output)
         state_array_local = np.reshape(y, self.shape_input)
         state_array_local[self.idx_output, self.idx_source] += dy
         return np.ravel(state_array_local)
 
-    def source_full(
+    def source_local(
         self,
         time: float,
         state_array_local: Array,
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
-        """Reshape the source term to match the state array."""
+        """Reshape the source term to match the local state array."""
         dydt = np.zeros_like(state_array_local)
 
         return self.add_source(
+            dydt, self.source(time, state_array_local, gamma_star, e0_star)
+        )
+
+    def add_source_full(self, y: Array, dy: Array) -> Array:
+        """Add (2D) source term to the (1D) state array."""
+        dy = np.reshape(dy, self.shape_output)
+        state_array = np.reshape(y, self.shape_full)
+        state_array[self.idx_input][self.idx_output, self.idx_source] += dy
+        return np.ravel(state_array)
+
+    def source_full(
+        self,
+        time: float,
+        state_array: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        """Reshape the source term to match the full state array."""
+        dydt = np.zeros_like(state_array)
+        state_array_local, gamma_star, e0_star = self.before_time_integration(
+            time, state_array, gamma_star, e0_star
+        )
+
+        return self.add_source_full(
             dydt, self.source(time, state_array_local, gamma_star, e0_star)
         )
 
@@ -277,9 +297,9 @@ class FastSlowSource(RightHandSide):
     _mode: FastSlowMode
 
     # By default, all locations and sources are set to slow:
-    idx_output_implicit: Index = np.array([], dtype=np.int64)
+    idx_input_implicit: Index = np.array([], dtype=np.int64)
     idx_source_implicit: Index = np.s_[:]
-    idx_output_explicit: Index = np.s_[:]
+    idx_input_explicit: Index = np.s_[:]
     idx_source_explicit: Index = np.s_[:]
 
     def __init__(
@@ -287,6 +307,8 @@ class FastSlowSource(RightHandSide):
     ) -> None:
         """Split RHS into fast and slow source terms accessed by setting the mode."""
         super().__init__(**precompute_steps)
+        self.shape_input_implicit = (0, self.shape_input[1])
+        self.shape_input_explicit = self.shape_input
         self.mode = mode
 
     @property
@@ -297,11 +319,13 @@ class FastSlowSource(RightHandSide):
     def mode(self, mode: FastSlowMode) -> None:
         self._mode = mode
         if mode == "fast":
-            self.idx_output = self.idx_output_implicit
+            self.shape_input = self.shape_input_implicit
+            self.idx_input = self.idx_input_implicit
             self.idx_source = self.idx_source_implicit
             self.source_implementation = self.source_fast
         elif mode == "slow":
-            self.idx_output = self.idx_output_explicit
+            self.shape_input = self.shape_input_explicit
+            self.idx_input = self.idx_input_explicit
             self.idx_source = self.idx_source_explicit
             self.source_implementation = self.source_slow
 
@@ -353,7 +377,10 @@ class CombinedSource(RightHandSide):
         super().__init__(**precompute_steps)
 
         # Don't modify the shapes, as the sources will handle that internally
-        self.shape_full = max(source.shape_full for source in self.sources)
+        self.shape_full = (
+            max(source.shape_full[0] for source in self.sources),
+            max(source.shape_full[1] for source in self.sources),
+        )
         self.shape_input = self.shape_output = self.shape_full
         self.idx_input = self.idx_output = np.s_[:]
 
@@ -365,20 +392,20 @@ class CombinedSource(RightHandSide):
         e0_star: Array | None = None,
     ) -> Array:
         rhs: Array = np.zeros_like(state_array_local)
-
-        state_array_local, state, face_states, avg_face_states, face_gradients = (
+        state_array_temp, state, face_states, avg_face_states, face_gradients = (
             self.precompute_for_source(time, state_array_local, gamma_star, e0_star)
         )
+        state_array_temp = np.reshape(state_array_temp, self.shape_input)
 
         for source in self.sources:
             dydt = source.source_implementation(
                 time=time,
-                state_array_local=state_array_local,
-                state=state,
+                state_array_local=state_array_temp[source.idx_input],
+                state=state[source.idx_input] if state is not None else state,
                 face_states=face_states,
                 avg_face_states=avg_face_states,
                 face_gradients=face_gradients,
             )
-            rhs = source.add_source(rhs, dydt)
+            rhs = source.add_source_full(rhs, dydt)
 
         return rhs

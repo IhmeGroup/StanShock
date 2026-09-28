@@ -67,7 +67,7 @@ class ScipyIVP(TimeIntegrator):
         )
 
         results = self.integrator(
-            fun=self.rhs.source_full,
+            fun=self.rhs.source_local,
             t_span=(time, time + dt),
             y0=y0,
             method=self.method,
@@ -557,7 +557,7 @@ class FastSlowIntegrator(TimeIntegrator):
 
         # Integrate fast terms
         self.rhs.mode = "fast"
-        if len(state_array[self.rhs.idx_output_implicit]) > 0:
+        if len(state_array[self.rhs.idx_input_implicit]) > 0:
             _, state_array, gamma_star, e0_star = self.fast_integrator.advance(
                 dt, time, state_array, gamma_star, e0_star
             )

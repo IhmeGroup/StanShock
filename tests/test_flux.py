@@ -57,32 +57,21 @@ def test_hllc_predicts_constant_flux():
 
 def test_isentropic_flow_relations(isentropic_flow: Combustor) -> None:
     # Get initial state from given solution
+    physics = isentropic_flow.physics
     t = isentropic_flow.t
     state = isentropic_flow.initialization()
-    state_array = np.ravel(isentropic_flow.physics.primitive_to_conservative(state))
-    gamma_star, e0_star = isentropic_flow.physics.get_double_flux_variables(state)
+    state_array = np.ravel(physics.primitive_to_conservative(state))
+    gamma_star, e0_star = physics.get_double_flux_variables(state)
 
     # Get source terms from inviscid flux
-    y, gamma_star_local, e0_star_local = (
-        isentropic_flow.inviscid_flux.before_time_integration(
-            t, state_array, gamma_star, e0_star
-        )
-    )
-    source_flux = isentropic_flow.inviscid_flux.source(
-        t, y, gamma_star_local, e0_star_local
+    source_flux = isentropic_flow.inviscid_flux.source_full(
+        t, state_array, gamma_star, e0_star
     )
 
     # Get source terms from area change
-    assert isentropic_flow.area_change is not None
-    y, gamma_star_local, e0_star_local = (
-        isentropic_flow.area_change.before_time_integration(
-            t, state_array, gamma_star, e0_star
-        )
-    )
-    source_area = isentropic_flow.area_change.source_full(
-        t,
-        y,
-        gamma_star_local,
-        e0_star_local,
-    )
+    area_change = isentropic_flow.area_change
+    area_change.update_indices(t, state)
+    area_change.mode = "slow"
+    source_area = area_change.source_full(t, state_array, gamma_star, e0_star)
+
     assert source_flux == pytest.approx(-source_area, rel=1e-3)
