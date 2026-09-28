@@ -7,6 +7,7 @@ import numpy as np
 from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import newton
 
+from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array
 
 
@@ -22,32 +23,54 @@ class WallState:
     q: Array
     Cf: Array | None = None
 
+    @classmethod
+    def from_primitives(
+        cls,
+        rho: Array,
+        U: Array,
+        mu: Array,
+        a: Array,
+        cp: Array,
+        k: Array,
+        gamma: Array,
+        Lc: Array | float,
+        T: Array,
+        wall_temperature: Array | float | None,
+    ) -> WallState:
+        Re = np.abs(rho * U * Lc / mu)
+        M = np.abs(U / a)
 
-def get_wall_state(
-    rho: Array,
-    U: Array,
-    mu: Array,
-    a: Array,
-    cp: Array,
-    k: Array,
-    gamma: Array,
-    Lc: Array | float,
-    T: Array,
-    wall_temperature: Array | float | None,
-) -> WallState:
-    Re = np.abs(rho * U * Lc / mu)
-    M = np.abs(U / a)
+        if wall_temperature is None:  # noqa: SIM108
+            Tw = T.copy()  # adiabatic
+        else:
+            Tw = np.array((wall_temperature,))  # isothermal
 
-    if wall_temperature is None:  # noqa: SIM108
-        Tw = T.copy()  # adiabatic
-    else:
-        Tw = np.array((wall_temperature,))  # isothermal
+        Pr = cp * mu / k
+        h_St = rho * U * cp
 
-    Pr = cp * mu / k
-    h_St = rho * U * cp
+        q = 0.5 * rho * U**2 * np.sign(U)
+        return cls(Re=Re, M=M, T=T, Tw=Tw, Pr=Pr, gamma=gamma, h_St=h_St, q=q)
 
-    q = 0.5 * rho * U**2 * np.sign(U)
-    return WallState(Re=Re, M=M, T=T, Tw=Tw, Pr=Pr, gamma=gamma, h_St=h_St, q=q)
+    @classmethod
+    def from_state(
+        cls,
+        state: FluidState,
+        physics: FluidPhysics,
+        Lc: Array | float,
+        Tw: Array | float | None = None,
+    ) -> WallState:
+        return cls.from_primitives(
+            rho=physics.get_density(state),
+            U=physics.get_velocity(state),
+            mu=physics.get_mu(state),
+            a=physics.get_sound_speed(state),
+            cp=physics.get_cp(state),
+            k=physics.get_thermal_conductivity(state),
+            gamma=physics.get_gamma(state),
+            Lc=Lc,
+            T=physics.get_temperature(state),
+            wall_temperature=Tw,
+        )
 
 
 """
