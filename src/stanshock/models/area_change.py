@@ -28,9 +28,9 @@ class AreaChange(FastSlowSource):
         assert self.geometry is not None
         _ = state
         idx_update_implicit: Index = np.array([], dtype=np.int64)
-        self.shape_input_implicit = (0, self.shape_input[1])
+        self.shape_input_implicit = (0, 3)
         idx_update_explicit: Index = self.geometry.idx_cells
-        self.shape_input_explicit = self.shape_input
+        self.shape_input_explicit = (self.geometry.n_cells_interior, 3)
 
         if self.geometry.dlnA_dt is not None:
             dlnA_dt: Array | float = self.geometry.dlnA_dt(time, self.x)
@@ -142,7 +142,7 @@ class AreaChange(FastSlowSource):
 
         return np.ravel(state_array_local), state, None, None, None
 
-    def source(
+    def source_local(
         self,
         time: float,
         state_array_local: Array,
@@ -152,6 +152,30 @@ class AreaChange(FastSlowSource):
         if self.no_area_change:
             return np.zeros_like(state_array_local)
         return super().source(time, state_array_local, gamma_star, e0_star)
+
+    def source_full(
+        self,
+        time: float,
+        state_array: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        """Project the mass source back onto species sources."""
+        if self.no_area_change:
+            return np.zeros_like(state_array)
+        assert self.physics is not None
+
+        state_array_local, gamma_star, e0_star = self.before_time_integration(
+            time, state_array, gamma_star, e0_star
+        )
+        rhs = self.source(time, state_array_local, gamma_star, e0_star)
+        rhs = np.reshape(rhs, self.shape_output)
+        rhs = np.pad(rhs, ((0, 0), (0, self.physics.n_scalars - 1)), mode="edge")
+        rhs[:, 2:] *= self.composition_frozen
+
+        rhs_full = np.reshape(np.zeros_like(state_array), self.shape_full)
+        rhs_full[self.idx_input, :] = rhs
+        return np.ravel(rhs_full)
 
     def source_slow(
         self,

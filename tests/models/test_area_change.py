@@ -49,8 +49,10 @@ def test_area_change_handles_partial_moving_area_region() -> None:
         0.0, state_array, gamma_star, e0_star
     )
     assert len(state_compact) == nfast * 3
-    rhs_fast = area_change.source_full(0.0, state_compact, gamma_star_in, e0_star_in)
+    rhs_fast = area_change.source_local(0.0, state_compact, gamma_star_in, e0_star_in)
     assert len(rhs_fast) == nfast * 3
+    rhs_fast_full = area_change.source_full(0.0, state_array, gamma_star, e0_star)
+    assert len(rhs_fast_full) == nc * 6
 
     # Check slow source terms
     area_change.mode = "slow"
@@ -58,8 +60,10 @@ def test_area_change_handles_partial_moving_area_region() -> None:
         0.0, state_array, gamma_star, e0_star
     )
     assert len(state_compact) == nslow * 3
-    rhs_slow = area_change.source_full(0.0, state_compact, gamma_star_in, e0_star_in)
+    rhs_slow = area_change.source_local(0.0, state_compact, gamma_star_in, e0_star_in)
     assert len(rhs_slow) == nslow * 3
+    rhs_slow_full = area_change.source_full(0.0, state_array, gamma_star, e0_star)
+    assert len(rhs_slow_full) == nc * 6
 
     # Check single time integration step
     time_integrator = FastSlowIntegrator(area_change)

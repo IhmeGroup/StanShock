@@ -301,6 +301,7 @@ class Combustor:
             # Update plots at initial condition
             self.update_probes(iters)
             self.update_XT_diagrams(iters)
+        self.update_indices(self.time_integrator)
 
         res_p = np.inf
         gamma_star: Array | None = None

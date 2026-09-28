@@ -233,23 +233,47 @@ class RightHandSide:
         )
 
     def add_source(self, y: Array, dy: Array) -> Array:
-        """Add (2D) source term to the (1D) state array."""
+        """Add (2D) source term to the (1D) local state array."""
         dy = np.reshape(dy, self.shape_output)
         state_array_local = np.reshape(y, self.shape_input)
         state_array_local[self.idx_output, self.idx_source] += dy
         return np.ravel(state_array_local)
 
-    def source_full(
+    def source_local(
         self,
         time: float,
         state_array_local: Array,
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
-        """Reshape the source term to match the state array."""
+        """Reshape the source term to match the local state array."""
         dydt = np.zeros_like(state_array_local)
 
         return self.add_source(
+            dydt, self.source(time, state_array_local, gamma_star, e0_star)
+        )
+
+    def add_source_full(self, y: Array, dy: Array) -> Array:
+        """Add (2D) source term to the (1D) state array."""
+        dy = np.reshape(dy, self.shape_output)
+        state_array = np.reshape(y, self.shape_full)
+        state_array[self.idx_input][self.idx_output, self.idx_source] += dy
+        return np.ravel(state_array)
+
+    def source_full(
+        self,
+        time: float,
+        state_array: Array,
+        gamma_star: Array | None = None,
+        e0_star: Array | None = None,
+    ) -> Array:
+        """Reshape the source term to match the full state array."""
+        dydt = np.zeros_like(state_array)
+        state_array_local, gamma_star, e0_star = self.before_time_integration(
+            time, state_array, gamma_star, e0_star
+        )
+
+        return self.add_source_full(
             dydt, self.source(time, state_array_local, gamma_star, e0_star)
         )
 
@@ -367,14 +391,13 @@ class CombinedSource(RightHandSide):
         gamma_star: Array | None = None,
         e0_star: Array | None = None,
     ) -> Array:
+        rhs: Array = np.zeros_like(state_array_local)
         state_array_temp, state, face_states, avg_face_states, face_gradients = (
             self.precompute_for_source(time, state_array_local, gamma_star, e0_star)
         )
         state_array_temp = np.reshape(state_array_temp, self.shape_input)
-        rhs: Array = np.zeros_like(state_array_temp)
 
         for source in self.sources:
-            rhs_flat = np.ravel(rhs[source.idx_input])
             dydt = source.source_implementation(
                 time=time,
                 state_array_local=state_array_temp[source.idx_input],
@@ -383,6 +406,6 @@ class CombinedSource(RightHandSide):
                 avg_face_states=avg_face_states,
                 face_gradients=face_gradients,
             )
-            rhs_flat[:] = source.add_source(rhs_flat, dydt)
+            rhs = source.add_source_full(rhs, dydt)
 
-        return np.ravel(rhs)
+        return rhs

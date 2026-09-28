@@ -64,29 +64,14 @@ def test_isentropic_flow_relations(isentropic_flow: Combustor) -> None:
     gamma_star, e0_star = physics.get_double_flux_variables(state)
 
     # Get source terms from inviscid flux
-    y, gamma_star_local, e0_star_local = (
-        isentropic_flow.inviscid_flux.before_time_integration(
-            t, state_array, gamma_star, e0_star
-        )
-    )
-    source_flux = isentropic_flow.inviscid_flux.source(
-        t, y, gamma_star_local, e0_star_local
+    source_flux = isentropic_flow.inviscid_flux.source_full(
+        t, state_array, gamma_star, e0_star
     )
 
     # Get source terms from area change
     area_change = isentropic_flow.area_change
-    assert area_change is not None
     area_change.update_indices(t, state)
     area_change.mode = "slow"
-    y, gamma_star_local, e0_star_local = area_change.before_time_integration(
-        t, state_array, gamma_star, e0_star
-    )
-    source_area = area_change.source_full(t, y, gamma_star_local, e0_star_local)
-
-    # Project mass flux onto species fluxes
-    source_area = np.reshape(source_area, area_change.shape_output)
-    source_area = np.pad(source_area, ((0, 0), (0, physics.n_scalars - 1)), mode="edge")
-    source_area[:, 2:] *= area_change.composition_frozen[area_change.idx_output]
-    source_area = np.ravel(source_area)
+    source_area = area_change.source_full(t, state_array, gamma_star, e0_star)
 
     assert source_flux == pytest.approx(-source_area, rel=1e-3)

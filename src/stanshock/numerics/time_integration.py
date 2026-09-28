@@ -67,7 +67,7 @@ class ScipyIVP(TimeIntegrator):
         )
 
         results = self.integrator(
-            fun=self.rhs.source_full,
+            fun=self.rhs.source_local,
             t_span=(time, time + dt),
             y0=y0,
             method=self.method,
