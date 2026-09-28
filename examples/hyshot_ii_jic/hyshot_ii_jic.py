@@ -272,7 +272,7 @@ ss = Combustor(
 
 # Update CSV writer initialization to match plot_state_interval
 csv_writer = CSVWriter(
-    combustor=ss,
+    domain=ss,
     filename=figdir / "data.csv",  # Will become test_00000.csv, test_00001.csv, etc.
     interval=100,  # Same as plot_state_interval=100
 )
