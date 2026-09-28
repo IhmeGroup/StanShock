@@ -328,7 +328,7 @@ def main(
 
     if write_csv:
         csv_writer = CSVWriter(
-            combustor=ss,
+            domain=ss,
             filename=output_dir / "csv" / "isentropic_nozzle_state.csv",
             interval=0,
             variables=["x", "mach", "p", "rho", "u", "T", "area", "area ratio"],

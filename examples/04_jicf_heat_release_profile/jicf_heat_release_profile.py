@@ -532,7 +532,7 @@ def run_case(verbose: bool = True) -> dict[str, Any]:
     )
 
     csv_writer = CSVWriter(
-        combustor=combustor,
+        domain=combustor,
         filename=local["output"] / "case2_state.csv",
         interval=0,
         variables=[
