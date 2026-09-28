@@ -68,7 +68,6 @@ init = InitializeConstant(geometry, physics_model, gas1, u1)
 wall_models = (CompressibleInertSkinFriction(), CompressibleHeatFlux())
 
 
-
 ss = Combustor(
     geometry=geometry,
     wall_temperature=330.0,
@@ -100,9 +99,8 @@ except Exception as e:
     print("Full traceback:")
     traceback.print_exc()
 finally:
-    
     ind_s = np.array(ss.pseudoshock.sf_array).flatten()
-    
+
     if len(ind_s) != 0:
         t_ps = np.array(ss.pseudoshock.t_ps).flatten()
         u_s = np.array(ss.pseudoshock.us).flatten()
@@ -111,16 +109,15 @@ finally:
         t_ps_ms = t_ps * 1000
 
         plt.figure()
-        plt.plot(x_s, t_ps_ms,c='r')
-        plt.xlabel('x [m]')
-        plt.ylabel('t [ms]')
-        plt.xlim([x[0],x[-1]])
+        plt.plot(x_s, t_ps_ms, c="r")
+        plt.xlabel("x [m]")
+        plt.ylabel("t [ms]")
+        plt.xlim([x[0], x[-1]])
         plt.tight_layout()
         plt.show()
 
-
         plt.figure()
-        plt.plot(t_ps_ms, sigma,c='r')
+        plt.plot(t_ps_ms, sigma, c="r")
         plt.ylabel(r"$\sigma  [(P_2 / P_1)_{SS} / (P_2 / P_1)_{NS}]$")
         plt.ylim([0, 1.01])
         plt.xlabel(r"$t$ $[\mathrm{ms}]$")
