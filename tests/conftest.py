@@ -180,8 +180,8 @@ def isentropic_flow(
     nsp = gas.n_species
     gas.TPY = 3000.0, 30e6, np.ones((nsp,)) / nsp
     bcs: BCInput = {
-        "left": FreezeCells(location="left"),
-        "right": FreezeCells(location="right"),
+        "left": [FreezeCells(location="left")],
+        "right": [FreezeCells(location="right")],
     }
 
     # Get throat area at which flow will choke

@@ -338,6 +338,7 @@ def set_boundary_conditions(
     # Convert lists into BoundaryConditions:
     if not isinstance(boundary_conditions, BoundaryConditions):
         bcs: list[BCType] = []
+        bc_specs: Sequence[BCLike]
         bc_loc: Literal["left", "right"]
         for bc_loc, bc_specs in boundary_conditions.items():  # type: ignore[assignment]
             for bc_specification in bc_specs:
