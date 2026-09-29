@@ -338,25 +338,27 @@ def set_boundary_conditions(
     # Convert lists into BoundaryConditions:
     if not isinstance(boundary_conditions, BoundaryConditions):
         bcs: list[BCType] = []
+        bc_specs: Sequence[BCLike]
         bc_loc: Literal["left", "right"]
-        for bc_loc, bc_specification in boundary_conditions.items():  # type: ignore[assignment]
-            if isinstance(bc_specification, str):
-                if bc_specification == "periodic":
-                    bcs += [PeriodicCells(mt, location=bc_loc)]
-                elif bc_specification == "extrapolate":
-                    bcs += [ExtrapolateCells(mt, location=bc_loc)]
-                elif bc_specification == "outflow":
-                    bcs += [ExtrapolateFace(location=bc_loc)]
-                elif bc_specification in ["symmetry", "reflecting"]:
-                    bcs += [SymmetryCells(mt, location=bc_loc)]
-                elif bc_specification == "wall":
-                    bcs += [AdiabaticWallFace(location=bc_loc)]
-            elif isinstance(bc_specification, BoundaryCondition):
-                bcs += [bc_specification]
-            elif isinstance(bc_specification, tuple):
-                bcs += [
-                    SpecifiedFace(reference_state=bc_specification, location=bc_loc)
-                ]
+        for bc_loc, bc_specs in boundary_conditions.items():  # type: ignore[assignment]
+            for bc_specification in bc_specs:
+                if isinstance(bc_specification, str):
+                    if bc_specification == "periodic":
+                        bcs += [PeriodicCells(mt, location=bc_loc)]
+                    elif bc_specification == "extrapolate":
+                        bcs += [ExtrapolateCells(mt, location=bc_loc)]
+                    elif bc_specification == "outflow":
+                        bcs += [ExtrapolateFace(location=bc_loc)]
+                    elif bc_specification in ["symmetry", "reflecting"]:
+                        bcs += [SymmetryCells(mt, location=bc_loc)]
+                    elif bc_specification == "wall":
+                        bcs += [AdiabaticWallFace(location=bc_loc)]
+                elif isinstance(bc_specification, BoundaryCondition):
+                    bcs += [bc_specification]
+                elif isinstance(bc_specification, tuple):
+                    bcs += [
+                        SpecifiedFace(reference_state=bc_specification, location=bc_loc)
+                    ]
 
         boundary_conditions = BoundaryConditions(boundary_conditions=bcs)
 
