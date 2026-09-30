@@ -463,7 +463,7 @@ def plot_state(
             plot_variables += [sp_plot]
 
     nrows: int = len(plot_variables)
-    if domain.injectors is not None:
+    if domain.injectors:
         nrows += 1
 
     fig: Figure
@@ -516,7 +516,7 @@ def plot_state(
         ax.set_ylabel(plot_label)
 
     ax = axs[-1]
-    if domain.injectors is not None:
+    if domain.injectors:
         phi_tot = 0.0
         for inj in domain.injectors:
             ax.scatter(
