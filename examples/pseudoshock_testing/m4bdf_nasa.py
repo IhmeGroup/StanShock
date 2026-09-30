@@ -280,7 +280,7 @@ BC_outlet = SpecifiedFace(
     location="right",
     reference_state=(None, None, gas1.P, None),
 )
-BCs: BCInput = {"left": BC_inlet, "right": BC_outlet}
+BCs: BCInput = {"left": [BC_inlet], "right": [BC_outlet]}
 
 
 ### Initialization ###
@@ -317,7 +317,7 @@ ss = Combustor(
 
 ss.csv_writers = [
     CSVWriter(
-        combustor=ss,
+        domain=ss,
         filename=csvdir / "state.csv",
         interval=csv_interval,
         variables=["x", "rho", "u", "mach", "p", "T"],
