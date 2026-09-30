@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, TypeAlias
 import matplotlib.pyplot as plt
 import numpy as np
 
+from stanshock.numerics.boundary_conditions import SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.geometry import AsymmetricBox, Box, Cylinder, Geometry
+from stanshock.utils.isentropic import property_ratios
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -379,51 +381,52 @@ def add_h_plot(
 
 
 def get_state_plot_bounds(
-    domain,
+    domain: Combustor,
 ) -> tuple[float, float, float, dict[str, tuple[float, float]]]:
-    rlims = [0, 0]
-    ulims = [0, 0]
-    plims = [0, 0]
+    # Get fluid state at inflow and outflow
+    state = domain.state[np.array([0, -1])]
+    u = domain.physics.get_velocity(state)
+    r = domain.physics.get_density(state)
+    T = domain.physics.get_temperature(state)
+    p = domain.physics.get_pressure(state)
+    g = domain.physics.get_gamma(state)
+    a = domain.physics.get_sound_speed(state)
+    cp = domain.physics.get_cp(state)
 
-    g = 1.4
+    # If boundaries include reference states, override the inflow/outflow condition
+    for bc in domain.boundary_conditions.riemann_fluxes:
+        if isinstance(bc, SpecifiedFace):
+            ibc = 0 if bc.location == "left" else -1
+            if bc.reference_state[0] is not None:
+                r[ibc] = bc.reference_state[0]
+            if bc.reference_state[1] is not None:
+                u[ibc] = bc.reference_state[1]
+            if bc.reference_state[2] is not None:
+                p[ibc] = bc.reference_state[2]
 
-    for ibc in [0, 1]:
-        if type(domain.boundary_conditions[ibc]) is not str:
-            if domain.boundary_conditions[ibc][0] is not None:
-                rlims[ibc] = domain.boundary_conditions[ibc][0]
-            if domain.boundary_conditions[ibc][1] is not None:
-                ulims[ibc] = domain.boundary_conditions[ibc][1]
-            if domain.boundary_conditions[ibc][2] is not None:
-                plims[ibc] = domain.boundary_conditions[ibc][2]
+    # Compute range from inflow using isentropic flow relations
+    p1 = float(p[0])
+    r1 = float(r[0])
+    T1 = float(T[0])
+    g1 = float(g[0])
+    cp_max = float(np.max(cp))
+    M_max = float(np.max(u / a))
 
-    a = domain.physics.get_sound_speed(domain.state)
-    T = domain.physics.get_temperature(domain.state)
-    cp = domain.physics.get_cp(domain.state)
-    cp_max = max([cp[0], cp[-1]])
+    T_rat, p_rat, r_rat = property_ratios(M_max, g1)
 
-    Mlims = [ulims[0] / a[0], ulims[-1] / a[-1]]
+    # Round up to nearest integer
+    T_rat = float(np.ceil(T_rat))
+    p_rat = float(np.ceil(p_rat))
+    r_rat = float(np.ceil(r_rat))
+    u2 = float(np.ceil(np.sqrt(2 * cp_max * T1 * T_rat)))
 
-    p1 = plims[0]
-    r1 = rlims[0]
-    T1 = T[0]
-
-    rlims = np.max(rlims)
-    ulims = np.max(ulims)
-    plims = np.max(plims)
-    Mlims = np.max(Mlims)
-
-    p_rat = 1 + ((2 * g) / (g + 1)) * Mlims**2 - 1
-    r_rat = (1 + ((g + 1) / (g - 1)) * p_rat) / (((g + 1) / (g - 1)) + p_rat)
-    T_rat = p_rat / r_rat
-
-    u2 = np.sqrt(2 * cp_max * T1 * T_rat)
     k = 2.0
     plot_limits = {
-        "r": (0, r_rat * k),
-        "u": (0, np.ceil(u2)),
-        "p": (0, np.ceil(p_rat)),
-        "T": (0, np.ceil(T_rat)),
-        "m": (0, 5),
+        "r": (0.0, r_rat * k),
+        "u": (0.0, u2),
+        "p": (0.0, p_rat),
+        "T": (0.0, T_rat),
+        "m": (0.0, 5.0),
     }
     return T1, p1, r1, plot_limits
 
@@ -533,7 +536,7 @@ def plot_state(
 
     full_title = rf"$t = {domain.t * 1.0e3:.4f}$ ms"
     if subtitle_str:
-        full_title += rf"\n\footnotesize{{{', '.join(subtitle_str)}}}"
+        full_title += "\n" + rf"\footnotesize{{{', '.join(subtitle_str)}}}"
     fig.suptitle(full_title)
 
     output_path = Path(filename)
