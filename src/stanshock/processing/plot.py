@@ -8,9 +8,11 @@ from typing import TYPE_CHECKING, TypeAlias
 import matplotlib.pyplot as plt
 import numpy as np
 
+from stanshock.numerics.boundary_conditions import SpecifiedFace
 from stanshock.physics.flamelet import FPVTable
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.geometry import AsymmetricBox, Box, Cylinder, Geometry
+from stanshock.utils.isentropic import property_ratios
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -378,6 +380,57 @@ def add_h_plot(
     return ax1
 
 
+def get_state_plot_bounds(
+    domain: Combustor,
+) -> tuple[float, float, float, dict[str, tuple[float, float]]]:
+    # Get fluid state at inflow and outflow
+    state = domain.state[np.array([0, -1])]
+    u = domain.physics.get_velocity(state)
+    r = domain.physics.get_density(state)
+    T = domain.physics.get_temperature(state)
+    p = domain.physics.get_pressure(state)
+    g = domain.physics.get_gamma(state)
+    a = domain.physics.get_sound_speed(state)
+    cp = domain.physics.get_cp(state)
+
+    # If boundaries include reference states, override the inflow/outflow condition
+    for bc in domain.boundary_conditions.riemann_fluxes:
+        if isinstance(bc, SpecifiedFace):
+            ibc = 0 if bc.location == "left" else -1
+            if bc.reference_state[0] is not None:
+                r[ibc] = bc.reference_state[0]
+            if bc.reference_state[1] is not None:
+                u[ibc] = bc.reference_state[1]
+            if bc.reference_state[2] is not None:
+                p[ibc] = bc.reference_state[2]
+
+    # Compute range from inflow using isentropic flow relations
+    p1 = float(p[0])
+    r1 = float(r[0])
+    T1 = float(T[0])
+    g1 = float(g[0])
+    cp_max = float(np.max(cp))
+    M_max = float(np.max(u / a))
+
+    T_rat, p_rat, r_rat = property_ratios(M_max, g1)
+
+    # Round up to nearest integer
+    T_rat = float(np.ceil(T_rat))
+    p_rat = float(np.ceil(p_rat))
+    r_rat = float(np.ceil(r_rat))
+    u2 = float(np.ceil(np.sqrt(2 * cp_max * T1 * T_rat)))
+
+    k = 2.0
+    plot_limits = {
+        "r": (0.0, r_rat * k),
+        "u": (0.0, u2),
+        "p": (0.0, p_rat),
+        "T": (0.0, T_rat),
+        "m": (0.0, 5.0),
+    }
+    return T1, p1, r1, plot_limits
+
+
 def plot_state(
     domain: Combustor,
     filename: Path | str,
@@ -385,7 +438,12 @@ def plot_state(
     plot_geometry: bool = True,
     plot_variables: list[str | list[str]] | None = None,
     region: str = "domain",
+    limits: dict[str, tuple[float, float]] | None = None,
 ) -> None:
+    T1, p1, r1 = None, None, None
+    if limits is None:
+        T1, p1, r1, limits = get_state_plot_bounds(domain)
+
     xscale = 1.0e3
     geometry = domain.geometry
     idx_cells = geometry.idx_cells
@@ -405,13 +463,14 @@ def plot_state(
             plot_variables += [sp_plot]
 
     nrows: int = len(plot_variables)
-    if domain.injectors is not None:
+    if domain.injectors:
         nrows += 1
 
     fig: Figure
     fig, tmp = plt.subplots(nrows, 1, sharex=True, figsize=(6, 9))
     axs: Sequence[Axes] = np.atleast_1d(tmp)
 
+    subtitle_str = []
     for iax, vnames in enumerate(plot_variables):
         ax = axs[iax]
 
@@ -442,14 +501,22 @@ def plot_state(
             ax.plot(x, variable_info.fun(state) * variable_info.scale)
             plot_label = variable_info.plot_label
 
+            # Special treatments:
             if variable_info.short_name == "m":
                 ax.axhline(1.0, color="r", linestyle="--")
+
+            if variable_info.short_name == "p" and p1 is not None:
+                subtitle_str.append(f"$P_1 = {p1:.0f}$ Pa")
+            if variable_info.short_name == "T" and T1 is not None:
+                subtitle_str.append(f"$T_1 = {T1:.0f}$ K")
+            if variable_info.short_name == "r" and r1 is not None:
+                subtitle_str.append(f"$\\rho_1 = {r1:.2f}$ [kg/m$^3$]")
 
         ax.set_ymargin(0.1)
         ax.set_ylabel(plot_label)
 
     ax = axs[-1]
-    if domain.injectors is not None:
+    if domain.injectors:
         phi_tot = 0.0
         for inj in domain.injectors:
             ax.scatter(
@@ -467,7 +534,10 @@ def plot_state(
         for ax in axs:
             add_h_plot(domain, ax, scale=xscale, region=region)
 
-    fig.suptitle(rf"$t = {domain.t * 1.0e3:.4f}$ ms")
+    full_title = rf"$t = {domain.t * 1.0e3:.4f}$ ms"
+    if subtitle_str:
+        full_title += "\n" + rf"\footnotesize{{{', '.join(subtitle_str)}}}"
+    fig.suptitle(full_title)
 
     output_path = Path(filename)
     output_path.parent.mkdir(parents=True, exist_ok=True)
