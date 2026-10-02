@@ -27,20 +27,20 @@ from stanshock.system.geometry import AsymmetricBox
 #   NASA Technical Paper 3502 (Emami, 1995) #
 #   Data and geometry from figure 19e.      #
 #############################################
-case_dir = Path(__file__).resolve().parent
-root_dir = case_dir.parents[1]
-plt.style.use(root_dir / "data" / "stylelib" / "publication.mplstyle")
-
 ### Data ###
-figdir = root_dir / "figures"
+data_dir = Path(__file__).resolve().parents[2] / "data"
+plt.style.use(data_dir / "stylelib" / "publication.mplstyle")
+mech = data_dir / "mechanisms" / "N2O2HeAr.yaml"
+
+### Simulation Output ###
+case_dir = Path()
+figdir = case_dir / "figures"
 animdir = figdir / "anim"
 csvdir = figdir / "csv"
 figdir.mkdir(exist_ok=True)
 animdir.mkdir(exist_ok=True)
 csvdir.mkdir(exist_ok=True)
 
-### Chemistry ###
-mech = root_dir / "data" / "mechanisms" / "N2O2HeAr.yaml"
 
 ### Geometry ###
 N_x = 150

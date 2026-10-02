@@ -20,22 +20,21 @@ from stanshock.system.geometry import Box
 ###############################################################################
 #              Edelman, 2023, Assessment of Pseudoshock Models... JPP         #
 ###############################################################################
-case_dir = Path(__file__).resolve().parent
-root_dir = case_dir.parents[2]
-plt.style.use(root_dir / "data" / "stylelib" / "publication.mplstyle")
-
 ### Data ###
-figdir = root_dir / "figures"
+data_dir = Path(__file__).resolve().parents[3] / "data"
+plt.style.use(data_dir / "stylelib" / "publication.mplstyle")
+mech = data_dir / "mechanisms" / "N2O2HeAr.yaml"
+piv_data = data_dir / "validation" / "cad_umdci_piv.csv"
+
+### Simulation Output ###
+case_dir = Path()
+figdir = case_dir / "figures"
 animdir = figdir / "anim"
 csvdir = figdir / "csv"
 figdir.mkdir(exist_ok=True)
 animdir.mkdir(exist_ok=True)
 csvdir.mkdir(exist_ok=True)
 test_figdir = case_dir / "test_figs"
-piv_data = case_dir / "cad_umdci_piv.csv"
-
-### Chemistry ###
-mech = root_dir / "data" / "mechanisms" / "N2O2HeAr.yaml"
 
 
 ### Geometry ###
@@ -46,7 +45,7 @@ geometry = Box(xf=x, h=H, w=W)
 
 ### Boundary Conditions ###
 gas = ct.Solution(mech)
-physics_model = CanteraInterface(gas)
+physics = CanteraInterface(gas)
 X_air = {"N2": 0.79, "O2": 0.21}
 
 
@@ -71,16 +70,14 @@ BCs: BCInput = {"left": [BC_inlet], "right": [BC_outlet]}
 
 ### Initialization ###
 x_shock = L / 2
-init = InitializeRiemannProblem(
-    geometry, physics_model, (gas1, u1), (gas2, u2), x_shock
-)
+init = InitializeRiemannProblem(geometry, physics, (gas1, u1), (gas2, u2), x_shock)
 
 
 ### Sim params ###
 interval = 10
 tFinal = 2e-3
 
-variable_info_map = get_variable_info_map(physics_model)
+variable_info_map = get_variable_info_map(physics)
 wall_models = (CompressibleInertSkinFriction(), CompressibleHeatFlux())
 
 plot_variables = ["mach", "density", "pressure", "temperature"]
@@ -92,7 +89,7 @@ ss = Combustor(
     include_pseudoshock=True,
     initialization=init,
     boundary_conditions=BCs,
-    physics=physics_model,
+    physics=physics,
     cfl=1.0,
     output_every=interval,
     plot_state_interval=interval,
@@ -117,7 +114,7 @@ xlabel, xlims, xticks = r"$x/H~[\mathrm{-}]$", [0.0, 9.0], np.arange(0, 10.0)
 pseudoshock = ss.pseudoshock
 x_sf = np.array(pseudoshock.x_sf).flatten()
 
-p_sf = pseudoshock.state_0.pressure
+p_sf = physics.get_pressure(pseudoshock.state_0)
 xH_local_exp, p_p1_exp, M_exp, _ = np.genfromtxt(
     piv_data,
     delimiter=",",
@@ -132,8 +129,8 @@ idx = ss.geometry.idx_cells
 xH = ss.geometry.xc[idx] / H
 
 state = ss.state[idx]
-p = state.pressure / 1e3
-M = state.velocity / ss.physics.get_sound_speed(state)
+p = 1e-3 * physics.get_pressure(state)
+M = physics.get_velocity(state) / physics.get_sound_speed(state)
 
 fig, axs = plt.subplots(1, 2, figsize=(6, 3))
 stanshock_data = [p, M]
