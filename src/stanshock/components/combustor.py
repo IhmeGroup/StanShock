@@ -216,13 +216,7 @@ class Combustor:
                     physics=self.physics,
                     boundary_layer=self.boundary_layer,
                 )
-                integrators += [
-                    FastSlowIntegrator(
-                        self.pseudoshock,
-                        fast_integrator=ForwardEuler,
-                        slow_integrator=ForwardEuler,
-                    )
-                ]
+                integrators += [ForwardEuler(self.pseudoshock)]
 
             else:
                 integrators += [ForwardEuler(self.boundary_layer)]
