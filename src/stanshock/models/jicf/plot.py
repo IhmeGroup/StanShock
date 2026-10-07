@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -47,7 +48,8 @@ def _line_plot(
             nyl = yl.shape[1]
             for i in range(nyl):
                 alpha = 0.8 * (i / (nyl - 1) + 0.25) if nyl > 1 else 1.0
-                line = ax.plot(xl, yl[:, i], "r--", alpha=alpha, label=label)[0]
+                xli = xl[:, i] if xl.ndim == 2 else xl
+                line = ax.plot(xli, yl[:, i], "r--", alpha=alpha, label=label)[0]
 
             if label:
                 labels += [label]
@@ -56,7 +58,8 @@ def _line_plot(
     for i in range(nJ):
         alpha = 0.8 * (i / (nJ - 1) + 0.25) if nJ > 1 else 1.0
         ax.set_prop_cycle(None)
-        line = ax.plot(x, y[:, i], alpha=alpha)[0]
+        xi = x[:, i] if x.ndim == 2 else x
+        line = ax.plot(xi, y[:, i], alpha=alpha)[0]
 
     if opts.label:
         labels = [opts.label, *labels]
@@ -141,6 +144,40 @@ def plot_jicf_flowfield(
     # Z_st = jicf.physics.Z_stoich
     # Z = phi * Z_st / (1.0 - Z_st + phi * Z_st)
 
+    # Get the momentum flux ratios to plot over
+    nJ = jicf.nJ
+    J = jicf.analytic.J
+    nstep = 1
+    if not plot_all_J:
+        nstep = max(len(J) // 5, 1)
+        J = J[::nstep]
+        nJ = len(J)
+        Z = Z[..., ::nstep]
+
+    # Generate plots in transverse slices
+    opts = PlotOptions(
+        "Centerline Mixture Fraction",
+        "z [m]",
+        "y [m]",
+        plot_dir / "Z_centerline.png",
+        (38.4, 6.4),
+    )
+
+    # Get transverse slice locations
+    n_plot = 5
+    nx = len(x)
+    ix_inj = np.argmin(np.abs(x - jicf.x_inj))
+    di = (nx - ix_inj) // (n_plot - 1)
+    if n_plot * di + ix_inj > nx - 1:
+        di -= 1
+
+    for i in range(n_plot):
+        ix = ix_inj + i * di
+        for iJ in range(nJ):
+            opts.title = f"Mixture Fraction at $x/d_{{inj}}$={x[ix] / jicf.d_inj:.3f}, J={J[iJ]:.2f}"
+            opts.filename = plot_dir / f"Z_x{i:02d}_J{iJ:02d}.png"
+            _contour_plot(z, y, Z[ix, :, :, iJ], opts)
+
     # Get injector location info for constraining the plots
     x_min = 0.9 * jicf.x_inj + 0.1 * x[0]
     ix_min = np.argmin(np.abs(x - x_min))
@@ -155,8 +192,6 @@ def plot_jicf_flowfield(
         # Keep center injector
         i_mid = len(z_inj) // 2
         z_inj = z_inj[[i_mid]]
-    nx = len(x)
-    ix_inj = np.argmin(np.abs(x - jicf.x_inj))
 
     # Compute jet centerline profiles
     jicf.analytic.i_m = slice(None)
@@ -164,25 +199,12 @@ def plot_jicf_flowfield(
     y_cl = jicf.analytic.y_cl(x_cl[:, None])
     x_cl += jicf.x_inj
     y_cl[y_cl > y[-1]] = np.nan
-
-    # Get the momentum flux ratios to plot over
-    nJ = jicf.nJ
-    J = jicf.analytic.J
     if not plot_all_J:
-        nstep = max(len(J) // 5, 1)
-        J = J[::nstep]
-        nJ = len(J)
         y_cl = y_cl[:, ::nstep]
-        Z = Z[..., ::nstep]
 
     # Generate plot along injector centerlines
-    opts = PlotOptions(
-        "Centerline Mixture Fraction",
-        "x [m]",
-        "y [m]",
-        plot_dir / "Z_centerline.png",
-        (19.2, 6.4) if truncate_plot else (38.4, 4.0),
-    )
+    opts.xlabel = "x [m]"
+    opts.figsize = (19.2, 6.4) if truncate_plot else (38.4, 4.0)
 
     for i in range(len(z_inj)):
         iz_inj = np.argmin(np.abs(z - z_inj[i]))
@@ -199,27 +221,13 @@ def plot_jicf_flowfield(
                 opts.filename = plot_dir / f"Z_z{i:02d}_J{iJ:02d}.png"
                 _contour_plot(x, y, Z[:, :, iz_inj, iJ].T, opts)
 
-    # Generate plots in transverse slices
-    n_plot = 5
-    di = (nx - ix_inj) // (n_plot - 1)
-    if n_plot * di + ix_inj > nx - 1:
-        di -= 1
-
-    opts.xlabel = "z [m]"
-    opts.figsize = (38.4, 6.4)
-    for i in range(n_plot):
-        ix = ix_inj + i * di
-        for iJ in range(nJ):
-            opts.title = f"Mixture Fraction at x={x[ix]:.3f}, J={J[iJ]:.2f}"
-            opts.filename = plot_dir / f"Z_x{i:02d}_J{iJ:02d}.png"
-            _contour_plot(z, y, Z[ix, :, :, iJ], opts)
-
 
 def plot_jicf_mean_variance(
     jicf: JICModel, rho_ratio: float = 1.0, plot_dir: Path = Path("figures/jicf")
 ) -> None:
     """Plot the mixture fraction mean and variance profiles."""
     print("Plotting mixture fraction mean and variance profiles.")
+    jicf.analytic.i_m = slice(None)
     Zmean = jicf.Z_avg_profile * np.sqrt(rho_ratio)
     Zvar = jicf.Z_var_profile * rho_ratio
     x = jicf.x_profile
@@ -256,3 +264,31 @@ def plot_jicf_mean_variance(
 
     idx = xr_d > -1.0
     _line_plot(x_d[idx], Zvar[idx], opts, extra)
+
+    # Debug plots
+    _ = jicf.analytic.adjustment_factors
+    data = jicf.analytic._aux_adjust_data
+    if data is not None:
+        x_d = data[0] / jicf.d_inj
+        y_d = data[1] / jicf.d_inj
+
+        opts.title = ""
+        opts.ylabel = r"Centerline-Normal Planar Area [$m^2$]"
+        opts.filename = plot_dir / "debug_area.png"
+        _line_plot(x_d, data[2], opts)
+
+        opts.xscale = "linear"
+        opts.yscale = "linear"
+
+        opts.title = "Centerline Trajectory"
+        opts.ylabel = r"$y/d_{inj}$ [m]"
+        opts.filename = plot_dir / "debug_centerline.png"
+        h_d = jicf.h / jicf.d_inj
+        extra = {"h": (x_d[(0, -1), -1], np.array([[h_d], [h_d]]))}
+        _line_plot(x_d, y_d, opts, extra)
+
+        opts.title = ""
+        opts.ylabel = r"Volume Under Distribution [-]"
+        opts.filename = plot_dir / "debug_curve_volume.png"
+        _line_plot(x_d, data[3], opts)
+    sys.exit()
