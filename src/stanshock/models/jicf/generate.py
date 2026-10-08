@@ -325,7 +325,7 @@ class JICModel:
         y: Array
         z: Array
         y, z = yz[:, 0, None], yz[:, 1, None]
-        return np.reshape(self.analytic.Z_3D_adjusted(x, y, z), (y.shape[0], -1))
+        return np.reshape(self.analytic.Z_3D(x, y, z), (y.shape[0], -1))
 
     def _sigma_Z(self, yz: Array, x: Array, Z_avg: Array) -> Array:
         """Vectorized evaluation of mixture fraction variance over set of y + z points.
