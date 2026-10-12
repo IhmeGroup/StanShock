@@ -425,6 +425,10 @@ def _convolve_point(
     sigma2 = Qbar_vec[i_S]
     Lbar = Lbar_vec[i_Lbar]
 
+    # Bound valid values of sigma2
+    Zvmax = Zbar * (1.0 - Zbar)
+    sigma2 = min(Zvmax, sigma2)
+
     eps = 1.0e-6
     if (Zbar < eps) or (Zbar > 1 - eps) or (sigma2 < eps):
         result = np.array([v.lookup(Zbar, 0.0, Lbar) for v in variables.values()])
@@ -464,8 +468,7 @@ def apply_pdf_convolution(table: FPVTable, keep_backup: bool = True) -> FPVTable
     # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
     n_tab = (table.Z.size, 31, table.L.size)
     Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
-    logsigma2_vec = np.linspace(-4.0, -1.5, n_tab[1] - 1)
-    Qbar_vec = np.concatenate(([0.0], 10.0**logsigma2_vec))
+    Qbar_vec = np.linspace(0.0, 0.5, n_tab[1]) ** 2
     Lbar_vec = np.linspace(0.0, 1.0, n_tab[2])
 
     uv_vec, W_vec = special.roots_legendre(200)
@@ -502,13 +505,14 @@ def apply_pdf_convolution(table: FPVTable, keep_backup: bool = True) -> FPVTable
     filename = table.filename
     if keep_backup:
         backup_file = filename.with_stem(filename.stem + "_orig")
+        backup_file.unlink(missing_ok=True)
         filename.copy(backup_file)
 
     with h5py.File(str(filename), "r+") as f:
         coords = f["Coordinates"]
         assert isinstance(coords, h5py.Group)
         del coords["Coor_1"]
-        coords.create_dataset("Coor_1", data=10.0**logsigma2_vec)
+        coords.create_dataset("Coor_1", data=Qbar_vec)
 
         del f["Data"]
         f.create_dataset("Data", data=data.flatten())
