@@ -22,6 +22,7 @@ class FluidState:
     mass_fractions: Array | None = None
     mole_fractions: Array | None = None
     mixture_fraction: Array | None = None
+    mixture_fraction_variance: Array | None = None
     progress_variable: Array | None = None
     normalized_progress_variable: Array | None = None
     composition: Array | None = None

@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import functools
-import warnings
 from functools import cached_property
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import h5py
 import numpy as np
-from joblib import Parallel, delayed
-from scipy import special, stats
+from scipy import stats
 from scipy.integrate import cubature
 from scipy.interpolate import RegularGridInterpolator
-from tqdm import tqdm
 
 from stanshock.models.jicf.profile import AnalyticJICF
 from stanshock.physics.flamelet import FPVTable
@@ -188,21 +184,6 @@ class JICModel:
             bounds_error=False,
             fill_value=None,
         )
-
-        # Precompute and tabulate chemical source terms
-        if h5_has(self.model_file, "chemical_sources/omega_C_int"):
-            with h5py.File(str(self.model_file), "r") as f:
-                group = f["chemical_sources"]
-                assert isinstance(group, h5py.Group)
-                self.Zbar_vec = h5_getarray(group, "Zbar")
-                self.Lbar_vec = h5_getarray(group, "Lbar")
-                self.logsigma2_vec = h5_getarray(group, "logsigma2")
-                self.omega_C_int = h5_getarray(group, "omega_C_int")
-            self.omega_C_int_interp = RegularGridInterpolator(
-                (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
-            )
-        else:
-            self.calc_chemical_sources(write=True)
 
     @property
     def manifold_state(self) -> FluidState:
@@ -486,119 +467,3 @@ class JICModel:
         a = ((Z_avg * (1 - Z_avg) / Z_var) - 1) * Z_avg
         b = a * (1 - Z_avg) / Z_avg
         return np.asarray(stats.beta.pdf(Z, a, b))
-
-    @staticmethod
-    def _compute_omega_C_int(
-        i_Zbar: int,
-        i_Lbar: int,
-        i_S: int,
-        Zbar_vec: Array,
-        Lbar_vec: Array,
-        logsigma2_vec: Array,
-        uv_vec: Array,
-        W_vec: Array,
-        omega_C_interp: RegularGridInterpolator[np.float64],
-    ) -> tuple[int, int, int, float]:
-        Zbar = Zbar_vec[i_Zbar]
-        Lbar = Lbar_vec[i_Lbar]
-        logsigma2 = logsigma2_vec[i_S]
-        sigma2 = 10**logsigma2
-
-        eps = 1.0e-6
-        if (Zbar < eps) or (Zbar > 1 - eps) or (Lbar < eps) or (Lbar > 1 - eps):
-            return (i_Zbar, i_Lbar, i_S, float(omega_C_interp((Zbar, Lbar))))
-
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-
-            # Compute the shape parameters
-            alpha_Z = ((Zbar * (1 - Zbar) / sigma2) - 1) * Zbar
-            beta_Z = alpha_Z * (1 - Zbar) / Zbar
-            alpha_L = ((Lbar * (1 - Lbar) / sigma2) - 1) * Lbar
-            beta_L = alpha_L * (1 - Lbar) / Lbar
-
-            # Compute the quadrature points and weights
-            Z_int_vec = stats.beta.ppf(uv_vec, alpha_Z, beta_Z)
-            L_int_vec = stats.beta.ppf(uv_vec, alpha_L, beta_L)
-
-            # Evaluate the integrand at the quadrature points
-            W_Z_mesh, W_L_mesh = np.meshgrid(W_vec, W_vec, indexing="ij")
-            W_mesh = W_Z_mesh * W_L_mesh
-            Z_int_mesh, L_int_mesh = np.meshgrid(Z_int_vec, L_int_vec, indexing="ij")
-            integrand = omega_C_interp((Z_int_mesh, L_int_mesh))
-
-            # Perform the integration
-            result = float(np.sum(integrand * W_mesh))
-
-        return (i_Zbar, i_Lbar, i_S, result)
-
-    def calc_chemical_sources(self, write: bool = False) -> None:
-        """
-        This method precomputes the chemical source terms as a function of x, mdot_f, and L.
-        """
-        print("Precomputing chemical sources...")
-
-        # Build omega_C interpolator
-        Z_sample = np.linspace(0.0, 1.0, 100)
-        L_sample = np.linspace(0.0, 1.0, 100)
-        Z_sample_mesh, L_sample_mesh = np.meshgrid(Z_sample, L_sample, indexing="ij")
-        omega_C = self.physics.lookup_direct(
-            "SRC_PROG", Z_sample_mesh, 0.0, L_sample_mesh
-        )
-        omega_C_interp = RegularGridInterpolator(
-            (Z_sample, L_sample), omega_C, bounds_error=False, fill_value=0.0
-        )
-
-        # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
-        n_tab = (100, 100, 100)
-        self.Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
-        self.Lbar_vec = np.linspace(0.0, 1.0, n_tab[1])
-        self.logsigma2_vec = np.linspace(-4.0, -1.5, n_tab[2])
-
-        uv_vec, W_vec = special.roots_legendre(200)
-        W_vec = W_vec / 2
-        uv_vec = uv_vec / 2 + 0.5
-
-        self.omega_C_int = np.zeros(n_tab)
-        compute_func = functools.partial(
-            self._compute_omega_C_int,
-            Zbar_vec=self.Zbar_vec,
-            Lbar_vec=self.Lbar_vec,
-            logsigma2_vec=self.logsigma2_vec,
-            uv_vec=uv_vec,
-            W_vec=W_vec,
-            omega_C_interp=omega_C_interp,
-        )
-        tasks = [
-            (i_Zbar, i_Lbar, i_S)
-            for i_Zbar in range(n_tab[0])
-            for i_Lbar in range(n_tab[1])
-            for i_S in range(n_tab[2])
-        ]
-
-        # Parallel version
-        gen = Parallel(n_jobs=-1, return_as="generator")(
-            delayed(compute_func)(i_Zbar, i_Lbar, i_S) for i_Zbar, i_Lbar, i_S in tasks
-        )
-        results = list(tqdm(gen, total=len(tasks)))
-
-        for i_Zbar, i_Lbar, i_S, value in results:
-            self.omega_C_int[i_Zbar, i_Lbar, i_S] = value
-        self.omega_C_int[np.isnan(self.omega_C_int)] = 0.0
-
-        if write:
-            h5_write(
-                self.model_file,
-                "chemical_sources",
-                {
-                    "Zbar": self.Zbar_vec,
-                    "Lbar": self.Lbar_vec,
-                    "logsigma2": self.logsigma2_vec,
-                    "omega_C_int": self.omega_C_int,
-                },
-            )
-
-        # Build 3D table interpolator
-        self.omega_C_int_interp = RegularGridInterpolator(
-            (self.Zbar_vec, self.Lbar_vec, self.logsigma2_vec), self.omega_C_int
-        )

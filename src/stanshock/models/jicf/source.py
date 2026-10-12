@@ -344,10 +344,6 @@ class JICFChemistrySource(RightHandSide):
         _ = time, state_array_local, face_states, avg_face_states, face_gradients
         assert isinstance(self.physics, FPVTable)
         assert state is not None
-        assert state.density is not None
-        assert state.mixture_fraction is not None
-        assert state.normalized_progress_variable is not None
-        factor = self.physics.get_source_progress_variable_compressibility_factor(state)
 
         # Get the mixture fraction variance profile. The variance table is
         # indexed by momentum-flux ratio J (column 2 of the fluid tips), which
@@ -359,16 +355,7 @@ class JICFChemistrySource(RightHandSide):
         rhor = result[:, 1]
 
         Zvar = rhor * self.injector.jicf.Z_var_profile_interp((self.xc, J))
-        Zvar = np.maximum(Zvar, 10 ** self.injector.jicf.logsigma2_vec.min())
+        Zvar = np.maximum(Zvar, self.physics.Q[0])
+        state.mixture_fraction_variance = Zvar
 
-        return (
-            factor
-            * state.density
-            * self.injector.jicf.omega_C_int_interp(
-                (
-                    state.mixture_fraction,
-                    state.normalized_progress_variable,
-                    np.log10(Zvar),
-                )
-            )
-        )
+        return self.physics.get_source_terms(state)

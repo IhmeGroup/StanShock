@@ -1,14 +1,20 @@
 from __future__ import annotations
 
+import functools
+import warnings
 from pathlib import Path
 
 import h5py
 import numpy as np
 from cantera import Solution
+from joblib import Parallel, delayed
+from scipy import special, stats
 from scipy.interpolate import RegularGridInterpolator
+from tqdm import tqdm
 
 from stanshock.physics.fluid_base import FluidPhysics, FluidState
 from stanshock.system.backend import Array, Composition
+from stanshock.utils.h5 import h5_getarray
 
 
 class TableVariable:
@@ -38,6 +44,32 @@ class FPVTable(FluidPhysics):
     Class to read an FPV table from an HDF5 file and perform lookups.
     """
 
+    def __new__(
+        cls,
+        filename: Path | str,
+        gas: Solution,
+        ox_def: Composition | None = None,
+        fuel_def: Composition | None = None,
+        prog_def: Composition | None = None,
+        p_correction: bool = False,
+        T_correction: bool = False,
+    ) -> FPVTable:
+        """Apply PDF convolution if the table lacks a Q dimension."""
+        table = super().__new__(cls)
+        cls.__init__(
+            table,
+            filename,
+            gas,
+            ox_def,
+            fuel_def,
+            prog_def,
+            p_correction,
+            T_correction,
+        )
+        if len(table.Q) <= 2:
+            return apply_pdf_convolution(table)
+        return table
+
     def __init__(
         self,
         filename: Path | str,
@@ -56,19 +88,23 @@ class FPVTable(FluidPhysics):
         self.n_scalars_rho_sum: int = 1
         self.scalar_names = ["density", "mixture fraction", "progress variable"]
         self.is_flamelet = True
-        self.filename: str = filename.name if isinstance(filename, Path) else filename
+        self.filename: Path = Path(filename)
         self.p_correction: bool = p_correction
         self.T_correction: bool = T_correction
-        with h5py.File(filename, "r") as f:
-            self.P: float = f["Header"]["Doubles"]["Double_0"].attrs["Value"][0]
-            self.Z: Array = f["Coordinates"]["Coor_0"][:]
-            self.Q: Array = f["Coordinates"]["Coor_1"][:]
-            self.L: Array = f["Coordinates"]["Coor_2"][:]
+        with h5py.File(str(self.filename), "r") as f:
+            doubles = f["Header/Doubles/Double_0"]
+            assert isinstance(doubles, h5py.Dataset)
+            Pref = doubles.attrs.get("Value")
+            assert isinstance(Pref, np.ndarray)
+            self.P: float = float(Pref[0])
+            self.Z: Array = h5_getarray(f, "Coordinates/Coor_0")
+            self.Q: Array = h5_getarray(f, "Coordinates/Coor_1")
+            self.L: Array = h5_getarray(f, "Coordinates/Coor_2")
 
-            var_names: list[str] = [
-                var.decode("utf-8") for var in f["Header"]["Variable Names"][:]
-            ]
-            data_raw: Array = f["Data"][:]
+            raw_var_names = f["Header/Variable Names"]
+            assert isinstance(raw_var_names, h5py.Dataset)
+            var_names: list[str] = [var.decode("utf-8") for var in raw_var_names[:]]
+            data_raw: Array = h5_getarray(f, "Data")
             n_tot = self.Z.size * self.Q.size * self.L.size
             self.variables: dict[str, TableVariable] = {}
             for i, var in enumerate(var_names):
@@ -119,6 +155,8 @@ class FPVTable(FluidPhysics):
         Z = state.mixture_fraction = state.composition[..., 1]
         C = state.progress_variable = state.composition[..., 2]
         state.normalized_progress_variable = self.get_normalized_progress_variable(Z, C)
+        if state.mixture_fraction_variance is None:
+            state.mixture_fraction_variance = np.zeros_like(Z)
         return state
 
     def get_composition_from_mass_fractions(self, Y: Array) -> Array:
@@ -133,10 +171,11 @@ class FPVTable(FluidPhysics):
         if state.normalized_progress_variable is None:
             state = self.set_state(state)
         assert state.mixture_fraction is not None
+        assert state.mixture_fraction_variance is not None
         assert state.normalized_progress_variable is not None
 
         Z = state.mixture_fraction
-        Q = np.zeros_like(Z)
+        Q = state.mixture_fraction_variance
         L = state.normalized_progress_variable
 
         nsp = self.gas.n_species
@@ -164,10 +203,11 @@ class FPVTable(FluidPhysics):
         if state.normalized_progress_variable is None:
             state = self.set_state(state)
         assert state.mixture_fraction is not None
+        assert state.mixture_fraction_variance is not None
         assert state.normalized_progress_variable is not None
 
         Z = state.mixture_fraction
-        Q = np.zeros_like(Z)
+        Q = state.mixture_fraction_variance
         L = state.normalized_progress_variable
 
         return self.lookup_direct(var, Z, Q, L)
@@ -190,10 +230,11 @@ class FPVTable(FluidPhysics):
         if state.normalized_progress_variable is None:
             state = self.set_state(state)
         assert state.mixture_fraction is not None
+        assert state.mixture_fraction_variance is not None
         assert state.normalized_progress_variable is not None
 
         Z = state.mixture_fraction
-        Q = np.zeros_like(Z)
+        Q = state.mixture_fraction_variance
         L = state.normalized_progress_variable
 
         return {var: v.lookup(Z, Q, L) for var, v in self.variables.items()}
@@ -348,7 +389,8 @@ class FPVTable(FluidPhysics):
         return state.sound_speed
 
     def get_source_terms(self, state: FluidState) -> Array:
-        return self.lookup("SRC_PROG", state)
+        factor = self.get_source_progress_variable_compressibility_factor(state)
+        return factor * self.lookup("SRC_PROG", state)
 
     def get_source_progress_variable_compressibility_factor(
         self, state: FluidState
@@ -358,12 +400,125 @@ class FPVTable(FluidPhysics):
         """
         factor = np.ones(state.shape)
         if self.p_correction:
-            assert state.pressure is not None
-            factor *= state.pressure / self.P
+            P = self.get_pressure(state)
+            factor *= P / self.P
         if self.T_correction:
-            if state.temperature is None:
-                state.temperature = self.get_temperature(state)
+            T = self.get_temperature(state)
             TA = self.lookup("TA", state)
             T0 = self.lookup("T0", state)
-            factor *= np.exp(-TA * ((1 / state.temperature) - (1 / T0)))
+            factor *= np.exp(-TA * (1.0 / T - 1.0 / T0))
         return factor
+
+
+def _convolve_point(
+    i_Zbar: int,
+    i_S: int,
+    i_Lbar: int,
+    Zbar_vec: Array,
+    Qbar_vec: Array,
+    Lbar_vec: Array,
+    uv_vec: Array,
+    W_vec: Array,
+    variables: dict[str, TableVariable],
+) -> tuple[int, int, int, Array]:
+    Zbar = Zbar_vec[i_Zbar]
+    sigma2 = Qbar_vec[i_S]
+    Lbar = Lbar_vec[i_Lbar]
+
+    eps = 1.0e-6
+    if (Zbar < eps) or (Zbar > 1 - eps) or (sigma2 < eps):
+        result = np.array([v.lookup(Zbar, 0.0, Lbar) for v in variables.values()])
+        return i_Zbar, i_S, i_Lbar, result
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+
+        # Compute the shape parameters
+        alpha_Z = ((Zbar * (1 - Zbar) / sigma2) - 1) * Zbar
+        beta_Z = alpha_Z * (1 - Zbar) / Zbar
+        alpha_L = ((Lbar * (1 - Lbar) / sigma2) - 1) * Lbar
+        beta_L = alpha_L * (1 - Lbar) / Lbar
+
+        # Compute the quadrature points and weights
+        Z_int_vec = stats.beta.ppf(uv_vec, alpha_Z, beta_Z)
+        L_int_vec = stats.beta.ppf(uv_vec, alpha_L, beta_L)
+
+        # Evaluate the integrand at the quadrature points
+        W_Z_mesh, W_L_mesh = np.meshgrid(W_vec, W_vec, indexing="ij")
+        W_mesh = W_Z_mesh * W_L_mesh
+        Z_int_mesh, L_int_mesh = np.meshgrid(Z_int_vec, L_int_vec, indexing="ij")
+        integrand = np.stack(
+            [v.lookup(Z_int_mesh, 0.0, L_int_mesh) for v in variables.values()]
+        )
+
+        # Perform the integration
+        result = np.sum(integrand * W_mesh, axis=(1, 2))
+
+    return i_Zbar, i_S, i_Lbar, result
+
+
+def apply_pdf_convolution(table: FPVTable, keep_backup: bool = True) -> FPVTable:
+    """Convolve a laminar flamelet table with a beta PDF to model turbulent mixing."""
+    print("Convolving flamelet table with beta PDF...")
+
+    # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
+    n_tab = (table.Z.size, 31, table.L.size)
+    Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
+    logsigma2_vec = np.linspace(-4.0, -1.5, n_tab[1] - 1)
+    Qbar_vec = np.concatenate(([0.0], 10.0**logsigma2_vec))
+    Lbar_vec = np.linspace(0.0, 1.0, n_tab[2])
+
+    uv_vec, W_vec = special.roots_legendre(200)
+    W_vec = 0.5 * W_vec
+    uv_vec = 0.5 * (uv_vec + 1.0)
+
+    compute_func = functools.partial(
+        _convolve_point,
+        Zbar_vec=Zbar_vec,
+        Qbar_vec=Qbar_vec,
+        Lbar_vec=Lbar_vec,
+        uv_vec=uv_vec,
+        W_vec=W_vec,
+        variables=table.variables,
+    )
+    tasks = [
+        (i_Zbar, i_S, i_Lbar)
+        for i_Zbar in range(n_tab[0])
+        for i_S in range(n_tab[1])
+        for i_Lbar in range(n_tab[2])
+    ]
+
+    # Parallel version
+    gen = Parallel(n_jobs=-1, return_as="generator")(
+        delayed(compute_func)(i_Zbar, i_S, i_Lbar) for i_Zbar, i_S, i_Lbar in tasks
+    )
+
+    data = np.zeros((len(table.variables), *n_tab))
+    for i_Zbar, i_S, i_Lbar, value in tqdm(gen, total=data[0].size):
+        data[:, i_Zbar, i_S, i_Lbar] = value
+    data[np.isnan(data)] = 0.0
+
+    # Write data to the original file
+    filename = table.filename
+    if keep_backup:
+        backup_file = filename.with_stem(filename.stem + "_orig")
+        filename.copy(backup_file)
+
+    with h5py.File(str(filename), "r+") as f:
+        coords = f["Coordinates"]
+        assert isinstance(coords, h5py.Group)
+        del coords["Coor_1"]
+        coords.create_dataset("Coor_1", data=10.0**logsigma2_vec)
+
+        del f["Data"]
+        f.create_dataset("Data", data=data.flatten())
+
+    return FPVTable(
+        filename,
+        table.gas,
+        table.ox_def,
+        table.fuel_def,
+        table.prog_def,
+        table.p_correction,
+        table.T_correction,
+    )
