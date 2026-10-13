@@ -330,6 +330,8 @@ def get_injectors_fpv(
     mdot: Literal["constant", "schedule"] = "constant",
     fpv_dir: Path = Path("./data"),
     nJ: int = 31,
+    Cd: float = 1.0,
+    injector: type[FuelInjector] = FuelInjector,
 ) -> FuelInjector:
     assert isinstance(geometry, AsymmetricBox)
     # Freeze after constant cross section region of the combustor
@@ -341,7 +343,6 @@ def get_injectors_fpv(
     N_f = 4  # -
     A_f = np.pi * r_f**2  # m^2
     A_f_tot = N_f * A_f  # m^2
-    Cd = 1.0  # 0.9
     Ae = Cd * A_f_tot
 
     # Air flow properties
@@ -427,8 +428,8 @@ def get_injectors_fpv(
     plot_jicf_flowfield(jicf, rho_ratio)
     plot_jicf_mean_variance(jicf, rho_ratio)
 
-    return FuelInjector(
-        jicf,
+    return injector(
+        jicf=jicf,
         mdot_max=mdot_max,
         throttle=throttle,
         geometry=geometry,
@@ -445,6 +446,7 @@ class Hyshot2Interface:
         conditions: _Conditions | None = None,
         inflow: Literal["constant", "diffuser"] = "diffuser",
         mdot: Literal["constant", "schedule"] = "constant",
+        injector: type[FuelInjector] = FuelInjector,
     ) -> None:
         # Get case setup
         geometry = hyshot_ii_geometry(200)
@@ -478,7 +480,14 @@ class Hyshot2Interface:
         if chemistry == "FPV":
             # Initialize the injectors
             assert isinstance(physics, FPVTable)
-            jic = get_injectors_fpv(geometry, physics, gas_init, u_init, mdot)
+            jic = get_injectors_fpv(
+                geometry=geometry,
+                physics=physics,
+                gas_in=gas_init,
+                u_in=u_init,
+                mdot=mdot,
+                injector=injector,
+            )
 
         # Initialize the simulation
         self.case = Combustor(
@@ -537,9 +546,12 @@ class Hyshot2Interface:
 
         # Compute and return the thrust and fuel consumption rate
         thrust = self.get_thrust()
-        mdot = 4.4e-3  # kg/s
+        mdot_fuel = 0.0  # kg/s
+        for inj in self.case.injectors:
+            _, mdot_inj = inj.inflow(self.case.t, self.case.state)
+            mdot_fuel += mdot_inj
 
-        return thrust, mdot
+        return thrust, mdot_fuel
 
     def get_thrust(self) -> float:
         """Compute the thrust:
