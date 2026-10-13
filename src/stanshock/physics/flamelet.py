@@ -53,6 +53,9 @@ class FPVTable(FluidPhysics):
         prog_def: Composition | None = None,
         p_correction: bool = False,
         T_correction: bool = False,
+        Z: Array | None = None,
+        Q: Array | None = None,
+        L: Array | None = None,
     ) -> FPVTable:
         """Apply PDF convolution if the table lacks a Q dimension."""
         table = super().__new__(cls)
@@ -67,7 +70,7 @@ class FPVTable(FluidPhysics):
             T_correction,
         )
         if len(table.Q) <= 2:
-            return apply_pdf_convolution(table)
+            return apply_pdf_convolution(table, Z, Q, L)
         return table
 
     def __init__(
@@ -79,6 +82,9 @@ class FPVTable(FluidPhysics):
         prog_def: Composition | None = None,
         p_correction: bool = False,
         T_correction: bool = False,
+        Z: Array | None = None,
+        Q: Array | None = None,
+        L: Array | None = None,
     ) -> None:
         """
         Initialize the FPVTable object by reading the HDF5 file.
@@ -91,6 +97,8 @@ class FPVTable(FluidPhysics):
         self.filename: Path = Path(filename)
         self.p_correction: bool = p_correction
         self.T_correction: bool = T_correction
+        _ = Z, Q, L
+
         with h5py.File(str(self.filename), "r") as f:
             doubles = f["Header/Doubles/Double_0"]
             assert isinstance(doubles, h5py.Dataset)
@@ -389,8 +397,9 @@ class FPVTable(FluidPhysics):
         return state.sound_speed
 
     def get_source_terms(self, state: FluidState) -> Array:
+        rho = self.get_density(state)
         factor = self.get_source_progress_variable_compressibility_factor(state)
-        return factor * self.lookup("SRC_PROG", state)
+        return factor * rho * self.lookup("SRC_PROG", state)
 
     def get_source_progress_variable_compressibility_factor(
         self, state: FluidState
@@ -461,15 +470,22 @@ def _convolve_point(
     return i_Zbar, i_S, i_Lbar, result
 
 
-def apply_pdf_convolution(table: FPVTable, keep_backup: bool = True) -> FPVTable:
+def apply_pdf_convolution(
+    table: FPVTable,
+    Z: Array | None = None,
+    Q: Array | None = None,
+    L: Array | None = None,
+    keep_backup: bool = True,
+) -> FPVTable:
     """Convolve a laminar flamelet table with a beta PDF to model turbulent mixing."""
     print("Convolving flamelet table with beta PDF...")
 
-    # Grid in Zbar, Lbar, logsigma2 dimensions (to be tabulated over)
-    n_tab = (table.Z.size, 31, table.L.size)
-    Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
-    Qbar_vec = np.linspace(0.0, 0.5, n_tab[1]) ** 2
-    Lbar_vec = np.linspace(0.0, 1.0, n_tab[2])
+    # Grid in Z mean, Z variance, and normalized C dimensions (to be tabulated over)
+    nQ = 31
+    Zbar_vec = table.Z if Z is None else Z
+    Qbar_vec = np.linspace(0.0, 0.5, nQ) ** 2 if Q is None else Q
+    Lbar_vec = table.L if L is None else L
+    n_tab = (Zbar_vec.size, Qbar_vec.size, Lbar_vec.size)
 
     uv_vec, W_vec = special.roots_legendre(200)
     W_vec = 0.5 * W_vec
@@ -509,10 +525,11 @@ def apply_pdf_convolution(table: FPVTable, keep_backup: bool = True) -> FPVTable
         filename.copy(backup_file)
 
     with h5py.File(str(filename), "r+") as f:
-        coords = f["Coordinates"]
-        assert isinstance(coords, h5py.Group)
-        del coords["Coor_1"]
+        del f["Coordinates"]
+        coords = f.require_group("Coordinates")
+        coords.create_dataset("Coor_0", data=Zbar_vec)
         coords.create_dataset("Coor_1", data=Qbar_vec)
+        coords.create_dataset("Coor_2", data=Lbar_vec)
 
         del f["Data"]
         f.create_dataset("Data", data=data.flatten())
