@@ -327,7 +327,7 @@ def get_injectors_fpv(
     physics: FPVTable,
     gas_in: ct.Solution,
     u_in: float,
-    mdot: Literal["constant", "schedule"] = "constant",
+    mdot: Literal["constant", "schedule"] | float = "constant",
     fpv_dir: Path = Path("./data"),
     nJ: int = 31,
     Cd: float = 1.0,
@@ -373,7 +373,7 @@ def get_injectors_fpv(
         mdot_max = mdot_ox / afr_st * phi
         throttle = 1.0
         J = np.asarray([1.0])  # Only need the target profile
-    else:
+    elif mdot == "schedule":
         # Mass flow rate ramp:
         eps_t = 1.0e-6
         t = tau * np.array([0.0, 0.1 - eps_t, 0.1, 3.0, 8.0, 13.0, 15.0])
@@ -382,6 +382,11 @@ def get_injectors_fpv(
         mdot_max = float(mdot_fuel[-1])
         throttle = (t, mdot_fuel / mdot_max)
         J = np.linspace(0.0, 1.1, nJ)  # +10% buffer beyond maximum
+    else:
+        # Same maximum equivalence ratio as constant, but precompute range of J values:
+        mdot_max = mdot_ox / afr_st * 0.45
+        throttle = 1.0
+        J = np.linspace(0.0, mdot / mdot_max, nJ)
 
     # Fuel manifold properties
     T0_f = 300.0
@@ -445,7 +450,7 @@ class Hyshot2Interface:
         chemistry: Literal["FRC", "FPV"] = "FPV",
         conditions: _Conditions | None = None,
         inflow: Literal["constant", "diffuser"] = "diffuser",
-        mdot: Literal["constant", "schedule"] = "constant",
+        mdot: Literal["constant", "schedule"] | float = "constant",
         injector: type[FuelInjector] = FuelInjector,
     ) -> None:
         # Get case setup
