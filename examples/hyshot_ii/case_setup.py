@@ -135,6 +135,8 @@ def default_fpv_physics(
     | Path = "./h2_table/flamelet_results/H2_O2N2_p01_3_tf0300_to1367_200x2x200.h5",
 ) -> FPVTable:
     gas = ct.Solution(mech)
+    Z = np.concatenate((np.linspace(0.0, 0.04, 21), [1.0]))
+    Q = np.concatenate(([0.0], np.logspace(-4.0, -1.5, 21)))
     return FPVTable(
         table_file,
         gas,
@@ -143,6 +145,8 @@ def default_fpv_physics(
         prog_def={"H2O": 1.0},
         p_correction=False,
         T_correction=False,
+        Z=Z,
+        Q=Q,
     )
 
 
