@@ -548,7 +548,7 @@ class Hyshot2Interface:
         thrust = self.get_thrust()
         mdot_fuel = 0.0  # kg/s
         for inj in self.case.injectors:
-            _, mdot_inj = inj.inflow(self.case.t, self.case.state)
+            _, mdot_inj, _ = inj.inflow(self.case.t, self.case.state)
             mdot_fuel += mdot_inj
 
         return thrust, mdot_fuel
