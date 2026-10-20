@@ -117,9 +117,9 @@ class InletDiffuser(SpecifiedFlux):
         assert Y is not None
 
         # Momentum flux
-        self.reference_flux[0] = rho * u**2 + p
+        self.reference_flux[[0]] = rho * u**2 + p
         # Energy flux
-        self.reference_flux[1] = u * (rho * (e_int + 0.5 * u**2) + p)
+        self.reference_flux[[1]] = u * (rho * (e_int + 0.5 * u**2) + p)
         # Species fluxes
         self.reference_flux[2:] = rho * u * Y
 
