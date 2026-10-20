@@ -504,6 +504,10 @@ class JICModel:
         logsigma2 = logsigma2_vec[i_S]
         sigma2 = 10**logsigma2
 
+        # Bound valid values of sigma2
+        Zvmax = Zbar * (1.0 - Zbar)
+        sigma2 = min(Zvmax, sigma2)
+
         eps = 1.0e-6
         if (Zbar < eps) or (Zbar > 1 - eps) or (Lbar < eps) or (Lbar > 1 - eps):
             return (i_Zbar, i_Lbar, i_S, float(omega_C_interp((Zbar, Lbar))))
@@ -553,7 +557,7 @@ class JICModel:
         n_tab = (100, 100, 100)
         self.Zbar_vec = np.linspace(0.0, 1.0, n_tab[0])
         self.Lbar_vec = np.linspace(0.0, 1.0, n_tab[1])
-        self.logsigma2_vec = np.linspace(-4.0, -1.5, n_tab[2])
+        self.logsigma2_vec = np.linspace(-4.0, np.log10(0.5), n_tab[2])
 
         uv_vec, W_vec = special.roots_legendre(200)
         W_vec = W_vec / 2
