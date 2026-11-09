@@ -16,7 +16,7 @@ class WallState:
     Re: Array
     M: Array
     T: Array
-    Tw: Array
+    Tw: Array | None
     Pr: Array
     gamma: Array
     h_St: Array
@@ -40,10 +40,7 @@ class WallState:
         Re = np.abs(rho * U * Lc / mu)
         M = np.abs(U / a)
 
-        if wall_temperature is None:  # noqa: SIM108
-            Tw = T.copy()  # adiabatic
-        else:
-            Tw = np.array((wall_temperature,))  # isothermal
+        Tw = None if wall_temperature is None else np.array((wall_temperature,))
 
         Pr = cp * mu / k
         h_St = rho * U * cp
@@ -97,6 +94,8 @@ class CompressibleHeatFlux(HeatFlux):
     """
 
     def __call__(self, wall: WallState) -> Array:
+        if wall.Tw is None:
+            return np.zeros_like(wall.T)
         assert wall.Cf is not None
         T_r = self.recovery_temperature(wall.T, wall.M, wall.Pr, wall.gamma)
         St = self.get_stanton_number(wall.Pr, wall.Cf)
@@ -111,6 +110,8 @@ class CompressibleHeatFlux(HeatFlux):
 
 class IncompressibleHeatFlux(HeatFlux):
     def __call__(self, wall: WallState) -> Array:
+        if wall.Tw is None:
+            return np.zeros_like(wall.T)
         assert wall.Cf is not None
         laminar = wall.Re < 1e3
         St = self.get_stanton_number(wall.Pr, wall.Cf)
@@ -182,7 +183,10 @@ class CompressibleInertSkinFriction(SkinFriction):
             self.cfTable[i, :, :] = cf_dechant_solve(Re, F_jk, G_jk)
 
     def __call__(self, wall: WallState) -> Array:
-        T_Tw = wall.T / wall.Tw
+        if wall.Tw is None:
+            T_Tw = 1.0 / (1.0 + self.recovery * 0.5 * (self.gamma - 1.0) * wall.M**2)
+        else:
+            T_Tw = wall.T / wall.Tw
         pts = np.column_stack((wall.Re, wall.M, T_Tw))
         return self.interp(pts)
 
@@ -195,7 +199,10 @@ class CompressibleReactingSkinFriction(SkinFriction):
 
     def __call__(self, wall: WallState) -> Array:
         recovery = wall.Pr ** (1.0 / 3.0)
-        T_Tw = wall.T / wall.Tw
+        if wall.Tw is None:
+            T_Tw = 1.0 / (1.0 + recovery * 0.5 * (wall.gamma - 1.0) * wall.M**2)
+        else:
+            T_Tw = wall.T / wall.Tw
         F, G = get_dechant_constants(
             wall.M,
             T_Tw,
