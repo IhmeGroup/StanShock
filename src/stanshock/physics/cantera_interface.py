@@ -63,6 +63,7 @@ class CanteraInterface(FluidPhysics):
             elif (state.pressure is not None) and (state.temperature is not None):
                 self.sol.TPY = state.temperature, state.pressure, state.mass_fractions
                 state.temperature = self.sol.T
+                state.density = self.sol.density_mass
 
         state._cache_valid = True
 

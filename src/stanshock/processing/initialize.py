@@ -84,7 +84,9 @@ class InitializeConstant(Initialization):
         self.density: float = gas.density_mass
         self.pressure: float = gas.P
         self.gamma: float = gas.cp / gas.cv
-        self.composition = self.physics.get_composition(gas.Y[None, :])
+        self.composition = self.physics.get_composition_from_mass_fractions(
+            gas.Y[None, :]
+        )
         self.u: float = u
 
     def __call__(self) -> FluidState:
@@ -213,14 +215,14 @@ class InitializeDiffuseInterface(Initialization):
             u_left,
             left_gas.P,
             left_gas.cp / left_gas.cv,
-            physics.get_composition(left_gas.Y),
+            physics.get_composition_from_mass_fractions(left_gas.Y),
         )
         self.right = (
             right_gas.density_mass,
             u_right,
             right_gas.P,
             right_gas.cp / right_gas.cv,
-            physics.get_composition(right_gas.Y),
+            physics.get_composition_from_mass_fractions(right_gas.Y),
         )
 
     def __call__(self) -> FluidState:
@@ -276,7 +278,7 @@ class InitializeIsentropic(Initialization):
         self.g = inflow_state.cp / inflow_state.cv
         self.P_in = inflow_state.P
         self.rho_in = inflow_state.density_mass
-        self.composition = physics.get_composition(inflow_state.Y)
+        self.composition = physics.get_composition_from_mass_fractions(inflow_state.Y)
 
     def __call__(self) -> FluidState:
         # Get cross-sectional area from the geometry
@@ -382,7 +384,7 @@ class InitializeIsentropicTotal(Initialization):
         self.Pt = total_state.P
         self.Tt = total_state.T
         self.rhot = total_state.density_mass
-        self.composition = physics.get_composition(total_state.Y)
+        self.composition = physics.get_composition_from_mass_fractions(total_state.Y)
 
     def __call__(self) -> FluidState:
         # Get cross-sectional area from the geometry
